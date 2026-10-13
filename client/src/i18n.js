@@ -258,3 +258,148 @@ export const translations = {
     statusNote: "ఐచ్ఛిక గమనికను జోడించండి"
   }
 };
+
+/**
+ * Localize Class Names in Urdu and Telugu
+ */
+export function localizeClassName(name, lang = "en") {
+  if (!name) return "";
+  const key = String(name).trim();
+  const map = {
+    "Hifz Class": { ur: "حفظ کلاس", te: "హిఫ్జ్ తరగతి" },
+    "Hifz": { ur: "حفظ", te: "హిఫ్జ్" },
+    "Nazira Class": { ur: "ناظرہ کلاس", te: "నాజిరా తరగతి" },
+    "Nazira": { ur: "ناظرہ", te: "నాజిరా" }
+  };
+  return map[key]?.[lang] || key;
+}
+
+/**
+ * Localize Section Names (Morning, Afternoon, Evening, Full Day)
+ */
+export function localizeSection(section, lang = "en") {
+  if (!section) return "";
+  const sec = String(section).trim().toLowerCase();
+  const map = {
+    morning: { ur: "صبح", te: "ఉదయం" },
+    afternoon: { ur: "دوپہر", te: "మధ్యాహ్నం" },
+    evening: { ur: "شام", te: "సాయంత్రం" },
+    "full-day": { ur: "پورا دن", te: "పూర్తి రోజు" },
+    "full day": { ur: "پورا دن", te: "పూర్తి రోజు" }
+  };
+  return map[sec]?.[lang] || section;
+}
+
+/**
+ * Format Class Label with Localized Class Name and Section
+ */
+export function formatClassLabel(cls, lang = "en") {
+  if (!cls) return "";
+  const localizedName = localizeClassName(cls.name, lang);
+  if (!cls.section) return localizedName;
+  const localizedSec = localizeSection(cls.section, lang);
+  return `${localizedName} (${localizedSec})`;
+}
+
+// Extended name word token dictionary for transliteration/translation
+const nameTokens = {
+  "muhammad": { ur: "محمد", te: "ముహమ్మద్" },
+  "mohammad": { ur: "محمد", te: "ముహమ్మద్" },
+  "mohammed": { ur: "محمد", te: "ముహమ్మద్" },
+  "ahmad": { ur: "احمد", te: "అహ్మద్" },
+  "ahmed": { ur: "احمد", te: "అహ్మద్" },
+  "ali": { ur: "علی", te: "అలీ" },
+  "hassan": { ur: "حسن", te: "హసన్" },
+  "hasan": { ur: "حسن", te: "హసన్" },
+  "hussain": { ur: "حسین", te: "హుస్సేన్" },
+  "husain": { ur: "حسین", te: "హుస్సేన్" },
+  "umar": { ur: "عمر", te: "ఉమర్" },
+  "omer": { ur: "عمر", te: "ఉమర్" },
+  "usman": { ur: "عثمان", te: "ఉస్మాన్" },
+  "uthman": { ur: "عثمان", te: "ఉస్మాన్" },
+  "abu": { ur: "ابو", te: "అబూ" },
+  "bakr": { ur: "بکر", te: "బకర్" },
+  "zaid": { ur: "زید", te: "జైద్" },
+  "bilal": { ur: "بلال", te: "బిలాల్" },
+  "habashi": { ur: "حبشی", te: "హబషీ" },
+  "fatima": { ur: "فاطمہ", te: "ఫాతిమా" },
+  "fatimah": { ur: "فاطمہ", te: "ఫాతిమా" },
+  "zahra": { ur: "زہرا", te: "జహ్రా" },
+  "mariam": { ur: "مریم", te: "మరియం" },
+  "maryam": { ur: "مریم", te: "మరియం" },
+  "siddiq": { ur: "صدیق", te: "సిద్దీఖ్" },
+  "siddiqa": { ur: "صدیقہ", te: "సిద్దీఖా" },
+  "aisha": { ur: "عائشہ", te: "ఆయిషా" },
+  "khadija": { ur: "خدیجہ", te: "ఖదీజా" },
+  "zainab": { ur: "زینب", te: "జైనబ్" },
+  "ruqayyah": { ur: "رقیہ", te: "రుఖయ్య" },
+  "ibrahim": { ur: "ابراہیم", te: "ఇబ్రహీం" },
+  "ismail": { ur: "اسماعیل", te: "ఇస్మాయిల్" },
+  "ishaq": { ur: "اسحاق", te: "ఇస్హాక్" },
+  "yaqub": { ur: "یعقوب", te: "యాకూబ్" },
+  "yusuf": { ur: "یوسف", te: "యూసుఫ్" },
+  "musa": { ur: "موسیٰ", te: "మూసా" },
+  "isa": { ur: "عیسیٰ", te: "ఈసా" },
+  "yahya": { ur: "یحیٰی", te: "యహ్యా" },
+  "sulaiman": { ur: "سلیمان", te: "సులైమాన్" },
+  "dawood": { ur: "داؤد", te: "దావూద్" },
+  "shaik": { ur: "شیخ", te: "షేక్" },
+  "sheikh": { ur: "شیخ", te: "షేక్" },
+  "sameer": { ur: "سمیر", te: "సమీర్" },
+  "samir": { ur: "سمیر", te: "సమీర్" },
+  "khan": { ur: "خان", te: "ఖాన్" },
+  "syed": { ur: "سید", te: "సయ్యద్" },
+  "sayed": { ur: "سید", te: "సయ్యద్" },
+  "farooq": { ur: "فاروق", te: "ఫారూక్" },
+  "abdullah": { ur: "عبد اللہ", te: "అబ్దుల్లా" },
+  "abdul": { ur: "عبد ال", te: "అబ్దుల్" },
+  "rahman": { ur: "رحمن", te: "రహమాన్" },
+  "rahim": { ur: "رحیم", te: "రహీమ్" },
+  "kareem": { ur: "کریم", te: "కరీమ్" }
+};
+
+function translateWords(text, lang) {
+  if (!text || lang === "en") return text;
+  const words = text.split(/\s+/);
+  const translated = words.map(w => {
+    const clean = w.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return nameTokens[clean]?.[lang] || w;
+  });
+  return translated.join(" ");
+}
+
+/**
+ * Localize Student Names in Urdu and Telugu
+ */
+export function localizeStudentName(name, lang = "en") {
+  if (!name || lang === "en") return name;
+  const key = String(name).trim();
+  const directMap = {
+    "Muhammad Zaid": { ur: "محمد زید", te: "ముహమ్మద్ జైద్" },
+    "Abdullah Umar": { ur: "عبد اللہ عمر", te: "అబ్దుల్లా ఉమర్" },
+    "Fatima Zahra": { ur: "فاطمہ زہرا", te: "ఫాతిమా జహ్రా" },
+    "Bilal Habashi": { ur: "بلال حبشی", te: "బిలాల్ హబషీ" },
+    "Mariam Siddiq": { ur: "مریم صدیق", te: "మరియం సిద్దీఖ్" },
+    "Muhammad Bilal": { ur: "محمد بلال", te: "ముహమ్మద్ బిలాల్" },
+    "Muhammad Bilal Test": { ur: "محمد بلال (امتحان)", te: "ముహమ్మద్ బిలాల్ (టెస్ట్)" },
+    "Muhammad Bilal Test Updated": { ur: "محمد بلال (امتحان)", te: "ముహమ్మద్ బిలాల్ (టెస్ట్)" }
+  };
+  return directMap[key]?.[lang] || translateWords(key, lang);
+}
+
+/**
+ * Localize Guardian Names in Urdu and Telugu
+ */
+export function localizeGuardianName(name, lang = "en") {
+  if (!name || lang === "en") return name;
+  const key = String(name).trim();
+  const directMap = {
+    "Farooq Khan": { ur: "فاروق خان", te: "ఫారూక్ ఖాన్" },
+    "Umar Farooq": { ur: "عمر فاروق", te: "ఉమర్ ఫారూక్" },
+    "Hassan Ali": { ur: "حسن علی", te: "హసన్ అలీ" },
+    "Ibrahim": { ur: "ابراہیم", te: "ఇబ్రహీం" },
+    "Ibrahim Test": { ur: "ابراہیم", te: "ఇబ్రహీం" },
+    "Abu Bakr": { ur: "ابو بکر", te: "అబూ బకర్" }
+  };
+  return directMap[key]?.[lang] || translateWords(key, lang);
+}

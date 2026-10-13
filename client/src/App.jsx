@@ -34,7 +34,14 @@ import {
   X
 } from "lucide-react";
 import api from "./api";
-import { translations } from "./i18n";
+import {
+  translations,
+  formatClassLabel,
+  localizeClassName,
+  localizeSection,
+  localizeStudentName,
+  localizeGuardianName
+} from "./i18n";
 import {
   offlineDb,
   cacheClasses,
@@ -1151,7 +1158,9 @@ export default function App() {
             <div className="hero-action-card">
               <h2>{t.attendance}</h2>
               <p>
-                {activeClass ? `${activeClass.name} (${sessionKey})` : "Select a class to begin"}
+                {activeClass
+                  ? `${formatClassLabel(activeClass, lang)}`
+                  : (t.noClasses || "Select a class to begin")}
                 {" · "}
                 {dateKey}
               </p>
@@ -1168,7 +1177,7 @@ export default function App() {
                   <select value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)}>
                     {classes.map((c) => (
                       <option key={c._id || c.id} value={c._id || c.id}>
-                        {c.name} {c.section ? `(${c.section})` : ""}
+                        {formatClassLabel(c, lang)}
                       </option>
                     ))}
                   </select>
@@ -1288,7 +1297,7 @@ export default function App() {
                   >
                     {classes.map((c) => (
                       <option key={c._id || c.id} value={c._id || c.id}>
-                        {c.name} {c.section ? `(${c.section})` : ""}
+                        {formatClassLabel(c, lang)}
                       </option>
                     ))}
                   </select>
@@ -1337,7 +1346,7 @@ export default function App() {
                 }}
               >
                 <span>
-                  {activeClass ? activeClass.name : "Class"} · {dateKey} · {sessionKey.toUpperCase()}
+                  {activeClass ? formatClassLabel(activeClass, lang) : (t.classes || "Class")} · {dateKey} · {localizeSection(sessionKey, lang)}
                 </span>
                 <span>{students.length} {t.totalStudents}</span>
               </div>
@@ -1497,7 +1506,7 @@ export default function App() {
                             <option value="">{t.chooseStudent}</option>
                             {students.map((s) => (
                               <option key={s._id || s.id} value={s._id || s.id}>
-                                {s.name} ({s.admissionNo})
+                                {localizeStudentName(s.name, lang)} ({s.admissionNo})
                               </option>
                             ))}
                           </select>
@@ -1531,6 +1540,7 @@ export default function App() {
               {filteredStudents.map((s) => {
                 const sid = s._id || s.id;
                 const cur = records[sid]?.status;
+                const displayName = localizeStudentName(s.name, lang);
                 return (
                   <div className="student-attendance-card" key={sid}>
                     <div
@@ -1539,11 +1549,11 @@ export default function App() {
                       onClick={() => setViewingStudent(s)}
                     >
                       <div className="student-card-avatar">
-                        {s.photoUrl ? <img src={s.photoUrl} alt="" /> : s.name?.[0]?.toUpperCase()}
+                        {s.photoUrl ? <img src={s.photoUrl} alt="" /> : (displayName?.[0] || s.name?.[0])?.toUpperCase()}
                       </div>
                       <div className="student-card-meta">
-                        <strong>{s.name}</strong>
-                        <span>{s.admissionNo} · Tap for profile</span>
+                        <strong>{displayName}</strong>
+                        <span>{s.admissionNo} · {t.studentProfile || "Profile"}</span>
                       </div>
                     </div>
 
@@ -1732,10 +1742,10 @@ export default function App() {
                   onClick={() => setViewingStudent(s)}
                 >
                   <div className="student-card-avatar">
-                    {s.photoUrl ? <img src={s.photoUrl} alt="" /> : s.name?.[0]?.toUpperCase()}
+                    {s.photoUrl ? <img src={s.photoUrl} alt="" /> : (localizeStudentName(s.name, lang)?.[0] || s.name?.[0])?.toUpperCase()}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <strong style={{ display: "block", fontSize: 14 }}>{s.name}</strong>
+                    <strong style={{ display: "block", fontSize: 14 }}>{localizeStudentName(s.name, lang)}</strong>
                     <span style={{ fontSize: 12, color: "var(--muted)" }}>{s.admissionNo}</span>
                     {s.consentGiven && (
                       <small style={{ display: "block", color: "var(--success)", fontSize: 10, fontWeight: 700 }}>
@@ -1795,7 +1805,7 @@ export default function App() {
                 <select value={selectedClass} required onChange={(e) => setSelectedClass(e.target.value)}>
                   {classes.map((c) => (
                     <option key={c._id || c.id} value={c._id || c.id}>
-                      {c.name} {c.section ? `(${c.section})` : ""}
+                      {formatClassLabel(c, lang)}
                     </option>
                   ))}
                 </select>
@@ -2243,8 +2253,8 @@ export default function App() {
           <div className="sheet-content" onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div>
-                <p className="eyebrow">STUDENT PROFILE</p>
-                <h2 style={{ marginBottom: 0 }}>{viewingStudent.name}</h2>
+                <p className="eyebrow">{t.studentProfile || "STUDENT PROFILE"}</p>
+                <h2 style={{ marginBottom: 0 }}>{localizeStudentName(viewingStudent.name, lang)}</h2>
                 <small className="muted">Admission No: {viewingStudent.admissionNo}</small>
               </div>
               <button
@@ -2262,7 +2272,7 @@ export default function App() {
               <div className="photo-manager-avatar-wrap">
                 <div className="photo-manager-avatar">
                   {viewingStudent.photoUrl ? (
-                    <img src={viewingStudent.photoUrl} alt={viewingStudent.name} />
+                    <img src={viewingStudent.photoUrl} alt={localizeStudentName(viewingStudent.name, lang)} />
                   ) : (
                     <User size={38} />
                   )}
@@ -2355,7 +2365,7 @@ export default function App() {
             <div className="card" style={{ padding: "14px", marginTop: 12 }}>
               <strong style={{ display: "block", fontSize: 13, marginBottom: 8 }}>Profile Details</strong>
               <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
-                <div>Guardian: <strong>{viewingStudent.guardianName || "Not recorded"}</strong></div>
+                <div>Guardian: <strong>{localizeGuardianName(viewingStudent.guardianName, lang) || "Not recorded"}</strong></div>
                 <div>Contact: <strong>{viewingStudent.guardianPhone || "Not recorded"}</strong></div>
                 <div>Photo Consent: <strong>{viewingStudent.consentGiven ? "Granted ✓" : "Opted out"}</strong></div>
                 <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>
