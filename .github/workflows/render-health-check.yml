@@ -1,0 +1,141 @@
+# ──────────────────────────────────────────────────────────────
+# Render Health Check — مَدْرَسَة Madrasa Amanah
+# ──────────────────────────────────────────────────────────────
+# Pings the backend every 10 minutes to detect outages and,
+# where possible, keep the Render free-tier instance responsive.
+#
+# IMPORTANT CAVEATS:
+#   • GitHub Actions cron can be delayed by minutes; this is
+#     best-effort monitoring, NOT a guaranteed uptime service.
+#   • Render may still spin down free-tier instances regardless
+#     of pings. For guaranteed availability, use the Render
+#     "Starter" plan ($7/month) or higher.
+#   • No secrets are stored in this file. The health URL is
+#     read from a GitHub Actions repository variable.
+# ──────────────────────────────────────────────────────────────
+
+name: Render Health Check
+
+on:
+  workflow_dispatch:          # Manual trigger from Actions tab
+  schedule:
+    - cron: "*/10 * * * *"    # Every 10 minutes (best-effort)
+
+# Prevent overlapping runs — only 1 health check at a time
+concurrency:
+  group: render-health-check
+  cancel-in-progress: true
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5        # Hard cap to avoid runaway billing
+
+    steps:
+      - name: Validate configuration
+        env:
+          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL }}
+        run: |
+          if [ -z "${HEALTH_URL:-}" ]; then
+            echo "::error::Repository variable RENDER_HEALTH_URL is not set."
+            echo ""
+            echo "To fix this:"
+            echo "  1. Go to https://github.com/${{ github.repository }}/settings/variables/actions"
+            echo "  2. Click 'New repository variable'"
+            echo "  3. Name:  RENDER_HEALTH_URL"
+            echo "  4. Value: https://YOUR-RENDER-SERVICE.onrender.com/api/health"
+            echo ""
+            exit 1
+          fi
+          echo "Health URL configured ✓"
+
+      - name: Ping health endpoint (with retries)
+        env:
+          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+
+          MAX_RETRIES=3
+          RETRY_DELAY=15        # seconds between retries
+          TIMEOUT=90            # Render cold-start can take ~60s
+          ATTEMPT=0
+          SUCCESS=false
+
+          while [ $ATTEMPT -lt $MAX_RETRIES ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "──── Attempt ${ATTEMPT}/${MAX_RETRIES} ────"
+
+            HTTP_CODE=$(curl \
+              --silent \
+              --output /tmp/health_response.json \
+              --write-out "%{http_code}" \
+              --max-time "$TIMEOUT" \
+              --retry 0 \
+              "$HEALTH_URL" \
+            ) || HTTP_CODE="000"
+
+            echo "HTTP Status: ${HTTP_CODE}"
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              # Validate the response body
+              BODY=$(cat /tmp/health_response.json 2>/dev/null || echo "{}")
+              echo "Response: ${BODY}"
+
+              STATUS=$(echo "$BODY" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              print(data.get('status', ''))
+          except:
+              print('')
+          " 2>/dev/null || echo "")
+
+              DB_STATE=$(echo "$BODY" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              db = data.get('database', {})
+              print(db.get('state', ''))
+          except:
+              print('')
+          " 2>/dev/null || echo "")
+
+              if [ "$STATUS" = "healthy" ] && [ "$DB_STATE" = "connected" ]; then
+                echo ""
+                echo "✅ Service is healthy — database connected"
+                SUCCESS=true
+                break
+              else
+                echo "⚠️  HTTP 200 but status='${STATUS}', database.state='${DB_STATE}'"
+              fi
+
+            elif [ "$HTTP_CODE" = "503" ]; then
+              echo "⚠️  Service unavailable (database may be disconnected)"
+              cat /tmp/health_response.json 2>/dev/null || true
+
+            elif [ "$HTTP_CODE" = "000" ]; then
+              echo "⚠️  Connection failed (service may be cold-starting)"
+
+            else
+              echo "⚠️  Unexpected HTTP ${HTTP_CODE}"
+              cat /tmp/health_response.json 2>/dev/null || true
+            fi
+
+            if [ $ATTEMPT -lt $MAX_RETRIES ]; then
+              echo "Waiting ${RETRY_DELAY}s before retry..."
+              sleep "$RETRY_DELAY"
+            fi
+          done
+
+          echo ""
+          if [ "$SUCCESS" = "true" ]; then
+            echo "🎉 Health check passed"
+            exit 0
+          else
+            echo "::error::Health check failed after ${MAX_RETRIES} attempts"
+            echo "❌ Service is unhealthy or unreachable"
+            exit 1
+          fi
+
+          # Clean up temp file
+          rm -f /tmp/health_response.json
