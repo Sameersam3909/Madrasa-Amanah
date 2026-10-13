@@ -17,12 +17,28 @@ import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailR
 const app = express();
 app.set("trust proxy", 1);
 app.use(cors({
-  origin: (process.env.CLIENT_ORIGIN || "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173").split(",").map(s => s.trim()),
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (origin.includes("vercel.app") || origin.includes("localhost") || origin.includes("127.0.0.1") || origin.includes("onrender.com")) {
+      return callback(null, true);
+    }
+    const allowed = (process.env.CLIENT_ORIGIN || "").split(",").map(s => s.trim());
+    if (allowed.includes(origin)) return callback(null, true);
+    return callback(null, true);
+  },
   exposedHeaders: ["Content-Disposition"],
   credentials: false
 }));
 app.use(express.json({ limit: "10mb" }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
+
+// Auto-rewrite requests missing /api prefix so clients calling /auth/login or /students never 404
+app.use((req, _res, next) => {
+  if (!req.url.startsWith("/api") && !req.url.startsWith("/health")) {
+    req.url = `/api${req.url}`;
+  }
+  next();
+});
 
 // Health Check — lightweight, credential-safe, fast (no expensive queries)
 const healthHandler = (_req, res) => {

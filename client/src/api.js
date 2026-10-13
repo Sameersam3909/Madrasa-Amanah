@@ -1,7 +1,16 @@
 import axios from "axios";
 
+function getBaseUrl() {
+  const envUrl = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "").trim();
+  if (envUrl) {
+    const clean = envUrl.replace(/\/+$/, "");
+    return clean.endsWith("/api") ? clean : `${clean}/api`;
+  }
+  return import.meta.env.PROD ? "/api" : "http://localhost:4000/api";
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "/api" : "http://localhost:4000/api")
+  baseURL: getBaseUrl()
 });
 
 api.interceptors.request.use((config) => {
