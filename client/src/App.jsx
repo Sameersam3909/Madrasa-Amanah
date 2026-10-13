@@ -144,10 +144,12 @@ export default function App() {
   const t = translations[lang] || translations.en;
   const activeClass = classes.find((c) => String(c._id || c.id) === String(selectedClass));
 
-  // Counts
-  const presentCount = Object.values(records).filter((r) => r.status === "present" || r.status === "late").length;
-  const absentCount = Object.values(records).filter((r) => r.status === "absent").length;
-  const markedTotal = Object.keys(records).length;
+  // Counts - strictly computed against enrolled roster of selected class
+  const presentCount = students.filter((s) => records[s._id || s.id]?.status === "present").length;
+  const absentCount = students.filter((s) => records[s._id || s.id]?.status === "absent").length;
+  const lateCount = students.filter((s) => records[s._id || s.id]?.status === "late").length;
+  const excusedCount = students.filter((s) => records[s._id || s.id]?.status === "excused").length;
+  const markedTotal = presentCount + absentCount + lateCount + excusedCount;
   const notMarkedCount = Math.max(0, students.length - markedTotal);
 
   const filteredStudents = useMemo(
@@ -531,8 +533,10 @@ export default function App() {
     setNotice("");
     const unmarked = students.filter((s) => !records[s._id || s.id]?.status);
     if (unmarked.length > 0) {
+      const sampleNames = unmarked.slice(0, 3).map((s) => s.name).join(", ");
+      const extra = unmarked.length > 3 ? ` and ${unmarked.length - 3} more` : "";
       setError(
-        `Please mark all ${students.length} students. ${unmarked.length} student(s) still need a status.`
+        `Please mark all ${students.length} students. ${unmarked.length} student(s) still need a status (${sampleNames}${extra}).`
       );
       return;
     }
@@ -557,10 +561,10 @@ export default function App() {
       await refreshSyncStatus();
 
       const counts = {
-        present: Object.values(records).filter((r) => r.status === "present").length,
-        absent: Object.values(records).filter((r) => r.status === "absent").length,
-        late: Object.values(records).filter((r) => r.status === "late").length,
-        excused: Object.values(records).filter((r) => r.status === "excused").length
+        present: presentCount,
+        absent: absentCount,
+        late: lateCount,
+        excused: excusedCount
       };
 
       // 2. Online: Direct API save to MongoDB
@@ -660,6 +664,19 @@ export default function App() {
       }
     });
     setRecords(next);
+    setNotice("Marked all unmarked students as present.");
+  }
+
+  function markRemainingAbsent() {
+    const next = { ...records };
+    students.forEach((s) => {
+      const sid = s._id || s.id;
+      if (!next[sid]?.status) {
+        next[sid] = { status: "absent" };
+      }
+    });
+    setRecords(next);
+    setNotice("Marked remaining unmarked students as absent.");
   }
 
   function mark(id, status) {
@@ -703,8 +720,9 @@ export default function App() {
           descriptor: d,
           studentId: confident ? best.student.id || best.student._id : "",
           matchName: confident ? best.student.name : "",
+          matchAdmissionNo: confident ? (best.student.admissionNo || best.student.admissionNumber || "") : "",
           distance: best ? best.distance : null,
-          manual: !confident
+          confirmed: false
         };
       });
 
@@ -719,25 +737,40 @@ export default function App() {
     }
   }
 
-  function attachFace(faceNo, studentId) {
+  function confirmFaceMatch(faceNo, status = "present") {
+    const item = detected.find((f) => f.faceNo === faceNo);
+    if (!item || !item.studentId) return;
+
+    setDetected((prev) =>
+      prev.map((f) => (f.faceNo === faceNo ? { ...f, confirmed: true } : f))
+    );
+
+    setRecords((prev) => ({
+      ...prev,
+      [item.studentId]: { ...(prev[item.studentId] || {}), status }
+    }));
+
+    setNotice(`Confirmed ${item.matchName || "Student"} as ${status} ✓`);
+  }
+
+  function changeFaceStudent(faceNo, newStudentId) {
+    const matched = students.find((s) => String(s._id || s.id) === String(newStudentId));
     setDetected((prev) =>
       prev.map((f) => {
         if (f.faceNo !== faceNo) return f;
-        const matched = students.find((s) => String(s._id || s.id) === String(studentId));
         return {
           ...f,
-          studentId,
+          studentId: newStudentId,
           matchName: matched ? matched.name : "",
-          manual: true
+          matchAdmissionNo: matched ? (matched.admissionNo || matched.admissionNumber || "") : "",
+          confirmed: false
         };
       })
     );
-    if (studentId) {
-      setRecords((prev) => ({
-        ...prev,
-        [studentId]: { ...(prev[studentId] || {}), status: "present" }
-      }));
-    }
+  }
+
+  function dismissFaceMatch(faceNo) {
+    setDetected((prev) => prev.filter((f) => f.faceNo !== faceNo));
   }
 
   // Reports
@@ -754,44 +787,95 @@ export default function App() {
     }
   }
 
-  // F: Download with Clean Human-Readable Filenames
-  async function downloadReport(format) {
+  // Generic File Download Helper with Content-Disposition & UTF-8 parsing
+  async function triggerFileDownload(endpoint, params = {}, fallbackName = "download") {
+    if (loading) return;
     setError("");
     setLoading(true);
     try {
-      const className = activeClass ? `${activeClass.name}${activeClass.section ? `-${activeClass.section}` : ""}` : "Class";
-      const cleanClassName = className.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
-      const generatedName = `Madrasa-Amanah-Attendance-${cleanClassName}-${reportRange.from}${reportRange.from !== reportRange.to ? `-to-${reportRange.to}` : ""}.${format === "xlsx" ? "xlsx" : format}`;
+      const res = await api.get(endpoint, { params, responseType: "blob" });
 
-      const res = await api.get("/reports/export", {
-        params: { classId: selectedClass, ...reportRange, format },
-        responseType: "blob"
-      });
-
-      // Try reading filename from Content-Disposition header
-      let finalFilename = generatedName;
+      let filename = fallbackName;
       const disposition = res.headers["content-disposition"];
-      if (disposition && disposition.indexOf("filename=") !== -1) {
-        const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
-        if (matches != null && matches[1]) {
-          finalFilename = matches[1].replace(/['"]/g, "");
+      if (disposition) {
+        const utf8Match = /filename\*=UTF-8''([^;\n]+)/i.exec(disposition);
+        if (utf8Match && utf8Match[1]) {
+          filename = decodeURIComponent(utf8Match[1].trim());
+        } else {
+          const match = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i.exec(disposition);
+          if (match && match[1]) {
+            filename = match[1].replace(/['"]/g, "").trim();
+          }
         }
       }
 
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url;
-      a.download = finalFilename;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
 
       addNotification({
-        title: "Report Downloaded",
-        message: `${finalFilename} successfully generated and downloaded.`,
+        title: "Download Complete",
+        message: `${filename} downloaded successfully.`,
         type: "success"
       });
+      setNotice(`Downloaded ${filename} ✓`);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // F: Download with Clean Human-Readable Filenames
+  async function downloadReport(format) {
+    const className = activeClass ? `${activeClass.name}${activeClass.section ? `-${activeClass.section}` : ""}` : "Class";
+    const cleanClassName = className.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
+    const generatedName = `Madrasa-Amanah-Attendance-${cleanClassName}-${reportRange.from}${reportRange.from !== reportRange.to ? `-to-${reportRange.to}` : ""}.${format === "xlsx" ? "xlsx" : format}`;
+    await triggerFileDownload("/reports/export", { classId: selectedClass, ...reportRange, format }, generatedName);
+  }
+
+  async function downloadWeeklyReport() {
+    await triggerFileDownload("/reports/weekly-excel", {}, `Madrasa-Amanah-Weekly-Attendance-${today()}.xlsx`);
+  }
+
+  async function downloadStudentsRoster(format = "csv") {
+    const className = activeClass ? `${activeClass.name}${activeClass.section ? `-${activeClass.section}` : ""}` : "All-Classes";
+    const cleanClassName = className.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
+    const generatedName = `Madrasa-Amanah-Students-${cleanClassName}-${today()}.${format}`;
+    await triggerFileDownload("/students/export", { classId: selectedClass || undefined, format }, generatedName);
+  }
+
+  async function downloadSystemBackup() {
+    await triggerFileDownload("/admin/backup/export", {}, `Madrasa-Amanah-Backup-${today()}.json`);
+  }
+
+  async function sendWeeklyEmail() {
+    if (loading) return;
+    setError("");
+    setNotice("Generating and sending weekly report email...");
+    setLoading(true);
+    try {
+      const res = await api.post("/reports/send-weekly-email", { recipientEmail: "2300030621cseh1@gmail.com" });
+      if (res.data?.delivered) {
+        setNotice(`Weekly report email sent successfully to ${res.data.recipient} ✓`);
+        addNotification({
+          title: "Weekly Email Sent",
+          message: `Attendance report for ${res.data.from} to ${res.data.to} delivered to ${res.data.recipient}.`,
+          type: "success"
+        });
+      } else {
+        setNotice(`Weekly report generated (${res.data?.bytes} bytes). ${res.data?.message || ""}`);
+        addNotification({
+          title: "Weekly Report Generated",
+          message: `Workbook created for ${res.data?.recipient || "admin"}. Delivery status: ${res.data?.message || "Pending SMTP configuration."}`,
+          type: "info"
+        });
+      }
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -1192,6 +1276,119 @@ export default function App() {
         {/* TAB 2: FAST ATTENDANCE REGISTER */}
         {tab === "attendance" && (
           <div>
+            {/* 2.1 Clear, Mobile-Friendly Attendance Header */}
+            <div className="card" style={{ padding: "14px", marginBottom: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <label>
+                  {t.class}
+                  <select
+                    value={selectedClass}
+                    onChange={(e) => setSelectedClass(e.target.value)}
+                    style={{ minHeight: 44, fontSize: 13 }}
+                  >
+                    {classes.map((c) => (
+                      <option key={c._id || c.id} value={c._id || c.id}>
+                        {c.name} {c.section ? `(${c.section})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  {t.session}
+                  <select
+                    value={sessionKey}
+                    onChange={(e) => setSessionKey(e.target.value)}
+                    style={{ minHeight: 44, fontSize: 13 }}
+                  >
+                    <option value="morning">{t.morning}</option>
+                    <option value="afternoon">{t.afternoon}</option>
+                    <option value="evening">{t.evening}</option>
+                    <option value="full-day">{t.fullDay}</option>
+                  </select>
+                </label>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label>
+                  {t.date}
+                  <input
+                    type="date"
+                    value={dateKey}
+                    onChange={(e) => setDateKey(e.target.value)}
+                    style={{ minHeight: 44, fontSize: 13 }}
+                  />
+                </label>
+              </div>
+
+              {/* Selected class, date, and session summary badge */}
+              <div
+                style={{
+                  background: "var(--primary-subtle)",
+                  color: "var(--primary)",
+                  padding: "8px 12px",
+                  borderRadius: "var(--radius-sm)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 10
+                }}
+              >
+                <span>
+                  {activeClass ? activeClass.name : "Class"} · {dateKey} · {sessionKey.toUpperCase()}
+                </span>
+                <span>{students.length} {t.totalStudents}</span>
+              </div>
+
+              {/* 5 Distinct Attendance Counters */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, textAlign: "center" }}>
+                <div style={{ background: "var(--success-bg)", padding: "6px 2px", borderRadius: 6 }}>
+                  <div style={{ fontSize: 10, color: "var(--success)", fontWeight: 600 }}>{t.present}</div>
+                  <strong style={{ fontSize: 15, color: "var(--success)" }}>{presentCount}</strong>
+                </div>
+                <div style={{ background: "var(--danger-bg)", padding: "6px 2px", borderRadius: 6 }}>
+                  <div style={{ fontSize: 10, color: "var(--danger)", fontWeight: 600 }}>{t.absent}</div>
+                  <strong style={{ fontSize: 15, color: "var(--danger)" }}>{absentCount}</strong>
+                </div>
+                <div style={{ background: "#FFF8E6", padding: "6px 2px", borderRadius: 6 }}>
+                  <div style={{ fontSize: 10, color: "#B78103", fontWeight: 600 }}>{t.late}</div>
+                  <strong style={{ fontSize: 15, color: "#B78103" }}>{lateCount}</strong>
+                </div>
+                <div style={{ background: "var(--info-bg)", padding: "6px 2px", borderRadius: 6 }}>
+                  <div style={{ fontSize: 10, color: "var(--info)", fontWeight: 600 }}>{t.excused}</div>
+                  <strong style={{ fontSize: 15, color: "var(--info)" }}>{excusedCount}</strong>
+                </div>
+                <div
+                  style={{
+                    background: notMarkedCount > 0 ? "var(--warning-bg)" : "var(--canvas)",
+                    padding: "6px 2px",
+                    borderRadius: 6
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: notMarkedCount > 0 ? "var(--warning)" : "var(--muted)",
+                      fontWeight: 600
+                    }}
+                  >
+                    {t.notMarked}
+                  </div>
+                  <strong
+                    style={{
+                      fontSize: 15,
+                      color: notMarkedCount > 0 ? "var(--warning)" : "var(--muted)"
+                    }}
+                  >
+                    {notMarkedCount}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Student Search and Batch Actions */}
             <div className="card" style={{ padding: "12px", marginBottom: 10 }}>
               <div className="search-input-wrap">
                 <Search size={18} className="search-icon-pos" />
@@ -1204,21 +1401,31 @@ export default function App() {
                 />
               </div>
 
-              <div className="quick-batch-bar">
+              <div className="quick-batch-bar" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                 <button
                   className="btn secondary"
                   onClick={markAllPresent}
-                  style={{ minHeight: 38, padding: "6px 12px", fontSize: 12 }}
+                  style={{ minHeight: 38, padding: "6px 12px", fontSize: 12, flex: 1 }}
                 >
-                  <UserCheck size={15} /> Mark All Present
+                  <UserCheck size={15} /> {t.markAllPresent}
                 </button>
+
+                {notMarkedCount > 0 && (
+                  <button
+                    className="btn secondary"
+                    onClick={markRemainingAbsent}
+                    style={{ minHeight: 38, padding: "6px 12px", fontSize: 12, flex: 1, color: "var(--danger)" }}
+                  >
+                    <X size={15} /> {t.markRemainingAbsent}
+                  </button>
+                )}
 
                 <label
                   htmlFor="class-photo-input"
                   className="btn secondary"
-                  style={{ minHeight: 38, padding: "6px 12px", fontSize: 12, cursor: "pointer", display: "inline-flex" }}
+                  style={{ minHeight: 38, padding: "6px 12px", fontSize: 12, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
                 >
-                  <Camera size={15} /> Photo Match
+                  <Camera size={15} /> {t.takePhoto}
                 </label>
                 <input
                   id="class-photo-input"
@@ -1230,46 +1437,89 @@ export default function App() {
                 />
               </div>
 
+              {/* Phase 3 Face Suggestions & Review */}
               {detected.length > 0 && (
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                    <strong style={{ fontSize: 13 }}>{t.faceSuggestions} ({detected.length})</strong>
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                    <div>
+                      <strong style={{ fontSize: 13 }}>{t.faceSuggestions} ({detected.length})</strong>
+                      <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                        Teacher confirms candidate identity before marking attendance
+                      </p>
+                    </div>
                     <button
                       onClick={() => setDetected([])}
                       style={{ background: "none", border: "none", color: "var(--muted)", padding: 4 }}
+                      title="Clear suggestions"
                     >
                       <X size={16} />
                     </button>
                   </div>
-                  <div style={{ display: "grid", gap: 6 }}>
+
+                  <div style={{ display: "grid", gap: 8 }}>
                     {detected.map((f) => (
                       <div
                         key={f.faceNo}
                         style={{
-                          background: "var(--canvas)",
-                          padding: "8px 10px",
+                          background: f.confirmed ? "var(--success-bg)" : "var(--canvas)",
+                          border: `1px solid ${f.confirmed ? "var(--success)" : "var(--border)"}`,
+                          padding: "10px 12px",
                           borderRadius: 8,
                           display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
+                          flexDirection: "column",
                           gap: 8
                         }}
                       >
-                        <span style={{ fontSize: 12 }}>
-                          Face #{f.faceNo}: <strong>{f.matchName || "Unmatched"}</strong>
-                        </span>
-                        <select
-                          value={f.studentId}
-                          onChange={(e) => attachFace(f.faceNo, e.target.value)}
-                          style={{ maxWidth: 140, minHeight: 34, fontSize: 11, padding: "4px 8px" }}
-                        >
-                          <option value="">Attach...</option>
-                          {students.map((s) => (
-                            <option key={s._id || s.id} value={s._id || s.id}>
-                              {s.name}
-                            </option>
-                          ))}
-                        </select>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: 12 }}>
+                            Face #{f.faceNo}: <strong>{f.matchName || "Unmatched"}</strong> {f.matchAdmissionNo ? `(${f.matchAdmissionNo})` : ""}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "2px 6px",
+                              borderRadius: 4,
+                              background: f.confirmed ? "var(--success)" : "var(--warning-bg)",
+                              color: f.confirmed ? "#fff" : "var(--warning)"
+                            }}
+                          >
+                            {f.confirmed ? t.confirmed : t.suggested}
+                          </span>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <select
+                            value={f.studentId}
+                            onChange={(e) => changeFaceStudent(f.faceNo, e.target.value)}
+                            style={{ flex: 1, minHeight: 36, fontSize: 12, padding: "4px 8px" }}
+                          >
+                            <option value="">{t.chooseStudent}</option>
+                            {students.map((s) => (
+                              <option key={s._id || s.id} value={s._id || s.id}>
+                                {s.name} ({s.admissionNo})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button
+                            className="btn primary"
+                            style={{ minHeight: 34, fontSize: 11, padding: "4px 10px", flex: 1 }}
+                            onClick={() => confirmFaceMatch(f.faceNo, "present")}
+                            disabled={!f.studentId}
+                          >
+                            <Check size={14} /> {t.confirmPresent}
+                          </button>
+                          <button
+                            className="btn secondary"
+                            style={{ minHeight: 34, fontSize: 11, padding: "4px 10px" }}
+                            onClick={() => dismissFaceMatch(f.faceNo)}
+                          >
+                            <X size={14} /> {t.dismiss}
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1671,6 +1921,67 @@ export default function App() {
               </button>
             </div>
 
+            {/* Weekly Multi-Sheet Excel & Email Automation */}
+            <div className="card">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <h3>Weekly Report Automation</h3>
+                <span className="status-pill online">Automated</span>
+              </div>
+              <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+                Executive 3-sheet Excel report covering attendance summary, detailed audit log, and class breakdown.
+              </p>
+
+              <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+                <div><strong>Scheduled Recipient:</strong> 2300030621cseh1@gmail.com</div>
+                <div style={{ color: "var(--muted)", marginTop: 2 }}>Weekly Schedule: Mondays at 06:00 AM (Previous Mon–Sun)</div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <button
+                  className="btn secondary"
+                  onClick={downloadWeeklyReport}
+                  disabled={loading}
+                  style={{ minHeight: 44, fontSize: 13 }}
+                >
+                  <FileSpreadsheet size={16} /> Download Weekly .xlsx
+                </button>
+                <button
+                  className="btn primary"
+                  onClick={sendWeeklyEmail}
+                  disabled={loading}
+                  style={{ minHeight: 44, fontSize: 13 }}
+                >
+                  <Bell size={16} /> Send Email Report
+                </button>
+              </div>
+            </div>
+
+            {/* Student Roster Export */}
+            <div className="card">
+              <h3 style={{ marginBottom: 6 }}>Student Roster Export</h3>
+              <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
+                Export clean student roster with admission numbers, guardian contacts, and photo consent flags.
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <button
+                  className="btn secondary"
+                  onClick={() => downloadStudentsRoster("csv")}
+                  disabled={loading}
+                  style={{ minHeight: 42, fontSize: 13 }}
+                >
+                  <Download size={15} /> Students (CSV)
+                </button>
+                <button
+                  className="btn secondary"
+                  onClick={() => downloadStudentsRoster("xlsx")}
+                  disabled={loading}
+                  style={{ minHeight: 42, fontSize: 13 }}
+                >
+                  <FileSpreadsheet size={15} /> Students (Excel)
+                </button>
+              </div>
+            </div>
+
             {report.length > 0 && (
               <div className="card">
                 <h3 style={{ marginBottom: 10 }}>Summary View</h3>
@@ -1705,6 +2016,48 @@ export default function App() {
 
             {user.role === "admin" && (
               <>
+                {/* Six-Month Data Retention Policy Status */}
+                <div className="card">
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                    <h3>Data Retention (6 Months)</h3>
+                    <span className="status-pill online">180 Days Policy</span>
+                  </div>
+                  <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
+                    Attendance records older than 180 days are identified for archival to keep mobile queries performant.
+                  </p>
+                  <button
+                    className="btn secondary full"
+                    onClick={async () => {
+                      try {
+                        const res = await api.get("/admin/retention/status");
+                        setNotice(`Retention Status: ${res.data.recordsWithinRetention} active records within 180 days, ${res.data.recordsEligibleForArchival} eligible for archival.`);
+                      } catch (err) {
+                        setError(errText(err));
+                      }
+                    }}
+                    disabled={loading}
+                    style={{ minHeight: 40, fontSize: 13 }}
+                  >
+                    <History size={15} /> Check Retention Status
+                  </button>
+                </div>
+
+                {/* System Backup Export */}
+                <div className="card">
+                  <h3>Full Database Backup</h3>
+                  <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
+                    Export structured JSON backup of classes, students, attendance, and audit logs.
+                  </p>
+                  <button
+                    className="btn secondary full"
+                    onClick={downloadSystemBackup}
+                    disabled={loading}
+                    style={{ minHeight: 42, fontSize: 13 }}
+                  >
+                    <HardDrive size={15} /> Download Full System Backup (.json)
+                  </button>
+                </div>
+
                 <div className="card">
                   <h3 style={{ marginBottom: 10 }}>Add Class</h3>
                   <form

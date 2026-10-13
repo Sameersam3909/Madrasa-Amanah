@@ -217,6 +217,76 @@ async function runTests() {
       }
     }
 
+    // 12. Weekly Excel Report & Email Automation Tests
+    console.log('--- Testing Weekly Excel Reports & Email Automation ---');
+    const weeklyExcelRes = await fetch(`${API_BASE}/reports/weekly-excel`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    assert(weeklyExcelRes.status === 200, 'Weekly Excel report responded with 200 OK');
+    const weeklyDisp = weeklyExcelRes.headers.get('content-disposition') || '';
+    assert(weeklyDisp.includes('Madrasa-Amanah-Weekly-Attendance'), `Weekly Excel filename matches pattern: ${weeklyDisp.slice(0, 80)}`);
+    const weeklyBuf = await weeklyExcelRes.arrayBuffer();
+    assert(weeklyBuf.byteLength > 1000, `Weekly Excel workbook byte length valid (${weeklyBuf.byteLength} bytes)`);
+
+    // 13. Weekly Email Trigger Endpoint Test
+    const emailTriggerRes = await fetch(`${API_BASE}/reports/send-weekly-email`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ recipientEmail: '2300030621cseh1@gmail.com' })
+    });
+    const emailTriggerData = await emailTriggerRes.json();
+    assert(emailTriggerRes.status === 200, 'Weekly email trigger responded with 200 OK');
+    assert(emailTriggerData.recipient === '2300030621cseh1@gmail.com', `Target recipient matches: ${emailTriggerData.recipient}`);
+    assert(emailTriggerData.bytes > 1000, `Generated email attachment size: ${emailTriggerData.bytes} bytes`);
+    assert(typeof emailTriggerData.summary?.rate === 'string', `Report attendance rate computed: ${emailTriggerData.summary?.rate}%`);
+
+    // 14. Email Status Endpoint Test
+    const emailStatusRes = await fetch(`${API_BASE}/reports/email-status`, { headers: authHeaders });
+    const emailStatusData = await emailStatusRes.json();
+    assert(emailStatusRes.status === 200, 'Email status endpoint returned 200 OK');
+    assert(emailStatusData.recipientEmail === '2300030621cseh1@gmail.com', 'Report recipient email configured properly');
+
+    // 15. Student Roster Export Tests (CSV & XLSX)
+    console.log('--- Testing Student Roster Exports ---');
+    const studentCsvRes = await fetch(`${API_BASE}/students/export?format=csv`, { headers: authHeaders });
+    assert(studentCsvRes.status === 200, 'Student roster CSV responded with 200 OK');
+    const studentCsvDisp = studentCsvRes.headers.get('content-disposition') || '';
+    assert(studentCsvDisp.includes('Madrasa-Amanah-Students'), `Student CSV filename is descriptive: ${studentCsvDisp.slice(0, 80)}`);
+    const studentCsvBuf = await studentCsvRes.arrayBuffer();
+    assert(studentCsvBuf.byteLength > 50, `Student CSV byte length valid (${studentCsvBuf.byteLength} bytes)`);
+
+    const studentXlsxRes = await fetch(`${API_BASE}/students/export?format=xlsx`, { headers: authHeaders });
+    assert(studentXlsxRes.status === 200, 'Student roster XLSX responded with 200 OK');
+    const studentXlsxDisp = studentXlsxRes.headers.get('content-disposition') || '';
+    assert(studentXlsxDisp.includes('Madrasa-Amanah-Students'), `Student XLSX filename is descriptive: ${studentXlsxDisp.slice(0, 80)}`);
+    const studentXlsxBuf = await studentXlsxRes.arrayBuffer();
+    assert(studentXlsxBuf.byteLength > 1000, `Student XLSX byte length valid (${studentXlsxBuf.byteLength} bytes)`);
+
+    // 16. Six-Month Retention & Backup Tests
+    console.log('--- Testing Six-Month Retention & Backups ---');
+    const retentionRes = await fetch(`${API_BASE}/admin/retention/status`, { headers: authHeaders });
+    const retentionData = await retentionRes.json();
+    assert(retentionRes.status === 200, 'Retention status endpoint returned 200 OK');
+    assert(retentionData.retentionDays === 180, 'Retention policy is configured to 180 days (6 months)');
+    assert(typeof retentionData.totalRecords === 'number', `Total records tracked: ${retentionData.totalRecords}`);
+
+    const retentionArchiveRes = await fetch(`${API_BASE}/admin/retention/archive`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ confirmPurge: false })
+    });
+    const retentionArchiveData = await retentionArchiveRes.json();
+    assert(retentionArchiveRes.status === 200, 'Retention archive dry-run returned 200 OK');
+
+    const backupRes = await fetch(`${API_BASE}/admin/backup/export`, { headers: authHeaders });
+    assert(backupRes.status === 200, 'System backup responded with 200 OK');
+    const backupDisp = backupRes.headers.get('content-disposition') || '';
+    assert(backupDisp.includes('Madrasa-Amanah-Backup'), `Backup filename is descriptive: ${backupDisp.slice(0, 80)}`);
+    const backupJson = await backupRes.json();
+    assert(backupJson.metadata?.system?.includes('Madrasa Amanah'), 'Backup package contains valid system metadata');
+    assert(Array.isArray(backupJson.classes) && Array.isArray(backupJson.students), 'Backup package contains classes and students arrays');
+
+
     // 12. Cleanup
     const deleteRes = await fetch(`${API_BASE}/students/${studentId}`, {
       method: 'DELETE',

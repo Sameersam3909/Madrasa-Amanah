@@ -12,6 +12,7 @@ import { User, Class, Student, Attendance, SyncMutation, AuditLog } from "./mode
 import { requireAuth, requireAdmin, canAccessClass } from "./auth.js";
 import { uploadImageDataUrl } from "./cloudinary.js";
 import { connectDB } from "./db.js";
+import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport } from "./weeklyReportService.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -225,6 +226,74 @@ app.put("/api/students/:id", async (req, res) => {
   obj.admissionNumber = obj.admissionNo;
   obj.referencePhotoUrl = obj.photoUrl;
   res.json(obj);
+});
+
+// --- STUDENT ROSTER EXPORT (CSV / XLSX) ---
+app.get("/api/students/export", async (req, res) => {
+  const classId = req.query.classId;
+  const format = req.query.format || "csv";
+  const filter = { active: true };
+  let className = "All-Classes";
+
+  if (classId) {
+    if (!(await canAccessClass(req.user, classId))) {
+      return res.status(403).json({ message: "Class access denied." });
+    }
+    filter.classId = classId;
+    const cls = await Class.findById(classId);
+    if (cls) className = `${cls.name}${cls.section ? `-${cls.section}` : ""}`;
+  }
+
+  const cleanClassName = className.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const safeFilename = `Madrasa-Amanah-Students-${cleanClassName}-${todayStr}`;
+
+  const students = await Student.find(filter)
+    .populate("classId", "name section academicYear")
+    .sort({ name: 1 });
+
+  const rows = students.map(s => ({
+    "Admission No": s.admissionNo,
+    "Student Name": s.name,
+    "Class": s.classId ? `${s.classId.name}${s.classId.section ? ` (${s.classId.section})` : ""}` : "",
+    "Academic Year": s.classId?.academicYear || "",
+    "Guardian Name": s.guardianName || "",
+    "Guardian Phone": s.guardianPhone || "",
+    "Photo Consent Recorded": s.consentGiven ? "Yes" : "No",
+    "Status": s.active ? "Active" : "Inactive"
+  }));
+
+  if (format === "csv") {
+    const headers = ["Admission No", "Student Name", "Class", "Academic Year", "Guardian Name", "Guardian Phone", "Photo Consent Recorded", "Status"];
+    const quote = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = "\uFEFF" + [headers, ...rows.map(r => headers.map(h => r[h]))].map(r => r.map(quote).join(",")).join("\r\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.csv"; filename*=UTF-8''${encodeURIComponent(safeFilename)}.csv`);
+    return res.send(csv);
+  }
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Students Roster");
+  ws.columns = [
+    { header: "Admission No", key: "Admission No", width: 16 },
+    { header: "Student Name", key: "Student Name", width: 28 },
+    { header: "Class", key: "Class", width: 22 },
+    { header: "Academic Year", key: "Academic Year", width: 18 },
+    { header: "Guardian Name", key: "Guardian Name", width: 24 },
+    { header: "Guardian Phone", key: "Guardian Phone", width: 18 },
+    { header: "Photo Consent Recorded", key: "Photo Consent Recorded", width: 24 },
+    { header: "Status", key: "Status", width: 12 }
+  ];
+  ws.addRows(rows);
+  ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+  ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF174B36" } };
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.xlsx"; filename*=UTF-8''${encodeURIComponent(safeFilename)}.xlsx`);
+  await wb.xlsx.write(res);
+  res.end();
 });
 
 // Get single student by ID
@@ -556,9 +625,155 @@ app.get("/api/reports/export", async (req, res) => {
   ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF174B36" } };
   ws.views = [{ state: "frozen", ySplit: 1 }];
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.xlsx"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.xlsx"; filename*=UTF-8''${encodeURIComponent(safeFilename)}.xlsx`);
   await wb.xlsx.write(res);
   res.end();
+});
+
+// --- WEEKLY EXCEL REPORT & EMAIL AUTOMATION ---
+app.get("/api/reports/weekly-excel", async (req, res) => {
+  const prevWeek = getPreviousReportingWeek();
+  const from = req.query.from || req.query.startDate || prevWeek.from;
+  const to = req.query.to || req.query.endDate || prevWeek.to;
+  const safeFilename = `Madrasa-Amanah-Weekly-Attendance-${from}-to-${to}.xlsx`;
+
+  const wb = await generateWeeklyExcelWorkbook({ from, to });
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`);
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+app.post("/api/reports/send-weekly-email", requireAdmin, async (req, res) => {
+  const prevWeek = getPreviousReportingWeek();
+  const from = req.body.from || req.body.startDate || prevWeek.from;
+  const to = req.body.to || req.body.endDate || prevWeek.to;
+  const recipientEmail = req.body.recipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com";
+
+  const result = await sendWeeklyEmailReport({
+    from,
+    to,
+    recipientEmail,
+    trigger: "manual-admin",
+    actorId: req.user._id
+  });
+
+  res.json(result);
+});
+
+app.get("/api/reports/email-status", requireAdmin, async (_req, res) => {
+  const prevWeek = getPreviousReportingWeek();
+  const lastSentLog = await AuditLog.findOne({ action: "report.weekly_email_sent" }).sort({ createdAt: -1 });
+
+  res.json({
+    recipientEmail: process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com",
+    smtpConfigured: Boolean(process.env.SMTP_USER && process.env.SMTP_PASS),
+    smtpHost: process.env.SMTP_HOST || "smtp.gmail.com",
+    smtpPort: process.env.SMTP_PORT || 587,
+    timezone: process.env.REPORT_TIMEZONE || "Asia/Kolkata",
+    previousReportingWeek: prevWeek,
+    lastSentLog: lastSentLog ? {
+      sentAt: lastSentLog.createdAt,
+      recipient: lastSentLog.details?.recipient,
+      period: `${lastSentLog.details?.from} to ${lastSentLog.details?.to}`,
+      messageId: lastSentLog.details?.messageId
+    } : null
+  });
+});
+
+// --- SIX-MONTH DATA RETENTION & BACKUP ENDPOINTS ---
+app.get("/api/admin/retention/status", requireAdmin, async (_req, res) => {
+  const retentionDays = 180; // 6 months
+  const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  const [totalRecords, recordsOlder, oldestDoc, newestDoc] = await Promise.all([
+    Attendance.countDocuments(),
+    Attendance.countDocuments({ dateKey: { $lt: cutoffDate } }),
+    Attendance.findOne().sort({ dateKey: 1 }).select("dateKey"),
+    Attendance.findOne().sort({ dateKey: -1 }).select("dateKey")
+  ]);
+
+  res.json({
+    retentionPolicy: "180 days (6 months)",
+    retentionDays,
+    cutoffDate,
+    totalRecords,
+    recordsWithinRetention: totalRecords - recordsOlder,
+    recordsEligibleForArchival: recordsOlder,
+    oldestRecordDate: oldestDoc ? oldestDoc.dateKey : null,
+    newestRecordDate: newestDoc ? newestDoc.dateKey : null
+  });
+});
+
+app.post("/api/admin/retention/archive", requireAdmin, async (req, res) => {
+  const retentionDays = Number(req.body.retentionDays || 180);
+  const cutoffDate = req.body.cutoffDate || new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  const eligibleCount = await Attendance.countDocuments({ dateKey: { $lt: cutoffDate } });
+
+  if (req.body.confirmPurge === true && eligibleCount > 0) {
+    const deleteResult = await Attendance.deleteMany({ dateKey: { $lt: cutoffDate } });
+    await AuditLog.create({
+      actorId: req.user._id,
+      action: "retention.purge_old_records",
+      entityType: "Attendance",
+      details: { cutoffDate, purgedCount: deleteResult.deletedCount }
+    });
+    return res.json({
+      message: `Successfully archived and purged ${deleteResult.deletedCount} attendance record(s) older than ${cutoffDate}.`,
+      purgedCount: deleteResult.deletedCount,
+      cutoffDate
+    });
+  }
+
+  res.json({
+    message: `Identified ${eligibleCount} attendance record(s) older than ${cutoffDate}. Set confirmPurge: true to finalize retention purge.`,
+    eligibleCount,
+    cutoffDate
+  });
+});
+
+// Full Structured System Backup Download
+app.get("/api/admin/backup/export", requireAdmin, async (req, res) => {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const safeFilename = `Madrasa-Amanah-Backup-${todayStr}.json`;
+
+  const [classes, students, attendance, auditLogs] = await Promise.all([
+    Class.find().lean(),
+    Student.find().select("-faceDescriptor").lean(),
+    Attendance.find().lean(),
+    AuditLog.find().sort({ createdAt: -1 }).limit(500).lean()
+  ]);
+
+  const backupPackage = {
+    metadata: {
+      system: "Madrasa Amanah Smart Attendance System",
+      version: "1.0.0",
+      exportTimestamp: new Date().toISOString(),
+      exportedBy: req.user.email,
+      counts: {
+        classes: classes.length,
+        students: students.length,
+        attendance: attendance.length,
+        auditLogs: auditLogs.length
+      }
+    },
+    classes,
+    students,
+    attendance,
+    auditLogs
+  };
+
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "backup.export",
+    entityType: "SystemBackup",
+    details: { counts: backupPackage.metadata.counts }
+  });
+
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`);
+  res.send(JSON.stringify(backupPackage, null, 2));
 });
 
 // Admin User Management
