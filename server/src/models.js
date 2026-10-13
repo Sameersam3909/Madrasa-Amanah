@@ -44,7 +44,9 @@ const attendanceSchema = new mongoose.Schema({
   serverVersion: { type: Number, default: 1 }
 }, { timestamps: true });
 attendanceSchema.index({ studentId: 1, classId: 1, dateKey: 1, sessionKey: 1 }, { unique: true });
-attendanceSchema.index({ classId: 1, dateKey: 1 });
+attendanceSchema.index({ classId: 1, dateKey: 1, sessionKey: 1 });
+attendanceSchema.index({ dateKey: -1 });
+attendanceSchema.index({ studentId: 1, dateKey: -1 });
 
 const syncMutationSchema = new mongoose.Schema({
   mutationId: { type: String, required: true, unique: true, index: true },

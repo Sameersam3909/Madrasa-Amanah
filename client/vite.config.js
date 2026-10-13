@@ -34,15 +34,44 @@ export default defineConfig({
             urlPattern: ({ url }) => url.pathname.startsWith("/models/"),
             handler: "CacheFirst",
             options: {
-              cacheName: "face-models-v1",
+              cacheName: "face-models-local-v1",
               expiration: {
                 maxEntries: 30,
                 maxAgeSeconds: 60 * 60 * 24 * 365
+              }
+            }
+          },
+          {
+            urlPattern: ({ url }) => url.hostname.includes("jsdelivr.net"),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "face-models-cdn-v1",
+              expiration: {
+                maxEntries: 30,
+                maxAgeSeconds: 60 * 60 * 24 * 365
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
               }
             }
           }
         ]
       }
     })
-  ]
+  ],
+  build: {
+    target: "esnext",
+    cssCodeSplit: true,
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ["react", "react-dom"],
+          icons: ["lucide-react"],
+          dexie: ["dexie"],
+          faceapi: ["@vladmandic/face-api"]
+        }
+      }
+    }
+  }
 });

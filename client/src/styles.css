@@ -962,6 +962,12 @@ small {
   transform: scale(0.98);
 }
 
+.photo-pill-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* Preview & Retake Area */
 .photo-preview-wrap {
   margin-top: 16px;
@@ -1012,6 +1018,7 @@ small {
 
 .camera-viewfinder {
   flex: 1;
+  min-height: 280px;
   position: relative;
   border-radius: 20px;
   overflow: hidden;

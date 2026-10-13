@@ -199,49 +199,67 @@ app.post("/api/students", async (req, res) => {
 });
 
 app.patch("/api/students/:id", async (req, res) => {
-  const student = await Student.findById(req.params.id);
-  if (!student) return res.status(404).json({ message: "Student not found." });
-  if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
+  try {
+    const student = await Student.findById(req.params.id);
+    if (!student) return res.status(404).json({ message: "Student not found." });
+    if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
 
-  const fields = ["name", "guardianName", "guardianPhone", "photoUrl", "active", "consentGiven", "classId"];
-  fields.forEach(k => { if (req.body[k] !== undefined) student[k] = req.body[k]; });
-  if (req.body.photoDataUrl) {
-    student.photoUrl = await uploadImageDataUrl(req.body.photoDataUrl);
+    const fields = ["name", "guardianName", "guardianPhone", "photoUrl", "active", "consentGiven", "classId"];
+    fields.forEach(k => { if (req.body[k] !== undefined) student[k] = req.body[k]; });
+    if (req.body.referencePhotoUrl !== undefined) student.photoUrl = req.body.referencePhotoUrl;
+    if (req.body.fullName !== undefined) student.name = req.body.fullName;
+
+    if (req.body.photoDataUrl) {
+      student.photoUrl = await uploadImageDataUrl(req.body.photoDataUrl);
+    }
+    if (Array.isArray(req.body.faceDescriptor)) {
+      student.faceDescriptor = req.body.faceDescriptor;
+    }
+    await student.save();
+    await AuditLog.create({ actorId: req.user._id, action: "student.update", entityType: "Student", entityId: String(student._id) });
+    const populated = await Student.findById(student._id).select("-faceDescriptor").populate("classId", "name section");
+    const obj = populated.toObject();
+    obj.id = String(obj._id);
+    obj.fullName = obj.name;
+    obj.admissionNumber = obj.admissionNo;
+    obj.referencePhotoUrl = obj.photoUrl;
+    res.json(obj);
+  } catch (err) {
+    console.error("Student PATCH error:", err);
+    res.status(400).json({ message: err.message || "Failed to update student profile." });
   }
-  if (Array.isArray(req.body.faceDescriptor)) {
-    student.faceDescriptor = req.body.faceDescriptor;
-  }
-  await student.save();
-  await AuditLog.create({ actorId: req.user._id, action: "student.update", entityType: "Student", entityId: String(student._id) });
-  res.json(await Student.findById(student._id).select("-faceDescriptor").populate("classId", "name section"));
 });
 
 // Also support PUT as an alias for PATCH (some clients send PUT)
 app.put("/api/students/:id", async (req, res) => {
-  const student = await Student.findById(req.params.id);
-  if (!student) return res.status(404).json({ message: "Student not found." });
-  if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
-  const fields = ["name", "guardianName", "guardianPhone", "photoUrl", "active", "consentGiven", "classId"];
-  fields.forEach(k => { if (req.body[k] !== undefined) student[k] = req.body[k]; });
-  // Accept referencePhotoUrl alias for photoUrl
-  if (req.body.referencePhotoUrl !== undefined) student.photoUrl = req.body.referencePhotoUrl;
-  if (req.body.photoDataUrl) {
-    student.photoUrl = await uploadImageDataUrl(req.body.photoDataUrl);
+  try {
+    const student = await Student.findById(req.params.id);
+    if (!student) return res.status(404).json({ message: "Student not found." });
+    if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
+    const fields = ["name", "guardianName", "guardianPhone", "photoUrl", "active", "consentGiven", "classId"];
+    fields.forEach(k => { if (req.body[k] !== undefined) student[k] = req.body[k]; });
+    // Accept referencePhotoUrl alias for photoUrl
+    if (req.body.referencePhotoUrl !== undefined) student.photoUrl = req.body.referencePhotoUrl;
+    if (req.body.fullName !== undefined) student.name = req.body.fullName;
+    if (req.body.photoDataUrl) {
+      student.photoUrl = await uploadImageDataUrl(req.body.photoDataUrl);
+    }
+    if (Array.isArray(req.body.faceDescriptor)) {
+      student.faceDescriptor = req.body.faceDescriptor;
+    }
+    await student.save();
+    await AuditLog.create({ actorId: req.user._id, action: "student.update", entityType: "Student", entityId: String(student._id) });
+    const populated = await Student.findById(student._id).select("-faceDescriptor").populate("classId", "name section");
+    const obj = populated.toObject();
+    obj.id = String(obj._id);
+    obj.fullName = obj.name;
+    obj.admissionNumber = obj.admissionNo;
+    obj.referencePhotoUrl = obj.photoUrl;
+    res.json(obj);
+  } catch (err) {
+    console.error("Student PUT error:", err);
+    res.status(400).json({ message: err.message || "Failed to update student profile." });
   }
-  if (Array.isArray(req.body.faceDescriptor)) {
-    student.faceDescriptor = req.body.faceDescriptor;
-  }
-  // Accept fullName alias for name
-  if (req.body.fullName !== undefined) student.name = req.body.fullName;
-  await student.save();
-  await AuditLog.create({ actorId: req.user._id, action: "student.update", entityType: "Student", entityId: String(student._id) });
-  const populated = await Student.findById(student._id).select("-faceDescriptor").populate("classId", "name section");
-  // Return aliases for client compatibility
-  const obj = populated.toObject();
-  obj.fullName = obj.name;
-  obj.admissionNumber = obj.admissionNo;
-  obj.referencePhotoUrl = obj.photoUrl;
-  res.json(obj);
 });
 
 // --- STUDENT ROSTER EXPORT (CSV / XLSX) ---

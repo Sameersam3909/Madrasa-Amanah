@@ -27,9 +27,6 @@ backups/
 *.archive.gz
 *.sha256
 
-# Large ML model binaries (downloaded via postinstall or CDN)
-client/public/models/*.bin
-
 # Local Database Stores
 .mongo-local-store/
 server/.mongo-local-store/

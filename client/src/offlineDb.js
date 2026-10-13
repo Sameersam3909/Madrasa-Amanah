@@ -10,6 +10,10 @@ offlineDb.version(2).stores({
   metadata: "key"
 });
 
+offlineDb.version(3).stores({
+  attendanceHistory: "id, classId, dateKey, sessionKey, studentId, status, updatedAt"
+});
+
 export async function cacheClasses(classes) {
   if (!classes || !classes.length) return;
   await offlineDb.classes.bulkPut(classes.map(c => ({
@@ -305,3 +309,32 @@ export async function checkStorageEstimate() {
   }
   return "Local storage active (IndexedDB)";
 }
+
+// 6-Month Data Retention: caches up to 6 months (180 days) of compressed attendance records
+export async function cacheAttendanceHistory(records, classId, dateKey, sessionKey = "morning") {
+  if (!records || !records.length) return;
+  const now = new Date().toISOString();
+  const normalized = records.map(r => ({
+    id: `${classId}:${dateKey}:${sessionKey}:${r.studentId || r._id || r.id}`,
+    classId: String(classId),
+    dateKey,
+    sessionKey,
+    studentId: String(r.studentId || r._id || r.id),
+    status: r.status,
+    updatedAt: now
+  }));
+  await offlineDb.attendanceHistory.bulkPut(normalized);
+}
+
+// Clean attendance records older than 180 days (6 months) to keep storage compact & fast
+export async function cleanOldAttendance(days = 180) {
+  try {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    await offlineDb.attendanceDrafts.where("dateKey").below(cutoff).delete();
+    await offlineDb.attendanceHistory.where("dateKey").below(cutoff).delete();
+    console.log(`IndexedDB cleaned records older than ${cutoff} (6-month retention).`);
+  } catch (err) {
+    console.warn("Storage cleaner note:", err.message);
+  }
+}
+

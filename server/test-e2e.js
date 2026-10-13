@@ -32,7 +32,7 @@ async function runTests() {
     const loginRes = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'admin@example.com', password: 'Admin12345678!' })
+      body: JSON.stringify({ email: process.env.ADMIN_EMAIL || 'admin@example.com', password: process.env.ADMIN_PASSWORD || 'Shaiksameer/3909' })
     });
     const loginData = await loginRes.json();
     assert(loginRes.status === 200 && !!loginData.token, 'Admin login succeeded and returned JWT');

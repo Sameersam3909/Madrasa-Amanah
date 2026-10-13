@@ -55,7 +55,9 @@ import {
   retryOutboxMutation,
   getLastSyncTime,
   setLastSyncTime,
-  checkStorageEstimate
+  checkStorageEstimate,
+  cacheAttendanceHistory,
+  cleanOldAttendance
 } from "./offlineDb";
 
 const today = () => new Date().toLocaleDateString("en-CA");
@@ -67,7 +69,17 @@ const readDataUrl = (file) =>
     r.onerror = reject;
     r.readAsDataURL(file);
   });
-const distance = (a, b) => Math.sqrt(a.reduce((sum, v, i) => sum + (v - b[i]) ** 2, 0));
+
+// Fast, resilient Euclidean distance calculation (guards against NaN & mismatch)
+const distance = (a, b) => {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || !a.length) return 999;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    const diff = a[i] - b[i];
+    sum += diff * diff;
+  }
+  return Math.sqrt(sum);
+};
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("madrasa_token") || "");
@@ -88,14 +100,19 @@ export default function App() {
   const [records, setRecords] = useState({});
   const [notes, setNotes] = useState({});
 
-  // Active Student Profile View Modal
+  // Active Student Profile View Modal & Camera
   const [viewingStudent, setViewingStudent] = useState(null);
   const [profilePreviewPhoto, setProfilePreviewPhoto] = useState(null);
   const [profilePreviewDescriptor, setProfilePreviewDescriptor] = useState(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraFacing, setCameraFacing] = useState("user");
+  const [cameraMode, setCameraMode] = useState("student-profile"); // 'student-profile' | 'class-attendance'
+  const [faceDetectStatus, setFaceDetectStatus] = useState(""); // '', 'loading', 'detected', 'no-face', 'error', 'unavailable'
+  const [photoSaving, setPhotoSaving] = useState(false);
+  const [photoSaveError, setPhotoSaveError] = useState("");
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const savingAttendanceRef = useRef(false);
 
   // Attendance Submission Confirmation Modal
   const [confirmationModal, setConfirmationModal] = useState(null);
@@ -180,6 +197,23 @@ export default function App() {
       ...prev.slice(0, 49)
     ]);
   }
+
+  function removeNotification(id) {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }
+
+  function clearAllNotifications() {
+    setNotifications([]);
+  }
+
+  function markAllNotificationsRead() {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  }
+
+  // 6-Month Data Retention Cleanup & Pre-warm
+  useEffect(() => {
+    cleanOldAttendance(180);
+  }, []);
 
   // Listen for 401 Unauthorized globally
   useEffect(() => {
@@ -267,11 +301,13 @@ export default function App() {
   async function loadStudentsAndAttendanceOfflineFirst(classId, date, session) {
     try {
       const res = await api.get("/students", { params: { classId } });
-      setStudents(res.data);
-      await cacheStudents(res.data, classId);
+      const unique = Array.from(new Map(res.data.map((s) => [String(s._id || s.id), s])).values());
+      setStudents(unique);
+      await cacheStudents(unique, classId);
     } catch {
       const cached = await offlineDb.students.where("classId").equals(String(classId)).toArray();
-      setStudents(cached);
+      const unique = Array.from(new Map(cached.map((s) => [String(s._id || s.id), s])).values());
+      setStudents(unique);
     }
 
     try {
@@ -279,7 +315,7 @@ export default function App() {
       const next = {};
       const noteMap = {};
       res.data.forEach((a) => {
-        const sid = a.studentId?._id || a.studentId;
+        const sid = String(a.studentId?._id || a.studentId?.id || a.studentId);
         next[sid] = { status: a.status };
         if (a.note) noteMap[sid] = a.note;
       });
@@ -357,54 +393,133 @@ export default function App() {
     }
   }
 
-  // Face API Loader
-  async function loadFaceApi() {
-    const faceapi = await import("@vladmandic/face-api");
-    const base = "/models";
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(base),
-      faceapi.nets.faceLandmark68Net.loadFromUri(base),
-      faceapi.nets.faceRecognitionNet.loadFromUri(base)
-    ]);
-    return faceapi;
-  }
+  // Resilient Face API Loader with CDN fallback and promise sharing
+  const faceApiRef = useRef(null);
+  const faceApiPromiseRef = useRef(null);
 
-  // Extract Face Descriptor from image data URL
-  async function extractDescriptor(dataUrl) {
+  async function loadFaceApi() {
+    if (faceApiRef.current) return faceApiRef.current;
+    if (faceApiPromiseRef.current) return faceApiPromiseRef.current;
+
+    faceApiPromiseRef.current = (async () => {
+      const faceapi = await import("@vladmandic/face-api");
+      const CDN_BASE = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model";
+      const LOCAL_BASE = "/models";
+      let modelBase = CDN_BASE;
+
+      try {
+        // Probe local /models directory to verify real binary weights are deployed (and not the SPA index.html fallback)
+        const check = await fetch(`${LOCAL_BASE}/tiny_face_detector_model.bin`, { method: "HEAD" });
+        const cType = check.headers.get("content-type") || "";
+        const cLen = Number(check.headers.get("content-length") || 0);
+        if (check.ok && !cType.includes("text/html") && (cLen > 100000 || cLen === 0)) {
+          modelBase = LOCAL_BASE;
+        }
+      } catch {
+        modelBase = CDN_BASE;
+      }
+
+      console.info(`Madrasa Amanah: Initializing face models from ${modelBase}`);
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(modelBase),
+        faceapi.nets.faceLandmark68Net.loadFromUri(modelBase),
+        faceapi.nets.faceRecognitionNet.loadFromUri(modelBase)
+      ]);
+
+      faceApiRef.current = faceapi;
+      return faceapi;
+    })();
+
     try {
-      const faceapi = await loadFaceApi();
-      const img = await faceapi.fetchImage(dataUrl);
-      const res = await faceapi
-        .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.48 }))
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-      return res ? Array.from(res.descriptor) : null;
-    } catch {
-      return null;
+      return await faceApiPromiseRef.current;
+    } catch (err) {
+      faceApiPromiseRef.current = null; // allow retry
+      console.error("Face model load failure:", err);
+      throw new Error("Face recognition models unavailable. Manual attendance is active.");
     }
   }
 
-  // Camera Management (getUserMedia)
-  async function startCamera(facing = "user") {
+  // Extract Face Descriptor from image data URL — with clear status reporting
+  async function extractDescriptor(dataUrl) {
+    try {
+      const faceapi = await loadFaceApi();
+      // Create an Image element and wait for it to fully load before detection
+      const img = document.createElement("img");
+      img.crossOrigin = "anonymous";
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error("Failed to decode the captured image."));
+        img.src = dataUrl;
+      });
+      if (!img.naturalWidth || !img.naturalHeight) {
+        throw new Error("Image has invalid dimensions (0×0).");
+      }
+      const res = await faceapi
+        .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.38 }))
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+      return res ? Array.from(res.descriptor) : null;
+    } catch (err) {
+      console.warn("Face detection error:", err.message);
+      throw err; // propagate — caller will decide what to show
+    }
+  }
+
+  // Camera Management (getUserMedia) — prevents black screen on laptops & mobiles
+  async function startCamera(facing = "user", mode = "student-profile") {
     setCameraFacing(facing);
+    setCameraMode(mode);
     stopCamera();
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Direct camera access not supported. Using photo picker fallback.");
+        throw new Error("Direct camera access not supported on this browser.");
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: facing, width: { ideal: 640 }, height: { ideal: 640 } },
-        audio: false
-      });
+
+      let stream = null;
+      try {
+        // 1. Try requested ideal facing mode
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: facing ? { ideal: facing } : undefined,
+            width: { ideal: 1280, min: 320 },
+            height: { ideal: 720, min: 240 }
+          },
+          audio: false
+        });
+      } catch (e1) {
+        // 2. Resilient fallback for desktop webcams that don't support facingMode constraints
+        console.warn("Facing constraint failed, falling back to basic video:", e1.message);
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+
+      if (!stream) throw new Error("Could not initialize camera stream.");
+
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
       setCameraActive(true);
+
+      const attachVideo = () => {
+        const vid = videoRef.current;
+        if (!vid || !streamRef.current) return;
+        vid.srcObject = streamRef.current;
+        vid.setAttribute("playsinline", "true");
+        vid.setAttribute("autoplay", "true");
+        vid.muted = true;
+        vid.onloadedmetadata = () => {
+          vid.play().catch((pErr) => console.warn("Auto-play warning:", pErr));
+        };
+        vid.play().catch(() => {});
+      };
+
+      requestAnimationFrame(() => {
+        setTimeout(attachVideo, 60);
+      });
     } catch (err) {
-      setError(err.message);
-      document.getElementById("profile-camera-file-input")?.click();
+      setError(`Camera error: ${err.message}. Please check browser camera permissions.`);
+      if (mode === "student-profile") {
+        document.getElementById("profile-camera-file-input")?.click();
+      } else {
+        document.getElementById("class-photo-input")?.click();
+      }
     }
   }
 
@@ -413,39 +528,79 @@ export default function App() {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
     setCameraActive(false);
   }
 
   function snapPhoto() {
     if (!videoRef.current) return;
+    const vw = videoRef.current.videoWidth;
+    const vh = videoRef.current.videoHeight;
+    if (!vw || !vh) {
+      setError("Camera not ready yet — please wait a moment and try again.");
+      return;
+    }
     const canvas = document.createElement("canvas");
-    canvas.width = videoRef.current.videoWidth || 480;
-    canvas.height = videoRef.current.videoHeight || 480;
+    canvas.width = vw;
+    canvas.height = vh;
     const ctx = canvas.getContext("2d");
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
+    const currentMode = cameraMode;
     stopCamera();
-    handleNewPhoto(dataUrl);
+
+    if (currentMode === "class-attendance") {
+      processClassPhoto(dataUrl);
+    } else {
+      handleNewPhoto(dataUrl);
+    }
   }
 
   async function handleNewPhoto(dataUrl) {
     setProfilePreviewPhoto(dataUrl);
-    setNotice("Processing face descriptor...");
-    const desc = await extractDescriptor(dataUrl);
-    setProfilePreviewDescriptor(desc);
-    if (desc) {
-      setNotice("Photo captured and face descriptor ready ✓");
-    } else {
-      setNotice("Photo captured. (No face detected; manual attendance is always available).");
+    setProfilePreviewDescriptor(null);
+    setFaceDetectStatus("loading");
+    setPhotoSaveError("");
+    setNotice("Analyzing image for face detection...");
+
+    // Validate image size (reject > 5MB data URLs)
+    if (dataUrl.length > 5 * 1024 * 1024 * 1.37) {
+      setFaceDetectStatus("error");
+      setNotice("Image is too large. Please use a smaller photo (under 5 MB).");
+      return;
+    }
+
+    try {
+      const desc = await extractDescriptor(dataUrl);
+      setProfilePreviewDescriptor(desc);
+      if (desc) {
+        setFaceDetectStatus("detected");
+        setNotice("Face detected and descriptor ready ✓");
+      } else {
+        setFaceDetectStatus("no-face");
+        setNotice("No face detected in this image. You can still save the photo for manual attendance.");
+      }
+    } catch (err) {
+      setProfilePreviewDescriptor(null);
+      if (err.message?.includes("model") || err.message?.includes("404") || err.message?.includes("not found")) {
+        setFaceDetectStatus("unavailable");
+        setNotice("Face recognition models could not load. Photo can still be saved for manual attendance.");
+      } else {
+        setFaceDetectStatus("error");
+        setNotice(`Face detection failed: ${err.message}. Photo can still be saved.`);
+      }
     }
   }
 
   // Save / Replace Reference Photo
   async function saveStudentPhoto() {
     if (!viewingStudent || !profilePreviewPhoto) return;
-    setLoading(true);
-    setError("");
+    setPhotoSaving(true);
+    setPhotoSaveError("");
     const studentId = viewingStudent._id || viewingStudent.id;
+    const previousPhotoUrl = viewingStudent.photoUrl; // preserve old photo reference
 
     try {
       if (isOnline) {
@@ -453,17 +608,26 @@ export default function App() {
           photoDataUrl: profilePreviewPhoto,
           faceDescriptor: profilePreviewDescriptor
         });
-        setStudents((prev) =>
-          prev.map((s) => (String(s._id || s.id) === String(studentId) ? data : s))
-        );
-        setViewingStudent(data);
-        await cacheStudents([data], selectedClass);
-        addNotification({
-          title: "Reference Photo Updated",
-          message: `Photo for ${data.name} (${data.admissionNo}) saved and uploaded to Cloudinary.`,
-          type: "success"
-        });
-        setNotice("Reference photo successfully updated and synced to Cloudinary.");
+        // Verify server returned a valid permanent photo URL (not a blob)
+        if (data.photoUrl && !data.photoUrl.startsWith("blob:") && !data.photoUrl.startsWith("data:")) {
+          setStudents((prev) =>
+            prev.map((s) => (String(s._id || s.id) === String(studentId) ? data : s))
+          );
+          setViewingStudent(data);
+          await cacheStudents([data], selectedClass);
+          addNotification({
+            title: "Reference Photo Updated",
+            message: `Photo for ${data.name} (${data.admissionNo}) saved to cloud storage.`,
+            type: "success"
+          });
+          setNotice("Reference photo saved and uploaded successfully ✓");
+          setProfilePreviewPhoto(null);
+          setProfilePreviewDescriptor(null);
+          setFaceDetectStatus("");
+        } else {
+          // Server responded but URL looks like a temp reference
+          setPhotoSaveError("Server saved the record but the photo URL may not be permanent. Please verify in the student list.");
+        }
       } else {
         await queuePhotoUpdate({
           studentId,
@@ -472,19 +636,32 @@ export default function App() {
         });
         addNotification({
           title: "Photo Saved Locally (Offline)",
-          message: `Photo for ${viewingStudent.name} queued for Cloudinary sync when online.`,
+          message: `Photo for ${viewingStudent.name} queued for upload when online.`,
           type: "warning"
         });
-        setNotice("Saved on this device — photo queued to upload when internet reconnects.");
+        setNotice("Photo saved on this device — will upload when internet reconnects.");
+        setProfilePreviewPhoto(null);
+        setProfilePreviewDescriptor(null);
+        setFaceDetectStatus("");
         await refreshSyncStatus();
       }
-      setProfilePreviewPhoto(null);
-      setProfilePreviewDescriptor(null);
     } catch (e) {
-      setError(errText(e));
+      // Keep preview and old photo intact on failure — allow retry
+      setPhotoSaveError(errText(e));
+      setNotice("");
     } finally {
-      setLoading(false);
+      setPhotoSaving(false);
     }
+  }
+
+  // Close the student profile modal safely
+  function closeStudentModal() {
+    stopCamera();
+    setViewingStudent(null);
+    setProfilePreviewPhoto(null);
+    setProfilePreviewDescriptor(null);
+    setFaceDetectStatus("");
+    setPhotoSaveError("");
   }
 
   // Offline Preparation Checklist
@@ -535,8 +712,9 @@ export default function App() {
     }
   }
 
-  // B: Save Attendance with Real Authoritative Confirmation
+  // B: Save Attendance with Real Authoritative Confirmation & 6-Month Cache
   async function saveAttendance() {
+    if (savingAttendanceRef.current) return; // Prevent duplicate rapid submission
     setError("");
     setNotice("");
     const unmarked = students.filter((s) => !records[s._id || s.id]?.status);
@@ -549,6 +727,7 @@ export default function App() {
       return;
     }
 
+    savingAttendanceRef.current = true;
     setLoading(true);
     try {
       const studentRecords = students.map((s) => ({
@@ -566,6 +745,8 @@ export default function App() {
         records: studentRecords
       });
 
+      // 2. Cache into 6-month historical offline store
+      await cacheAttendanceHistory(studentRecords, selectedClass, dateKey, sessionKey);
       await refreshSyncStatus();
 
       const counts = {
@@ -575,7 +756,7 @@ export default function App() {
         excused: excusedCount
       };
 
-      // 2. Online: Direct API save to MongoDB
+      // 3. Online: Direct API save to MongoDB Atlas
       if (isOnline) {
         try {
           const res = await api.post("/attendance/bulk", {
@@ -608,7 +789,7 @@ export default function App() {
 
           addNotification({
             title: "Attendance Confirmed by Server",
-            message: `${activeClass?.name || "Class"} (${sessionKey}) - ${students.length} marked. Confirmed by MongoDB.`,
+            message: `${activeClass?.name || "Class"} (${sessionKey}) - ${students.length} marked. Confirmed by MongoDB Atlas.`,
             type: "success"
           });
         } catch {
@@ -655,6 +836,7 @@ export default function App() {
       setError(errText(e));
     } finally {
       setLoading(false);
+      savingAttendanceRef.current = false;
     }
   }
 
@@ -686,19 +868,40 @@ export default function App() {
     setRecords((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), status } }));
   }
 
-  // Classroom Photo Recognition
-  async function processClassPhoto(file) {
-    setClassPhoto(file);
+  // Classroom Photo Recognition — supports File upload and direct camera dataUrl
+  async function processClassPhoto(fileOrDataUrl) {
+    setClassPhoto(fileOrDataUrl);
     setDetected([]);
     setError("");
-    setNotice("");
-    if (!file) return;
+    setNotice("Scanning photo for student faces...");
+    if (!fileOrDataUrl) return;
+
     try {
-      if (file.size > 8 * 1024 * 1024) throw new Error("Please select a photo under 8 MB.");
+      if (typeof fileOrDataUrl !== "string" && fileOrDataUrl.size > 8 * 1024 * 1024) {
+        throw new Error("Please select a photo under 8 MB.");
+      }
       const faceapi = await loadFaceApi();
-      const img = await faceapi.fetchImage(URL.createObjectURL(file));
+
+      let img;
+      if (typeof fileOrDataUrl === "string") {
+        img = document.createElement("img");
+        img.crossOrigin = "anonymous";
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = () => reject(new Error("Failed to decode camera snapshot."));
+          img.src = fileOrDataUrl;
+        });
+      } else {
+        const objectUrl = URL.createObjectURL(fileOrDataUrl);
+        try {
+          img = await faceapi.fetchImage(objectUrl);
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      }
+
       const found = await faceapi
-        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.42 }))
+        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.38 }))
         .withFaceLandmarks()
         .withFaceDescriptors();
 
@@ -717,7 +920,8 @@ export default function App() {
           .map((s) => ({ student: s, distance: distance(d, s.faceDescriptor) }))
           .sort((a, b) => a.distance - b.distance);
         const best = ranked[0];
-        const confident = best && best.distance < 0.52;
+        const confident = best && best.distance < 0.58;
+        const confidencePct = best ? Math.max(0, Math.min(100, Math.round((1 - best.distance) * 100))) : 0;
         return {
           faceNo: i + 1,
           descriptor: d,
@@ -725,15 +929,17 @@ export default function App() {
           matchName: confident ? best.student.name : "",
           matchAdmissionNo: confident ? (best.student.admissionNo || best.student.admissionNumber || "") : "",
           distance: best ? best.distance : null,
+          confidencePct,
           confirmed: false
         };
       });
 
       setDetected(matches);
       if (!found.length) {
-        setNotice("No faces detected. Continue with manual register below.");
+        setNotice("No faces detected in this photo. You can mark attendance manually below.");
       } else {
-        setNotice(`Detected ${found.length} face suggestion(s). Review each match below.`);
+        const recognizedCount = matches.filter((m) => m.studentId).length;
+        setNotice(`Detected ${found.length} face(s) (${recognizedCount} recognized with high confidence). Review below.`);
       }
     } catch (e) {
       setError(`${errText(e)} Continue with manual attendance.`);
@@ -753,7 +959,24 @@ export default function App() {
       [item.studentId]: { ...(prev[item.studentId] || {}), status }
     }));
 
-    setNotice(`Confirmed ${item.matchName || "Student"} as ${status} ✓ (Draft updated — click Save to persist to database)`);
+    setNotice(`Confirmed ${item.matchName || "Student"} as ${status} ✓`);
+  }
+
+  function confirmAllFaceMatches() {
+    let count = 0;
+    const updatedRecords = { ...records };
+    setDetected((prev) =>
+      prev.map((f) => {
+        if (f.studentId) {
+          updatedRecords[f.studentId] = { ...(updatedRecords[f.studentId] || {}), status: "present" };
+          count++;
+          return { ...f, confirmed: true };
+        }
+        return f;
+      })
+    );
+    setRecords(updatedRecords);
+    setNotice(`Confirmed all ${count} recognized student(s) as Present ✓. Click "Save Attendance" to persist.`);
   }
 
   function changeFaceStudent(faceNo, newStudentId) {
@@ -1092,7 +1315,10 @@ export default function App() {
         <div className="mobile-header-actions">
           {/* Notifications Bell */}
           <button
-            onClick={() => setShowNotificationDrawer(true)}
+            onClick={() => {
+              setShowNotificationDrawer(true);
+              markAllNotificationsRead();
+            }}
             style={{
               background: "transparent",
               border: "none",
@@ -1425,18 +1651,26 @@ export default function App() {
                   </button>
                 )}
 
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => startCamera("environment", "class-attendance")}
+                  style={{ minHeight: 38, padding: "6px 12px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                >
+                  <Camera size={15} /> Live Camera Scan
+                </button>
+
                 <label
                   htmlFor="class-photo-input"
                   className="btn secondary"
                   style={{ minHeight: 38, padding: "6px 12px", fontSize: 12, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
                 >
-                  <Camera size={15} /> {t.takePhoto}
+                  <Image size={15} /> Upload Photo
                 </label>
                 <input
                   id="class-photo-input"
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   style={{ display: "none" }}
                   onChange={(e) => processClassPhoto(e.target.files?.[0])}
                 />
@@ -1445,20 +1679,31 @@ export default function App() {
               {/* Phase 3 Face Suggestions & Review */}
               {detected.length > 0 && (
                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
                     <div>
                       <strong style={{ fontSize: 13 }}>{t.faceSuggestions} ({detected.length})</strong>
                       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                        Teacher confirms candidate identity before marking attendance
+                        AI suggested candidate identities based on reference photos
                       </p>
                     </div>
-                    <button
-                      onClick={() => setDetected([])}
-                      style={{ background: "none", border: "none", color: "var(--muted)", padding: 4 }}
-                      title="Clear suggestions"
-                    >
-                      <X size={16} />
-                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {detected.some((f) => f.studentId && !f.confirmed) && (
+                        <button
+                          className="btn primary"
+                          style={{ minHeight: 30, fontSize: 11, padding: "4px 8px" }}
+                          onClick={confirmAllFaceMatches}
+                        >
+                          <Check size={13} /> Confirm All Present
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setDetected([])}
+                        style={{ background: "none", border: "none", color: "var(--muted)", padding: 4, cursor: "pointer" }}
+                        title="Clear suggestions"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
                   </div>
 
                   <div style={{ display: "grid", gap: 8 }}>
@@ -1478,6 +1723,11 @@ export default function App() {
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                           <span style={{ fontSize: 12 }}>
                             Face #{f.faceNo}: <strong>{f.matchName || "Unmatched"}</strong> {f.matchAdmissionNo ? `(${f.matchAdmissionNo})` : ""}
+                            {f.confidencePct > 0 && (
+                              <span style={{ fontSize: 10, color: f.confidencePct > 70 ? "var(--success)" : "var(--warning)", marginLeft: 6 }}>
+                                ({f.confidencePct}% match)
+                              </span>
+                            )}
                           </span>
                           <span
                             style={{
@@ -1791,7 +2041,11 @@ export default function App() {
                     ...studentForm,
                     classId: selectedClass
                   });
-                  setStudents((prev) => [...prev, r.data].sort((a, b) => a.name.localeCompare(b.name)));
+                  setStudents((prev) => {
+                    const map = new Map(prev.map((s) => [String(s._id || s.id), s]));
+                    map.set(String(r.data._id || r.data.id), r.data);
+                    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+                  });
                   await cacheStudents([r.data], selectedClass);
                   setStudentForm({ admissionNo: "", name: "", guardianName: "", guardianPhone: "", consentGiven: true });
                   setNotice(`Student enrolled: ${r.data.name} (${r.data.admissionNo})`);
@@ -2207,13 +2461,28 @@ export default function App() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Bell size={20} color="var(--primary)" />
                 <h3 style={{ marginBottom: 0 }}>Notification History</h3>
+                {notifications.length > 0 && (
+                  <span style={{ background: "var(--primary)", color: "#fff", fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 10 }}>
+                    {notifications.length}
+                  </span>
+                )}
               </div>
-              <button
-                onClick={() => setShowNotificationDrawer(false)}
-                style={{ background: "none", border: "none", padding: 6, color: "var(--muted)" }}
-              >
-                <X size={20} />
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {notifications.length > 0 && (
+                  <button
+                    onClick={clearAllNotifications}
+                    style={{ background: "none", border: "none", color: "var(--danger)", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: "4px 8px" }}
+                  >
+                    Clear all
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowNotificationDrawer(false)}
+                  style={{ background: "none", border: "none", padding: 6, color: "var(--muted)", cursor: "pointer" }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             <div style={{ display: "grid", gap: 10, maxHeight: "65vh", overflowY: "auto" }}>
@@ -2233,11 +2502,22 @@ export default function App() {
                     }`
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                    <strong style={{ fontSize: 13 }}>{n.title}</strong>
-                    <small style={{ color: "var(--muted)" }}>{new Date(n.timestamp).toLocaleTimeString()}</small>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                    <div>
+                      <strong style={{ fontSize: 13, display: "block" }}>{n.title}</strong>
+                      <small style={{ color: "var(--muted)", fontSize: 11 }}>
+                        {new Date(n.timestamp).toLocaleTimeString()} · {new Date(n.timestamp).toLocaleDateString()}
+                      </small>
+                    </div>
+                    <button
+                      onClick={() => removeNotification(n.id)}
+                      title="Remove notification"
+                      style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", padding: 4, borderRadius: 4 }}
+                    >
+                      <X size={16} />
+                    </button>
                   </div>
-                  <p className="muted" style={{ fontSize: 12 }}>{n.message}</p>
+                  <p className="muted" style={{ fontSize: 12, margin: 0 }}>{n.message}</p>
                 </div>
               ))}
 
@@ -2253,7 +2533,7 @@ export default function App() {
           STUDENT PROFILE & PHOTO MANAGER (MODAL)
           ========================================================= */}
       {viewingStudent && (
-        <div className="sheet-overlay" onClick={() => { setViewingStudent(null); stopCamera(); setProfilePreviewPhoto(null); }}>
+        <div className="sheet-overlay" onClick={closeStudentModal}>
           <div className="sheet-content" onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div>
@@ -2262,12 +2542,19 @@ export default function App() {
                 <small className="muted">Admission No: {viewingStudent.admissionNo}</small>
               </div>
               <button
-                onClick={() => { setViewingStudent(null); stopCamera(); setProfilePreviewPhoto(null); }}
-                style={{ background: "transparent", border: "none", color: "var(--muted)", padding: 6 }}
+                onClick={closeStudentModal}
+                style={{ background: "transparent", border: "none", color: "var(--muted)", padding: 6, cursor: "pointer" }}
               >
                 <X size={22} />
               </button>
             </div>
+
+            {photoSaveError && (
+              <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", color: "#991B1B", padding: "10px 14px", borderRadius: 12, marginBottom: 14, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+                <AlertCircle size={18} />
+                <span>{photoSaveError}</span>
+              </div>
+            )}
 
             {/* EXACT MOCKUP CARD FROM USER IMAGE */}
             <div className="photo-manager-card">
@@ -2338,17 +2625,35 @@ export default function App() {
                     New image preview:
                   </div>
                   <img src={profilePreviewPhoto} alt="Preview" className="photo-preview-img" />
-                  <div style={{ fontSize: 11, color: profilePreviewDescriptor ? "var(--success)" : "var(--warning)", marginBottom: 14 }}>
-                    {profilePreviewDescriptor ? "Face descriptor recognized ✓" : "Manual attendance ready"}
+
+                  <div style={{
+                    fontSize: 12,
+                    fontWeight: 500,
+                    marginBottom: 14,
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    display: "inline-block",
+                    background: faceDetectStatus === "detected" ? "rgba(46, 125, 50, 0.25)" : "rgba(230, 81, 0, 0.25)",
+                    color: faceDetectStatus === "detected" ? "#4ADE80" : "#FDBA74"
+                  }}>
+                    {faceDetectStatus === "loading" && "Analyzing photo for face detection..."}
+                    {faceDetectStatus === "detected" && "Face detected & descriptor ready ✓"}
+                    {faceDetectStatus === "no-face" && "No face detected (manual attendance ready)"}
+                    {faceDetectStatus === "unavailable" && "Face models offline (manual attendance ready)"}
+                    {faceDetectStatus === "error" && "Face analysis skipped (manual attendance ready)"}
+                    {!faceDetectStatus && (profilePreviewDescriptor ? "Face descriptor ready ✓" : "Manual attendance ready")}
                   </div>
 
                   <div className="photo-preview-actions">
                     <button
                       className="photo-pill-btn choose"
                       style={{ marginBottom: 0 }}
+                      disabled={photoSaving}
                       onClick={() => {
                         setProfilePreviewPhoto(null);
                         setProfilePreviewDescriptor(null);
+                        setFaceDetectStatus("");
+                        setPhotoSaveError("");
                       }}
                     >
                       <RefreshCw size={16} /> Retake
@@ -2356,10 +2661,10 @@ export default function App() {
                     <button
                       className="photo-pill-btn take"
                       style={{ marginBottom: 0 }}
-                      disabled={loading}
+                      disabled={photoSaving}
                       onClick={saveStudentPhoto}
                     >
-                      <Check size={18} /> {loading ? "Saving..." : "Save photo"}
+                      <Check size={18} /> {photoSaving ? "Saving..." : "Save photo"}
                     </button>
                   </div>
                 </div>
@@ -2386,10 +2691,12 @@ export default function App() {
         <div className="camera-modal-overlay">
           <div className="camera-modal-content">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "#fff", marginBottom: 10 }}>
-              <span style={{ fontWeight: 600 }}>Camera Viewfinder</span>
+              <span style={{ fontWeight: 600 }}>
+                {cameraMode === "class-attendance" ? "Class Attendance Scanner (Live)" : "Camera Viewfinder"}
+              </span>
               <button
                 onClick={stopCamera}
-                style={{ background: "none", border: "none", color: "#fff", padding: 6 }}
+                style={{ background: "none", border: "none", color: "#fff", padding: 6, cursor: "pointer" }}
               >
                 <X size={24} />
               </button>
@@ -2401,8 +2708,9 @@ export default function App() {
 
             <div className="camera-snap-bar">
               <button
-                onClick={() => startCamera(cameraFacing === "user" ? "environment" : "user")}
-                style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: 44, height: 44, display: "grid", placeItems: "center" }}
+                onClick={() => startCamera(cameraFacing === "user" ? "environment" : "user", cameraMode)}
+                style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: 44, height: 44, display: "grid", placeItems: "center", cursor: "pointer" }}
+                title="Switch Camera"
               >
                 <FlipHorizontal size={20} />
               </button>
