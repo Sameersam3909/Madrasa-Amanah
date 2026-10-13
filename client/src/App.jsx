@@ -47,6 +47,7 @@ import {
   cacheClasses,
   cacheStudents,
   saveAttendanceLocally,
+  markOutboxSynced,
   queuePhotoUpdate,
   syncPendingAttendance,
   getPendingOutboxCount,
@@ -578,6 +579,7 @@ export default function App() {
       if (isOnline) {
         try {
           const res = await api.post("/attendance/bulk", {
+            mutationId: localResult?.mutationId,
             classId: selectedClass,
             dateKey,
             sessionKey,
@@ -585,15 +587,9 @@ export default function App() {
             records: studentRecords
           });
 
-          // Mark outbox item synced if present
-          const pendingItem = outboxItems.find(
-            (item) => item.payload?.classId === String(selectedClass) && item.payload?.dateKey === dateKey
-          );
-          if (pendingItem) {
-            await offlineDb.outbox.update(pendingItem.localId, {
-              state: "synced",
-              syncedAt: new Date().toISOString()
-            });
+          // Immediately mark outbox item as synced using the assigned mutationId
+          if (localResult?.mutationId) {
+            await markOutboxSynced(localResult.mutationId, res.data);
             await refreshSyncStatus();
           }
 
@@ -757,7 +753,7 @@ export default function App() {
       [item.studentId]: { ...(prev[item.studentId] || {}), status }
     }));
 
-    setNotice(`Confirmed ${item.matchName || "Student"} as ${status} ✓`);
+    setNotice(`Confirmed ${item.matchName || "Student"} as ${status} ✓ (Draft updated — click Save to persist to database)`);
   }
 
   function changeFaceStudent(faceNo, newStudentId) {
@@ -1611,7 +1607,7 @@ export default function App() {
                 onClick={saveAttendance}
               >
                 <Check size={18} />
-                <span>{t.save}</span>
+                <span>{isOnline ? (t.saveAttendance || "Save Attendance") : (t.saveOffline || "Save on this device")}</span>
               </button>
             </div>
           </div>
@@ -1666,16 +1662,21 @@ export default function App() {
                     {item.state === "synced" ? <Check size={20} /> : <Clock size={20} />}
                   </div>
                   <div className="outbox-details">
-                    <strong>
-                      {item.kind === "student.photo"
-                        ? "Student Reference Photo Update"
-                        : `${item.payload?.dateKey} - ${item.payload?.records?.length || 0} student records`}
-                    </strong>
-                    <small>
-                      Status: <strong>{item.state}</strong> · {new Date(item.createdAt).toLocaleTimeString()}
-                    </small>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+                      <strong>
+                        {item.kind === "student.photo"
+                          ? "Student Reference Photo Update"
+                          : `${item.payload?.dateKey} (${item.payload?.sessionKey || "morning"}) — ${item.payload?.records?.length || 0} students`}
+                      </strong>
+                      <span className={`status-pill ${item.state === "synced" ? "success" : item.state === "needs-auth" ? "danger" : "warning"}`} style={{ fontSize: 10 }}>
+                        {item.state === "synced" ? "Synced ✓" : item.state === "syncing" ? "Syncing..." : item.state === "needs-auth" ? "Needs Login" : "Pending Sync"}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                      Operation ID: <code>{item.mutationId?.slice(0, 16)}...</code> · {new Date(item.createdAt).toLocaleTimeString()}
+                    </div>
                     {item.lastError && (
-                      <span style={{ color: "var(--danger)", fontSize: 11, display: "block" }}>
+                      <span style={{ color: "var(--danger)", fontSize: 11, display: "block", marginTop: 4 }}>
                         {item.lastError}
                       </span>
                     )}
@@ -1683,7 +1684,10 @@ export default function App() {
                   {item.state !== "synced" && (
                     <button
                       className="btn secondary"
-                      onClick={() => retryOutboxMutation(item.localId, api)}
+                      onClick={async () => {
+                        await retryOutboxMutation(item.localId, api);
+                        await refreshSyncStatus();
+                      }}
                       style={{ minHeight: 36, padding: "6px 12px", fontSize: 12 }}
                     >
                       {t.retry}

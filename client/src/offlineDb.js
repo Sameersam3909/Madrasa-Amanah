@@ -172,6 +172,15 @@ export async function syncPendingAttendance(apiInstance) {
       try {
         if (item.kind === "attendance.bulk") {
           const { data } = await apiInstance.post("/sync/attendance", item.payload);
+          // Only mark synced if the server truly confirmed success
+          if (data.status === "error" || (Array.isArray(data.results) && data.results.some(r => r.status === "error"))) {
+            const errMsg = data.message || data.results?.find(r => r.status === "error")?.message || "Sync validation failed.";
+            await offlineDb.outbox.update(item.localId, {
+              state: "needs-review",
+              lastError: errMsg
+            });
+            continue;
+          }
           await offlineDb.transaction("rw", offlineDb.outbox, offlineDb.attendanceDrafts, async () => {
             await offlineDb.outbox.update(item.localId, {
               state: "synced",
@@ -179,7 +188,7 @@ export async function syncPendingAttendance(apiInstance) {
               syncedAt: new Date().toISOString(),
               lastError: null
             });
-            const ids = item.payload.records.map(r => `${item.payload.classId}:${item.payload.dateKey}:${item.payload.sessionKey || "morning"}:${r.studentId}`);
+            const ids = (item.payload.records || []).map(r => `${item.payload.classId}:${item.payload.dateKey}:${item.payload.sessionKey || "morning"}:${r.studentId}`);
             for (const id of ids) {
               const draft = await offlineDb.attendanceDrafts.get(id);
               if (draft) await offlineDb.attendanceDrafts.update(id, { syncState: "synced" });
@@ -235,6 +244,31 @@ export async function syncPendingAttendance(apiInstance) {
     return { success: true, processed: results.length, items: results };
   } finally {
     syncInProgress = false;
+  }
+}
+
+/**
+ * Mark a local outbox mutation as synced immediately upon authoritative server confirmation
+ */
+export async function markOutboxSynced(mutationId, serverResult) {
+  if (!mutationId) return;
+  const item = await offlineDb.outbox.where("mutationId").equals(mutationId).first();
+  if (item) {
+    await offlineDb.transaction("rw", offlineDb.outbox, offlineDb.attendanceDrafts, async () => {
+      await offlineDb.outbox.update(item.localId, {
+        state: "synced",
+        serverResult,
+        syncedAt: new Date().toISOString(),
+        lastError: null
+      });
+      if (item.payload?.records && item.payload?.classId) {
+        const ids = (item.payload.records || []).map(r => `${item.payload.classId}:${item.payload.dateKey}:${item.payload.sessionKey || "morning"}:${r.studentId}`);
+        for (const id of ids) {
+          const draft = await offlineDb.attendanceDrafts.get(id);
+          if (draft) await offlineDb.attendanceDrafts.update(id, { syncState: "synced" });
+        }
+      }
+    });
   }
 }
 

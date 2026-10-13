@@ -432,7 +432,7 @@ app.post("/api/attendance/bulk", async (req, res) => {
   });
 
   const now = new Date().toISOString();
-  res.json({
+  const resultPayload = {
     saved: ops.length,
     confirmed: true,
     message: "Attendance confirmed by MongoDB Atlas.",
@@ -445,7 +445,22 @@ app.post("/api/attendance/bulk", async (req, res) => {
     database: "MongoDB Atlas",
     confirmedAt: now,
     persistedAt: now
-  });
+  };
+
+  if (req.body.mutationId) {
+    try {
+      await SyncMutation.create({
+        mutationId: req.body.mutationId,
+        actorId: req.user._id,
+        kind: "attendance.bulk",
+        result: resultPayload
+      });
+    } catch {
+      // Mutation receipt already logged
+    }
+  }
+
+  res.json(resultPayload);
 });
 
 // Idempotent Offline Sync Endpoint
