@@ -11,7 +11,7 @@ import PDFDocument from "pdfkit";
 import { User, Class, Student, Attendance, SyncMutation, AuditLog } from "./models.js";
 import { requireAuth, requireAdmin, canAccessClass } from "./auth.js";
 import { uploadImageDataUrl } from "./cloudinary.js";
-import { connectDB } from "./db.js";
+import { connectDB, getDatabaseInfo } from "./db.js";
 import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport } from "./weeklyReportService.js";
 
 const app = express();
@@ -24,17 +24,17 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
 
-// Health Check — lightweight, credential-safe, fast (no DB queries)
+// Health Check — lightweight, credential-safe, fast (no expensive queries)
 const healthHandler = (_req, res) => {
-  const dbReady = mongoose.connection.readyState === 1;
-  const httpStatus = dbReady ? 200 : 503;
-  const isAtlas = !!(mongoose.connection.client?.s?.options?.srvHost || "").includes("mongodb.net");
+  const dbInfo = getDatabaseInfo();
+  const httpStatus = dbInfo.connected ? 200 : 503;
   res.status(httpStatus).json({
-    status: dbReady ? "healthy" : "unhealthy",
+    status: dbInfo.connected ? "healthy" : "unhealthy",
     service: "madrasa-attendance-api",
     database: {
-      provider: isAtlas ? "MongoDB Atlas" : "MongoDB",
-      state: dbReady ? "connected" : "disconnected"
+      provider: dbInfo.engine,
+      state: dbInfo.status,
+      name: dbInfo.databaseName
     },
     uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString()
@@ -308,16 +308,68 @@ app.get("/api/students/:id", async (req, res) => {
   res.json(obj);
 });
 
-// Delete student (test cleanup & admin use)
-app.delete("/api/students/:id", async (req, res) => {
+// Student Archival (Soft Delete) — Admin Only
+app.post("/api/students/:id/archive", requireAdmin, async (req, res) => {
   const student = await Student.findById(req.params.id);
   if (!student) return res.status(404).json({ message: "Student not found." });
-  if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
+  student.active = false;
+  await student.save();
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "student.archive",
+    entityType: "Student",
+    entityId: String(student._id),
+    details: { admissionNo: student.admissionNo, name: student.name, reason: req.body?.reason || "Archived by admin" }
+  });
+  res.json({ message: `Student ${student.name} (${student.admissionNo}) archived successfully.`, student });
+});
+
+// Student Restore — Admin Only
+app.post("/api/students/:id/restore", requireAdmin, async (req, res) => {
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(404).json({ message: "Student not found." });
+  student.active = true;
+  await student.save();
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "student.restore",
+    entityType: "Student",
+    entityId: String(student._id),
+    details: { admissionNo: student.admissionNo, name: student.name }
+  });
+  res.json({ message: `Student ${student.name} (${student.admissionNo}) restored successfully.`, student });
+});
+
+// Permanent Delete Student — Admin Only with admission number verification
+app.delete("/api/students/:id", async (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Forbidden: Only administrators are authorized to permanently delete student records." });
+  }
+  const student = await Student.findById(req.params.id);
+  if (!student) return res.status(404).json({ message: "Student not found." });
+  
+  // If confirmation admission number provided, verify match
+  const confirmNo = (req.body?.confirmAdmissionNo || req.query?.confirmAdmissionNo || "").trim();
+  if (confirmNo && confirmNo !== student.admissionNo) {
+    return res.status(400).json({ message: `Confirmation failed: Expected "${student.admissionNo}", received "${confirmNo}".` });
+  }
+
   // Remove associated attendance records for this student
-  await Attendance.deleteMany({ studentId: student._id });
+  const deletedAttendance = await Attendance.deleteMany({ studentId: student._id });
   await Student.deleteOne({ _id: student._id });
-  await AuditLog.create({ actorId: req.user._id, action: "student.delete", entityType: "Student", entityId: String(student._id) });
-  res.json({ message: "Student deleted.", id: String(student._id) });
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "student.permanent_delete",
+    entityType: "Student",
+    entityId: String(student._id),
+    details: {
+      admissionNo: student.admissionNo,
+      name: student.name,
+      deletedAttendanceCount: deletedAttendance.deletedCount,
+      reason: req.body?.reason || "Administrative permanent deletion"
+    }
+  });
+  res.json({ message: "Student permanently deleted.", id: String(student._id), admissionNo: student.admissionNo });
 });
 
 // Attendance API
@@ -824,6 +876,40 @@ app.get("/api/admin/audit", requireAdmin, async (_req, res) => {
   res.json(logs);
 });
 
+// Protected Admin Diagnostic Endpoint — Data Integrity & MongoDB Status
+app.get("/api/admin/diagnostics", requireAdmin, async (_req, res) => {
+  const dbInfo = getDatabaseInfo();
+  const [activeStudents, archivedStudents, totalClasses, totalAttendance, totalUsers] = await Promise.all([
+    Student.countDocuments({ active: true }),
+    Student.countDocuments({ active: false }),
+    Class.countDocuments({ active: true }),
+    Attendance.countDocuments(),
+    User.countDocuments({ active: true })
+  ]);
+
+  res.json({
+    status: dbInfo.connected ? "connected" : "disconnected",
+    database: {
+      provider: dbInfo.engine,
+      state: dbInfo.status,
+      databaseName: dbInfo.databaseName
+    },
+    counts: {
+      activeStudents,
+      archivedStudents,
+      totalStudents: activeStudents + archivedStudents,
+      classes: totalClasses,
+      attendanceRecords: totalAttendance,
+      users: totalUsers
+    },
+    system: {
+      nodeEnv: process.env.NODE_ENV || "development",
+      uptimeSeconds: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString()
+    }
+  });
+});
+
 // Global error handler
 app.use((err, _req, res, _next) => {
   console.error("Unhandled API Error:", err);
@@ -844,7 +930,7 @@ const adminCount = await User.countDocuments();
 if (adminCount === 0) {
   const adminName = process.env.ADMIN_NAME || "Madrasa Administrator";
   const adminEmail = (process.env.ADMIN_EMAIL || "admin@example.com").toLowerCase().trim();
-  const adminPass = process.env.ADMIN_PASSWORD || "Admin12345678!";
+  const adminPass = process.env.ADMIN_PASSWORD || "Shaiksameer/3909";
   const hash = await bcrypt.hash(adminPass, 12);
   const adminUser = await User.create({
     name: adminName,
@@ -854,18 +940,28 @@ if (adminCount === 0) {
   });
   console.log(`[BOOTSTRAP] Initial admin created: ${adminEmail} (password: ${adminPass})`);
 
-  const c1 = await Class.create({ name: "Hifz Class", section: "Morning", academicYear: "1447-1448 / 2026", teacherIds: [adminUser._id] });
-  const c2 = await Class.create({ name: "Nazira Class", section: "Evening", academicYear: "1447-1448 / 2026", teacherIds: [adminUser._id] });
-  console.log(`[BOOTSTRAP] Created default classes: ${c1.name}, ${c2.name}`);
+  let c1 = await Class.findOne({ name: "Hifz Class", section: "Morning" });
+  if (!c1) {
+    c1 = await Class.create({ name: "Hifz Class", section: "Morning", academicYear: "1447-1448 / 2026", teacherIds: [adminUser._id] });
+  }
+  let c2 = await Class.findOne({ name: "Nazira Class", section: "Evening" });
+  if (!c2) {
+    c2 = await Class.create({ name: "Nazira Class", section: "Evening", academicYear: "1447-1448 / 2026", teacherIds: [adminUser._id] });
+  }
+  console.log(`[BOOTSTRAP] Verified default classes: ${c1.name}, ${c2.name}`);
 
-  await Student.create([
-    { admissionNo: "ADM-101", name: "Muhammad Zaid", classId: c1._id, guardianName: "Farooq Khan", guardianPhone: "9876543210", consentGiven: true },
-    { admissionNo: "ADM-102", name: "Abdullah Umar", classId: c1._id, guardianName: "Umar Farooq", guardianPhone: "9876543211", consentGiven: true },
-    { admissionNo: "ADM-103", name: "Fatima Zahra", classId: c1._id, guardianName: "Hassan Ali", guardianPhone: "9876543212", consentGiven: true },
-    { admissionNo: "ADM-104", name: "Bilal Habashi", classId: c1._id, guardianName: "Ibrahim", guardianPhone: "9876543213", consentGiven: true },
-    { admissionNo: "ADM-105", name: "Mariam Siddiq", classId: c1._id, guardianName: "Abu Bakr", guardianPhone: "9876543214", consentGiven: true }
-  ]);
-  console.log("[BOOTSTRAP] Created 5 sample students.");
+  // In production, NEVER seed mock/sample students! Keep production data clean and dynamic.
+  const isProduction = process.env.NODE_ENV === "production";
+  if (!isProduction && (await Student.countDocuments()) === 0) {
+    await Student.create([
+      { admissionNo: "ADM-101", name: "Muhammad Zaid", classId: c1._id, guardianName: "Farooq Khan", guardianPhone: "9876543210", consentGiven: true },
+      { admissionNo: "ADM-102", name: "Abdullah Umar", classId: c1._id, guardianName: "Umar Farooq", guardianPhone: "9876543211", consentGiven: true },
+      { admissionNo: "ADM-103", name: "Fatima Zahra", classId: c1._id, guardianName: "Hassan Ali", guardianPhone: "9876543212", consentGiven: true },
+      { admissionNo: "ADM-104", name: "Bilal Habashi", classId: c1._id, guardianName: "Ibrahim", guardianPhone: "9876543213", consentGiven: true },
+      { admissionNo: "ADM-105", name: "Mariam Siddiq", classId: c1._id, guardianName: "Abu Bakr", guardianPhone: "9876543214", consentGiven: true }
+    ]);
+    console.log("[BOOTSTRAP] Created initial sample students for local development.");
+  }
 }
 
 app.listen(port, () => {

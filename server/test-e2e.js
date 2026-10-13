@@ -287,10 +287,36 @@ async function runTests() {
     assert(Array.isArray(backupJson.classes) && Array.isArray(backupJson.students), 'Backup package contains classes and students arrays');
 
 
-    // 12. Cleanup
+    // 11. Testing Admin Diagnostics & Data Integrity
+    const diagRes = await fetch(`${API_BASE}/admin/diagnostics`, { headers: authHeaders });
+    assert(diagRes.status === 200, 'Admin diagnostics responded with 200 OK');
+    const diagData = await diagRes.json();
+    assert(diagData.status === 'connected', `Database status: ${diagData.status} (${diagData.database?.provider})`);
+    assert(typeof diagData.counts?.activeStudents === 'number', `Active students reported: ${diagData.counts?.activeStudents}`);
+
+    // 12. Testing Student Lifecycle: Archival & Restoration
+    const archiveRes = await fetch(`${API_BASE}/students/${studentId}/archive`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ reason: 'Graduated / Inactive test' })
+    });
+    assert(archiveRes.status === 200, 'Student archive returned 200 OK');
+    const archiveData = await archiveRes.json();
+    assert(archiveData.student?.active === false, 'Student marked active: false on archive');
+
+    const restoreRes = await fetch(`${API_BASE}/students/${studentId}/restore`, {
+      method: 'POST',
+      headers: authHeaders
+    });
+    assert(restoreRes.status === 200, 'Student restore returned 200 OK');
+    const restoreData = await restoreRes.json();
+    assert(restoreData.student?.active === true, 'Student restored active: true');
+
+    // 13. Permanent Cleanup with Admission Number Confirmation
     const deleteRes = await fetch(`${API_BASE}/students/${studentId}`, {
       method: 'DELETE',
-      headers: authHeaders
+      headers: authHeaders,
+      body: JSON.stringify({ confirmAdmissionNo: testAdmNo })
     });
     assert(deleteRes.status === 200, `Cleaned up test student ${testAdmNo}`);
 
