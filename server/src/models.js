@@ -21,14 +21,18 @@ classSchema.index({ name: 1, section: 1, academicYear: 1 }, { unique: true });
 const studentSchema = new mongoose.Schema({
   admissionNo: { type: String, required: true, unique: true, trim: true },
   name: { type: String, required: true, trim: true },
+  gender: { type: String, trim: true, default: "" },
+  dob: { type: String, trim: true, default: "" },
   guardianName: { type: String, trim: true, default: "" },
   guardianPhone: { type: String, trim: true, default: "" },
+  address: { type: String, trim: true, default: "" },
+  enrollmentDate: { type: String, trim: true, default: "" },
   classId: { type: mongoose.Schema.Types.ObjectId, ref: "Class", required: true, index: true },
   photoUrl: { type: String, default: "" },
   // Face descriptors are sensitive biometric data: store only with appropriate guardian consent
   faceDescriptor: { type: [Number], select: false, default: undefined },
   consentGiven: { type: Boolean, default: true },
-  active: { type: Boolean, default: true }
+  active: { type: Boolean, default: true, index: true }
 }, { timestamps: true });
 
 const attendanceSchema = new mongoose.Schema({

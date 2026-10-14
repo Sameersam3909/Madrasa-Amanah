@@ -152,43 +152,100 @@ app.get("/api/students/face-index", async (req, res) => {
 });
 
 app.get("/api/students", async (req, res) => {
-  const filter = { active: true };
-  if (req.query.classId) {
+  const filter = {};
+  const status = String(req.query.status || "").toLowerCase();
+  if (status === "archived" || status === "inactive" || req.query.archived === "true") {
+    filter.active = false;
+  } else if (status === "all") {
+    // include all active and archived
+  } else {
+    filter.active = true;
+  }
+
+  if (req.query.classId && req.query.classId !== "all") {
     if (!(await canAccessClass(req.user, req.query.classId))) return res.status(403).json({ message: "Class access denied." });
     filter.classId = req.query.classId;
   } else if (req.user.role !== "admin") {
     const classes = await Class.find({ $or: [{ teacherIds: req.user._id }, { _id: { $in: req.user.assignedClasses.map(c => c._id || c) } }] }).select("_id");
     filter.classId = { $in: classes.map(c => c._id) };
   }
-  const students = await Student.find(filter).select("-faceDescriptor").populate("classId", "name section academicYear").sort({ name: 1 });
-  res.json(students);
+
+  if (req.query.search && req.query.search.trim()) {
+    const sTerm = req.query.search.trim();
+    filter.$or = [
+      { name: { $regex: sTerm, $options: "i" } },
+      { admissionNo: { $regex: sTerm, $options: "i" } },
+      { guardianName: { $regex: sTerm, $options: "i" } },
+      { guardianPhone: { $regex: sTerm, $options: "i" } }
+    ];
+  }
+
+  const students = await Student.find(filter)
+    .select("-faceDescriptor")
+    .populate("classId", "name section academicYear")
+    .sort({ name: 1 });
+
+  res.json(students.map(s => {
+    const obj = s.toObject();
+    obj.id = String(obj._id);
+    obj.fullName = obj.name;
+    obj.admissionNumber = obj.admissionNo;
+    obj.referencePhotoUrl = obj.photoUrl;
+    return obj;
+  }));
 });
 
 app.post("/api/students", async (req, res) => {
-  const admissionNo = req.body.admissionNo || req.body.admissionNumber;
-  const name = req.body.name || req.body.fullName;
+  const admissionNo = (req.body.admissionNo || req.body.admissionNumber || "").trim();
+  const name = (req.body.name || req.body.fullName || "").trim();
   const classId = req.body.classId;
-  const gender = req.body.gender;
-  if (!admissionNo?.trim() || !name?.trim() || !classId) {
-    return res.status(400).json({ message: "Admission number, name and class are required." });
+  if (!admissionNo || !name || !classId) {
+    return res.status(400).json({ message: "Admission number, student name and class assignment are required." });
   }
-  if (!(await canAccessClass(req.user, classId))) return res.status(403).json({ message: "Class access denied." });
+
+  const targetClass = await Class.findById(classId);
+  if (!targetClass) return res.status(400).json({ message: "The selected class does not exist." });
+
+  if (!(await canAccessClass(req.user, classId))) {
+    return res.status(403).json({ message: "You are not authorized to enrol students in this class." });
+  }
+
+  const existing = await Student.findOne({ admissionNo: { $regex: new RegExp(`^${admissionNo}$`, "i") } });
+  if (existing) {
+    return res.status(400).json({ message: `Admission number "${admissionNo}" is already assigned to ${existing.name}.` });
+  }
+
   try {
-    let photoUrl = String(req.body.photoUrl || "");
+    let photoUrl = String(req.body.photoUrl || req.body.referencePhotoUrl || "");
     if (req.body.photoDataUrl) photoUrl = await uploadImageDataUrl(req.body.photoDataUrl);
+
     const student = await Student.create({
-      admissionNo: admissionNo.trim(),
-      name: name.trim(),
+      admissionNo,
+      name,
+      gender: (req.body.gender || "").trim(),
+      dob: (req.body.dob || req.body.dateOfBirth || "").trim(),
+      guardianName: (req.body.guardianName || "").trim(),
+      guardianPhone: (req.body.guardianPhone || "").trim(),
+      address: (req.body.address || "").trim(),
+      enrollmentDate: (req.body.enrollmentDate || new Date().toISOString().slice(0, 10)).trim(),
       classId,
-      guardianName: req.body.guardianName || "",
-      guardianPhone: req.body.guardianPhone || "",
       photoUrl,
       consentGiven: req.body.consentGiven !== false,
+      active: req.body.active !== false,
       faceDescriptor: Array.isArray(req.body.faceDescriptor) ? req.body.faceDescriptor : undefined
     });
-    await AuditLog.create({ actorId: req.user._id, action: "student.create", entityType: "Student", entityId: String(student._id) });
-    const populated = await Student.findById(student._id).select("-faceDescriptor").populate("classId", "name section");
+
+    await AuditLog.create({
+      actorId: req.user._id,
+      action: "student.create",
+      entityType: "Student",
+      entityId: String(student._id),
+      details: { admissionNo: student.admissionNo, name: student.name, classId: String(classId) }
+    });
+
+    const populated = await Student.findById(student._id).select("-faceDescriptor").populate("classId", "name section academicYear");
     const obj = populated.toObject();
+    obj.id = String(obj._id);
     obj.fullName = obj.name;
     obj.admissionNumber = obj.admissionNo;
     obj.referencePhotoUrl = obj.photoUrl;
@@ -198,16 +255,53 @@ app.post("/api/students", async (req, res) => {
   }
 });
 
-app.patch("/api/students/:id", async (req, res) => {
+async function handleStudentUpdate(req, res) {
   try {
     const student = await Student.findById(req.params.id);
     if (!student) return res.status(404).json({ message: "Student not found." });
     if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
 
-    const fields = ["name", "guardianName", "guardianPhone", "photoUrl", "active", "consentGiven", "classId"];
-    fields.forEach(k => { if (req.body[k] !== undefined) student[k] = req.body[k]; });
+    const newAdm = (req.body.admissionNo !== undefined ? req.body.admissionNo : req.body.admissionNumber);
+    if (newAdm !== undefined && newAdm.trim() !== student.admissionNo) {
+      if (req.user.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden: Only administrators are authorized to modify admission numbers." });
+      }
+      if (!newAdm.trim()) {
+        return res.status(400).json({ message: "Admission number cannot be blank." });
+      }
+      const duplicate = await Student.findOne({
+        admissionNo: { $regex: new RegExp(`^${newAdm.trim()}$`, "i") },
+        _id: { $ne: student._id }
+      });
+      if (duplicate) {
+        return res.status(400).json({ message: `Admission number "${newAdm.trim()}" is already assigned to ${duplicate.name}.` });
+      }
+      student.admissionNo = newAdm.trim();
+    }
+
+    if (req.body.classId !== undefined && String(req.body.classId) !== String(student.classId)) {
+      const targetClass = await Class.findById(req.body.classId);
+      if (!targetClass) return res.status(400).json({ message: "Target class not found." });
+      if (!(await canAccessClass(req.user, req.body.classId))) {
+        return res.status(403).json({ message: "You do not have permission to transfer a student to this class." });
+      }
+      student.classId = req.body.classId;
+    }
+
+    if (req.body.name !== undefined) student.name = req.body.name.trim();
+    if (req.body.fullName !== undefined) student.name = req.body.fullName.trim();
+    if (req.body.guardianName !== undefined) student.guardianName = req.body.guardianName.trim();
+    if (req.body.guardianPhone !== undefined) student.guardianPhone = req.body.guardianPhone.trim();
+    if (req.body.gender !== undefined) student.gender = req.body.gender.trim();
+    if (req.body.dob !== undefined) student.dob = req.body.dob.trim();
+    if (req.body.dateOfBirth !== undefined) student.dob = req.body.dateOfBirth.trim();
+    if (req.body.address !== undefined) student.address = req.body.address.trim();
+    if (req.body.enrollmentDate !== undefined) student.enrollmentDate = req.body.enrollmentDate.trim();
+    if (req.body.active !== undefined) student.active = Boolean(req.body.active);
+    if (req.body.consentGiven !== undefined) student.consentGiven = Boolean(req.body.consentGiven);
+
     if (req.body.referencePhotoUrl !== undefined) student.photoUrl = req.body.referencePhotoUrl;
-    if (req.body.fullName !== undefined) student.name = req.body.fullName;
+    if (req.body.photoUrl !== undefined) student.photoUrl = req.body.photoUrl;
 
     if (req.body.photoDataUrl) {
       student.photoUrl = await uploadImageDataUrl(req.body.photoDataUrl);
@@ -215,41 +309,17 @@ app.patch("/api/students/:id", async (req, res) => {
     if (Array.isArray(req.body.faceDescriptor)) {
       student.faceDescriptor = req.body.faceDescriptor;
     }
-    await student.save();
-    await AuditLog.create({ actorId: req.user._id, action: "student.update", entityType: "Student", entityId: String(student._id) });
-    const populated = await Student.findById(student._id).select("-faceDescriptor").populate("classId", "name section");
-    const obj = populated.toObject();
-    obj.id = String(obj._id);
-    obj.fullName = obj.name;
-    obj.admissionNumber = obj.admissionNo;
-    obj.referencePhotoUrl = obj.photoUrl;
-    res.json(obj);
-  } catch (err) {
-    console.error("Student PATCH error:", err);
-    res.status(400).json({ message: err.message || "Failed to update student profile." });
-  }
-});
 
-// Also support PUT as an alias for PATCH (some clients send PUT)
-app.put("/api/students/:id", async (req, res) => {
-  try {
-    const student = await Student.findById(req.params.id);
-    if (!student) return res.status(404).json({ message: "Student not found." });
-    if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
-    const fields = ["name", "guardianName", "guardianPhone", "photoUrl", "active", "consentGiven", "classId"];
-    fields.forEach(k => { if (req.body[k] !== undefined) student[k] = req.body[k]; });
-    // Accept referencePhotoUrl alias for photoUrl
-    if (req.body.referencePhotoUrl !== undefined) student.photoUrl = req.body.referencePhotoUrl;
-    if (req.body.fullName !== undefined) student.name = req.body.fullName;
-    if (req.body.photoDataUrl) {
-      student.photoUrl = await uploadImageDataUrl(req.body.photoDataUrl);
-    }
-    if (Array.isArray(req.body.faceDescriptor)) {
-      student.faceDescriptor = req.body.faceDescriptor;
-    }
     await student.save();
-    await AuditLog.create({ actorId: req.user._id, action: "student.update", entityType: "Student", entityId: String(student._id) });
-    const populated = await Student.findById(student._id).select("-faceDescriptor").populate("classId", "name section");
+    await AuditLog.create({
+      actorId: req.user._id,
+      action: "student.update",
+      entityType: "Student",
+      entityId: String(student._id),
+      details: { admissionNo: student.admissionNo, name: student.name, classId: String(student.classId), active: student.active }
+    });
+
+    const populated = await Student.findById(student._id).select("-faceDescriptor").populate("classId", "name section academicYear");
     const obj = populated.toObject();
     obj.id = String(obj._id);
     obj.fullName = obj.name;
@@ -257,25 +327,39 @@ app.put("/api/students/:id", async (req, res) => {
     obj.referencePhotoUrl = obj.photoUrl;
     res.json(obj);
   } catch (err) {
-    console.error("Student PUT error:", err);
+    console.error("Student update error:", err);
     res.status(400).json({ message: err.message || "Failed to update student profile." });
   }
-});
+}
+
+app.patch("/api/students/:id", handleStudentUpdate);
+app.put("/api/students/:id", handleStudentUpdate);
 
 // --- STUDENT ROSTER EXPORT (CSV / XLSX) ---
 app.get("/api/students/export", async (req, res) => {
   const classId = req.query.classId;
   const format = req.query.format || "csv";
-  const filter = { active: true };
-  let className = "All-Classes";
+  const filter = {};
+  const status = String(req.query.status || "").toLowerCase();
+  if (status === "archived" || status === "inactive") {
+    filter.active = false;
+  } else if (status === "all") {
+    // all
+  } else {
+    filter.active = true;
+  }
 
-  if (classId) {
+  let className = "All-Classes";
+  if (classId && classId !== "all") {
     if (!(await canAccessClass(req.user, classId))) {
       return res.status(403).json({ message: "Class access denied." });
     }
     filter.classId = classId;
     const cls = await Class.findById(classId);
     if (cls) className = `${cls.name}${cls.section ? `-${cls.section}` : ""}`;
+  } else if (req.user.role !== "admin") {
+    const classes = await Class.find({ $or: [{ teacherIds: req.user._id }, { _id: { $in: req.user.assignedClasses.map(c => c._id || c) } }] }).select("_id");
+    filter.classId = { $in: classes.map(c => c._id) };
   }
 
   const cleanClassName = className.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
@@ -289,16 +373,33 @@ app.get("/api/students/export", async (req, res) => {
   const rows = students.map(s => ({
     "Admission No": s.admissionNo,
     "Student Name": s.name,
+    "Gender": s.gender || "",
+    "Date of Birth": s.dob || "",
     "Class": s.classId ? `${s.classId.name}${s.classId.section ? ` (${s.classId.section})` : ""}` : "",
     "Academic Year": s.classId?.academicYear || "",
     "Guardian Name": s.guardianName || "",
     "Guardian Phone": s.guardianPhone || "",
+    "Address": s.address || "",
+    "Enrollment Date": s.enrollmentDate || "",
     "Photo Consent Recorded": s.consentGiven ? "Yes" : "No",
-    "Status": s.active ? "Active" : "Inactive"
+    "Status": s.active ? "Active" : "Archived"
   }));
 
   if (format === "csv") {
-    const headers = ["Admission No", "Student Name", "Class", "Academic Year", "Guardian Name", "Guardian Phone", "Photo Consent Recorded", "Status"];
+    const headers = [
+      "Admission No",
+      "Student Name",
+      "Gender",
+      "Date of Birth",
+      "Class",
+      "Academic Year",
+      "Guardian Name",
+      "Guardian Phone",
+      "Address",
+      "Enrollment Date",
+      "Photo Consent Recorded",
+      "Status"
+    ];
     const quote = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = "\uFEFF" + [headers, ...rows.map(r => headers.map(h => r[h]))].map(r => r.map(quote).join(",")).join("\r\n");
 
@@ -312,11 +413,15 @@ app.get("/api/students/export", async (req, res) => {
   ws.columns = [
     { header: "Admission No", key: "Admission No", width: 16 },
     { header: "Student Name", key: "Student Name", width: 28 },
+    { header: "Gender", key: "Gender", width: 12 },
+    { header: "Date of Birth", key: "Date of Birth", width: 14 },
     { header: "Class", key: "Class", width: 22 },
     { header: "Academic Year", key: "Academic Year", width: 18 },
     { header: "Guardian Name", key: "Guardian Name", width: 24 },
     { header: "Guardian Phone", key: "Guardian Phone", width: 18 },
-    { header: "Photo Consent Recorded", key: "Photo Consent Recorded", width: 24 },
+    { header: "Address", key: "Address", width: 28 },
+    { header: "Enrollment Date", key: "Enrollment Date", width: 16 },
+    { header: "Photo Consent Recorded", key: "Photo Consent Recorded", width: 22 },
     { header: "Status", key: "Status", width: 12 }
   ];
   ws.addRows(rows);
@@ -332,14 +437,67 @@ app.get("/api/students/export", async (req, res) => {
 
 // Get single student by ID
 app.get("/api/students/:id", async (req, res) => {
-  const student = await Student.findById(req.params.id).select("-faceDescriptor").populate("classId", "name section");
+  const student = await Student.findById(req.params.id).select("-faceDescriptor").populate("classId", "name section academicYear");
   if (!student) return res.status(404).json({ message: "Student not found." });
   if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
   const obj = student.toObject();
+  obj.id = String(obj._id);
   obj.fullName = obj.name;
   obj.admissionNumber = obj.admissionNo;
   obj.referencePhotoUrl = obj.photoUrl;
   res.json(obj);
+});
+
+// Student Attendance History API
+app.get("/api/students/:id/attendance", async (req, res) => {
+  const student = await Student.findById(req.params.id).select("-faceDescriptor").populate("classId", "name section academicYear");
+  if (!student) return res.status(404).json({ message: "Student not found." });
+  if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
+
+  const filter = { studentId: student._id };
+  const from = req.query.startDate || req.query.from;
+  const to = req.query.endDate || req.query.to;
+  if (from && to) {
+    filter.dateKey = { $gte: from, $lte: to };
+  } else if (from) {
+    filter.dateKey = { $gte: from };
+  } else if (to) {
+    filter.dateKey = { $lte: to };
+  }
+
+  const limit = Math.min(parseInt(req.query.limit) || 120, 365);
+  const records = await Attendance.find(filter)
+    .populate("classId", "name section academicYear")
+    .populate("markedBy", "name email")
+    .populate("updatedBy", "name email")
+    .sort({ dateKey: -1, createdAt: -1 })
+    .limit(limit);
+
+  const stats = {
+    totalSessions: records.length,
+    present: records.filter(r => r.status === "present").length,
+    absent: records.filter(r => r.status === "absent").length,
+    late: records.filter(r => r.status === "late").length,
+    excused: records.filter(r => r.status === "excused").length
+  };
+  // Consistent formula: Present / Total * 100
+  stats.rate = stats.totalSessions > 0 ? Math.round((stats.present / stats.totalSessions) * 100) : 0;
+
+  res.json({
+    student: {
+      id: String(student._id),
+      _id: student._id,
+      name: student.name,
+      fullName: student.name,
+      admissionNo: student.admissionNo,
+      admissionNumber: student.admissionNo,
+      active: student.active,
+      photoUrl: student.photoUrl,
+      classId: student.classId
+    },
+    stats,
+    records
+  });
 });
 
 // Student Archival (Soft Delete) — Admin Only
@@ -413,8 +571,269 @@ app.get("/api/attendance", async (req, res) => {
   const sessionKey = req.query.sessionKey || req.query.session || "morning";
   if (!classId || !dateKey) return res.status(400).json({ message: "classId and dateKey are required." });
   if (!(await canAccessClass(req.user, classId))) return res.status(403).json({ message: "Class access denied." });
-  const records = await Attendance.find({ classId, dateKey, sessionKey }).populate("studentId", "name admissionNo photoUrl").sort({ studentId: 1 });
+  const records = await Attendance.find({ classId, dateKey, sessionKey })
+    .populate("studentId", "name admissionNo photoUrl")
+    .populate("markedBy", "name email")
+    .populate("updatedBy", "name email")
+    .sort({ studentId: 1 });
   res.json(records);
+});
+
+// Dedicated Attendance Monitoring API
+app.get("/api/attendance/monitoring", async (req, res) => {
+  const classId = req.query.classId || "all";
+  const dateKey = req.query.dateKey || req.query.date;
+  const startDate = req.query.startDate || req.query.from;
+  const endDate = req.query.endDate || req.query.to;
+  const sessionKey = req.query.sessionKey || req.query.session || "morning";
+  const statusFilter = String(req.query.status || "all").toLowerCase().trim();
+  const search = String(req.query.search || "").trim();
+
+  // Role-based class authorization
+  let targetClassIds = null;
+  if (classId !== "all") {
+    if (!(await canAccessClass(req.user, classId))) {
+      return res.status(403).json({ message: "Class access denied." });
+    }
+    targetClassIds = [new mongoose.Types.ObjectId(classId)];
+  } else if (req.user.role !== "admin") {
+    const userClasses = await Class.find({
+      $or: [{ teacherIds: req.user._id }, { _id: { $in: req.user.assignedClasses.map(c => c._id || c) } }]
+    }).select("_id");
+    targetClassIds = userClasses.map(c => c._id);
+    if (!targetClassIds.length) {
+      return res.json({
+        mode: "single",
+        dateKey: dateKey || new Date().toISOString().slice(0, 10),
+        sessionKey,
+        summary: { totalEligible: 0, present: 0, absent: 0, late: 0, excused: 0, notMarked: 0, attendanceRate: 0, formula: "Present / Eligible * 100" },
+        records: []
+      });
+    }
+  }
+
+  // Active students query (archived students NEVER eligible)
+  const studentFilter = { active: true };
+  if (targetClassIds) {
+    studentFilter.classId = { $in: targetClassIds };
+  }
+  if (search) {
+    studentFilter.$or = [
+      { name: { $regex: search, $options: "i" } },
+      { admissionNo: { $regex: search, $options: "i" } }
+    ];
+  }
+
+  const eligibleStudents = await Student.find(studentFilter)
+    .populate("classId", "name section academicYear")
+    .sort({ name: 1 });
+
+  // Mode: Date Range Monitoring
+  if (startDate && endDate) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: "Invalid startDate or endDate format (expected YYYY-MM-DD)." });
+    }
+    if (startDate > endDate) {
+      return res.status(400).json({ message: "startDate must be before or equal to endDate." });
+    }
+
+    const attFilter = { dateKey: { $gte: startDate, $lte: endDate } };
+    if (targetClassIds) attFilter.classId = { $in: targetClassIds };
+    if (sessionKey !== "all") attFilter.sessionKey = sessionKey;
+
+    const rangeRecords = await Attendance.find(attFilter)
+      .populate("studentId", "name admissionNo photoUrl active classId")
+      .populate("classId", "name section academicYear")
+      .populate("markedBy", "name email")
+      .populate("updatedBy", "name email")
+      .sort({ dateKey: -1, sessionKey: 1 });
+
+    // Generate date sequence in range
+    const startObj = new Date(startDate);
+    const endObj = new Date(endDate);
+    const dateList = [];
+    const cur = new Date(startObj);
+    while (cur <= endObj && dateList.length <= 90) {
+      dateList.push(cur.toISOString().slice(0, 10));
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    // Daily totals
+    const dailyTotals = dateList.map((d) => {
+      const dayRecs = rangeRecords.filter((r) => r.dateKey === d);
+      const pres = dayRecs.filter((r) => r.status === "present").length;
+      const abs = dayRecs.filter((r) => r.status === "absent").length;
+      const late = dayRecs.filter((r) => r.status === "late").length;
+      const exc = dayRecs.filter((r) => r.status === "excused").length;
+      const eligible = eligibleStudents.length;
+      const markedCount = pres + abs + late + exc;
+      const notMarked = Math.max(0, eligible - markedCount);
+      const rate = eligible > 0 ? Math.round((pres / eligible) * 100) : 0;
+      return {
+        dateKey: d,
+        totalEligible: eligible,
+        present: pres,
+        absent: abs,
+        late: late,
+        excused: exc,
+        notMarked,
+        attendanceRate: rate
+      };
+    });
+
+    // Student breakdown
+    const studentMap = new Map();
+    eligibleStudents.forEach((s) => {
+      studentMap.set(String(s._id), {
+        studentId: String(s._id),
+        name: s.name,
+        admissionNo: s.admissionNo,
+        photoUrl: s.photoUrl,
+        class: s.classId ? { id: s.classId._id, name: s.classId.name, section: s.classId.section } : null,
+        present: 0,
+        absent: 0,
+        late: 0,
+        excused: 0,
+        notMarked: 0,
+        totalSessions: dateList.length,
+        attendanceRate: 0,
+        records: []
+      });
+    });
+
+    rangeRecords.forEach((r) => {
+      const sId = String(r.studentId?._id || r.studentId);
+      const item = studentMap.get(sId);
+      if (item) {
+        if (item[r.status] !== undefined) item[r.status]++;
+        item.records.push({
+          dateKey: r.dateKey,
+          sessionKey: r.sessionKey,
+          status: r.status,
+          updatedAt: r.updatedAt || r.createdAt,
+          updatedBy: r.updatedBy ? { name: r.updatedBy.name, email: r.updatedBy.email } : (r.markedBy ? { name: r.markedBy.name, email: r.markedBy.email } : null),
+          note: r.note || ""
+        });
+      }
+    });
+
+    studentMap.forEach((item) => {
+      const marked = item.present + item.absent + item.late + item.excused;
+      item.notMarked = Math.max(0, item.totalSessions - marked);
+      item.attendanceRate = item.totalSessions > 0 ? Math.round((item.present / item.totalSessions) * 100) : 0;
+    });
+
+    const totalPresent = rangeRecords.filter((r) => r.status === "present").length;
+    const totalAbsent = rangeRecords.filter((r) => r.status === "absent").length;
+    const totalLate = rangeRecords.filter((r) => r.status === "late").length;
+    const totalExcused = rangeRecords.filter((r) => r.status === "excused").length;
+    const totalPossibleSessions = eligibleStudents.length * dateList.length;
+    const totalNotMarked = Math.max(0, totalPossibleSessions - (totalPresent + totalAbsent + totalLate + totalExcused));
+    const overallRate = totalPossibleSessions > 0 ? Math.round((totalPresent / totalPossibleSessions) * 100) : 0;
+
+    return res.json({
+      mode: "range",
+      startDate,
+      endDate,
+      classId,
+      sessionKey,
+      summary: {
+        totalEligible: eligibleStudents.length,
+        totalDays: dateList.length,
+        totalSessions: totalPossibleSessions,
+        present: totalPresent,
+        absent: totalAbsent,
+        late: totalLate,
+        excused: totalExcused,
+        notMarked: totalNotMarked,
+        attendanceRate: overallRate,
+        formula: "Present / (Eligible * Days) * 100"
+      },
+      dailyTotals,
+      studentBreakdown: Array.from(studentMap.values()),
+      records: rangeRecords.map((r) => ({
+        id: String(r._id),
+        studentId: String(r.studentId?._id || r.studentId),
+        name: r.studentId?.name || "Student",
+        admissionNo: r.studentId?.admissionNo || "",
+        class: r.classId ? { id: r.classId._id, name: r.classId.name, section: r.classId.section } : null,
+        date: r.dateKey,
+        session: r.sessionKey,
+        status: r.status,
+        lastUpdated: r.updatedAt || r.createdAt,
+        updatedBy: r.updatedBy ? { name: r.updatedBy.name, email: r.updatedBy.email } : (r.markedBy ? { name: r.markedBy.name, email: r.markedBy.email } : null),
+        note: r.note || ""
+      }))
+    });
+  }
+
+  // Mode: Single Date Monitoring
+  const targetDate = dateKey || new Date().toISOString().slice(0, 10);
+  const attFilter = { dateKey: targetDate };
+  if (targetClassIds) attFilter.classId = { $in: targetClassIds };
+  if (sessionKey !== "all") attFilter.sessionKey = sessionKey;
+
+  const records = await Attendance.find(attFilter)
+    .populate("studentId", "name admissionNo photoUrl active classId")
+    .populate("classId", "name section academicYear")
+    .populate("markedBy", "name email")
+    .populate("updatedBy", "name email");
+
+  const attMap = new Map();
+  records.forEach((r) => {
+    const sId = String(r.studentId?._id || r.studentId);
+    attMap.set(sId, r);
+  });
+
+  let rows = eligibleStudents.map((s) => {
+    const sid = String(s._id);
+    const att = attMap.get(sid);
+    const status = att ? att.status : "unmarked";
+    return {
+      studentId: sid,
+      name: s.name,
+      admissionNo: s.admissionNo,
+      photoUrl: s.photoUrl,
+      class: s.classId ? { id: s.classId._id, name: s.classId.name, section: s.classId.section } : null,
+      date: targetDate,
+      session: att?.sessionKey || (sessionKey !== "all" ? sessionKey : "morning"),
+      status,
+      lastUpdated: att?.updatedAt || att?.createdAt || null,
+      updatedBy: att?.updatedBy ? { name: att.updatedBy.name, email: att.updatedBy.email } : (att?.markedBy ? { name: att.markedBy.name, email: att.markedBy.email } : null),
+      note: att?.note || ""
+    };
+  });
+
+  const totalEligible = eligibleStudents.length;
+  const presentCount = rows.filter((r) => r.status === "present").length;
+  const absentCount = rows.filter((r) => r.status === "absent").length;
+  const lateCount = rows.filter((r) => r.status === "late").length;
+  const excusedCount = rows.filter((r) => r.status === "excused").length;
+  const notMarkedCount = rows.filter((r) => r.status === "unmarked").length;
+  const attendanceRate = totalEligible > 0 ? Math.round((presentCount / totalEligible) * 100) : 0;
+
+  // Filter rows by status if requested
+  if (statusFilter && statusFilter !== "all") {
+    rows = rows.filter((r) => r.status.toLowerCase() === statusFilter);
+  }
+
+  res.json({
+    mode: "single",
+    dateKey: targetDate,
+    sessionKey,
+    classId,
+    summary: {
+      totalEligible,
+      present: presentCount,
+      absent: absentCount,
+      late: lateCount,
+      excused: excusedCount,
+      notMarked: notMarkedCount,
+      attendanceRate,
+      formula: "Present / Eligible * 100"
+    },
+    records: rows
+  });
 });
 
 // Direct Online Save
@@ -435,7 +854,18 @@ app.post("/api/attendance/bulk", async (req, res) => {
   const ops = [];
   const statusCounts = { present: 0, absent: 0, late: 0, excused: 0 };
 
+  // Deduplicate incoming records by studentId to prevent duplicate operations or double-counting
+  const seenStudentIds = new Set();
+  const dedupedRecords = [];
   for (const r of records) {
+    const sId = String(r.studentId);
+    if (!seenStudentIds.has(sId)) {
+      seenStudentIds.add(sId);
+      dedupedRecords.push(r);
+    }
+  }
+
+  for (const r of dedupedRecords) {
     if (!allowed.has(String(r.studentId))) continue;
     if (!["present", "absent", "late", "excused"].includes(r.status)) continue;
     statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
@@ -550,7 +980,17 @@ app.post("/api/sync/attendance", async (req, res) => {
     const ops = [];
     const statusCounts = { present: 0, absent: 0, late: 0, excused: 0 };
 
+    const seenStudentIds = new Set();
+    const dedupedRecords = [];
     for (const r of records) {
+      const sId = String(r.studentId);
+      if (!seenStudentIds.has(sId)) {
+        seenStudentIds.add(sId);
+        dedupedRecords.push(r);
+      }
+    }
+
+    for (const r of dedupedRecords) {
       if (!allowed.has(String(r.studentId))) continue;
       if (!["present", "absent", "late", "excused"].includes(r.status)) continue;
       statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;

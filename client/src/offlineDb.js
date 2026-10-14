@@ -34,10 +34,35 @@ export async function cacheStudents(students, classId) {
     classId: String(s.classId?._id || s.classId || classId),
     name: s.name,
     admissionNo: s.admissionNo,
-    photoUrl: s.photoUrl || "",
+    gender: s.gender || "",
+    dob: s.dob || "",
+    guardianName: s.guardianName || "",
+    guardianPhone: s.guardianPhone || "",
+    address: s.address || "",
+    enrollmentDate: s.enrollmentDate || "",
+    photoUrl: s.photoUrl || s.referencePhotoUrl || "",
     consentGiven: s.consentGiven !== false,
+    active: s.active !== false,
     updatedAt: s.updatedAt || new Date().toISOString()
   })));
+}
+
+export async function removeStudentFromCache(studentId) {
+  if (!studentId) return;
+  await offlineDb.students.delete(String(studentId));
+}
+
+export async function updateStudentInCache(student) {
+  if (!student) return;
+  const id = String(student._id || student.id);
+  const existing = await offlineDb.students.get(id);
+  await offlineDb.students.put({
+    ...(existing || {}),
+    ...student,
+    id,
+    classId: String(student.classId?._id || student.classId || existing?.classId || ""),
+    updatedAt: new Date().toISOString()
+  });
 }
 
 // Deduplicated offline attendance save: updates existing draft/mutation instead of creating duplicate outbox rows

@@ -1180,3 +1180,514 @@ th {
   font-weight: 700;
   text-transform: uppercase;
 }
+
+/* STUDENT MANAGEMENT UI */
+.student-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.student-status-tabs {
+  display: inline-flex;
+  background: var(--canvas);
+  padding: 3px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  gap: 2px;
+}
+
+.student-status-tab-btn {
+  border: none;
+  background: transparent;
+  padding: 6px 12px;
+  border-radius: calc(var(--radius-md) - 3px);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.student-status-tab-btn.active {
+  background: var(--surface);
+  color: var(--primary);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.student-filter-select {
+  min-height: 38px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  width: auto;
+  max-width: 220px;
+}
+
+.student-action-menu-trigger {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.student-action-menu-trigger:hover {
+  background: var(--primary-subtle);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.student-action-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  z-index: 50;
+  min-width: 190px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+[dir="rtl"] .student-action-dropdown {
+  right: auto;
+  left: 0;
+}
+
+.student-action-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  min-height: 36px;
+  transition: background 0.12s ease;
+}
+
+[dir="rtl"] .student-action-item {
+  text-align: right;
+}
+
+.student-action-item:hover {
+  background: var(--canvas);
+}
+
+.student-action-item.danger {
+  color: var(--danger);
+}
+
+.student-action-item.danger:hover {
+  background: var(--danger-bg);
+}
+
+.student-action-item.success {
+  color: var(--success);
+}
+
+.student-action-item.success:hover {
+  background: var(--success-bg);
+}
+
+/* CONFIRMATION DIALOG */
+.confirm-dialog-content {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 440px;
+  padding: 24px 20px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.2);
+  margin: auto;
+}
+
+.confirm-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.confirm-dialog-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+/* ATTENDANCE HISTORY STATS */
+.att-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+@media (min-width: 480px) {
+  .att-stats-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.att-stat-box {
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  text-align: center;
+}
+
+.att-stat-box strong {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.att-stat-box span {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+/* --- ATTENDANCE MONITORING & LIVE STATUS --- */
+.monitoring-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+@media (min-width: 640px) {
+  .monitoring-kpi-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .monitoring-kpi-grid {
+    grid-template-columns: repeat(7, 1fr);
+  }
+}
+
+.monitoring-kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  position: relative;
+  overflow: hidden;
+}
+
+.monitoring-kpi-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--border);
+}
+
+.monitoring-kpi-card.kpi-eligible::before { background: var(--primary); }
+.monitoring-kpi-card.kpi-present::before { background: var(--success); }
+.monitoring-kpi-card.kpi-absent::before { background: var(--danger); }
+.monitoring-kpi-card.kpi-late::before { background: #D69E2E; }
+.monitoring-kpi-card.kpi-excused::before { background: var(--info); }
+.monitoring-kpi-card.kpi-unmarked::before { background: #A0AEC0; }
+.monitoring-kpi-card.kpi-rate::before { background: linear-gradient(90deg, var(--primary), var(--accent)); }
+
+.monitoring-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.monitoring-kpi-value {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text);
+  margin: 6px 0 2px;
+  letter-spacing: -0.5px;
+}
+
+.monitoring-kpi-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Monitoring Filter Toolbar */
+.monitoring-toolbar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.monitoring-filter-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  .monitoring-filter-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 992px) {
+  .monitoring-filter-row {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.monitoring-status-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.status-pill-btn {
+  border: 1px solid var(--border);
+  background: var(--canvas);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.status-pill-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.status-pill-btn.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.status-pill-btn.active.pill-present { background: var(--success); border-color: var(--success); }
+.status-pill-btn.active.pill-absent { background: var(--danger); border-color: var(--danger); }
+.status-pill-btn.active.pill-late { background: #D69E2E; border-color: #D69E2E; }
+.status-pill-btn.active.pill-excused { background: var(--info); border-color: var(--info); }
+.status-pill-btn.active.pill-unmarked { background: #718096; border-color: #718096; }
+
+/* Accessible Status Badges */
+.accessible-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.accessible-status-badge.status-present {
+  background: #EAF5EE;
+  color: #22543D;
+  border: 1px solid #9AE6B4;
+}
+
+.accessible-status-badge.status-absent {
+  background: #FFF5F5;
+  color: #742A2A;
+  border: 1px solid #FEB2B2;
+}
+
+.accessible-status-badge.status-late {
+  background: #FFFAF0;
+  color: #7B341E;
+  border: 1px solid #FBD38D;
+}
+
+.accessible-status-badge.status-excused {
+  background: #EBF8FF;
+  color: #2A4365;
+  border: 1px solid #90CDF4;
+}
+
+.accessible-status-badge.status-unmarked {
+  background: #F7FAFC;
+  color: #4A5568;
+  border: 1px dashed #CBD5E0;
+}
+
+/* Live Attendance Table */
+.monitoring-table-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.monitoring-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+[dir="rtl"] .monitoring-table {
+  text-align: right;
+}
+
+.monitoring-table th {
+  background: var(--canvas);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.monitoring-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.monitoring-table tbody tr:hover {
+  background: var(--canvas);
+}
+
+.monitoring-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Card view for mobile screens */
+.monitoring-mobile-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.monitoring-record-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}
+
+.monitoring-record-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.monitoring-record-meta {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--canvas);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+
+/* Confirmation state indicator on Student Card */
+.student-card-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  margin-left: 8px;
+}
+
+[dir="rtl"] .student-card-status-indicator {
+  margin-left: 0;
+  margin-right: 8px;
+}
+
+.student-card-status-indicator.confirmed {
+  background: #EAF5EE;
+  color: var(--success);
+  border: 1px solid #9AE6B4;
+}
+
+.student-card-status-indicator.draft {
+  background: #FFFBEA;
+  color: #B78103;
+  border: 1px dashed #F6E05E;
+}
+
+.student-card-status-indicator.unmarked {
+  background: #EDF2F7;
+  color: #718096;
+  border: 1px solid #E2E8F0;
+}
+

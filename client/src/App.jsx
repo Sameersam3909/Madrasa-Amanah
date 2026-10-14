@@ -2,14 +2,21 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertCircle,
+  Archive,
+  ArchiveRestore,
+  ArrowRightLeft,
   Bell,
   BookOpen,
+  Calendar,
   Camera,
   Check,
   CheckCircle2,
   Clock,
   Download,
+  Edit3,
+  Eye,
   FileSpreadsheet,
+  Filter,
   FlipHorizontal,
   GraduationCap,
   HardDrive,
@@ -18,7 +25,9 @@ import {
   Image,
   LayoutDashboard,
   LogOut,
+  MapPin,
   MoreHorizontal,
+  Phone,
   Plus,
   RefreshCw,
   Search,
@@ -26,8 +35,10 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
   User,
   UserCheck,
+  UserX,
   Users,
   Wifi,
   WifiOff,
@@ -46,6 +57,8 @@ import {
   offlineDb,
   cacheClasses,
   cacheStudents,
+  removeStudentFromCache,
+  updateStudentInCache,
   saveAttendanceLocally,
   markOutboxSynced,
   queuePhotoUpdate,
@@ -150,11 +163,51 @@ export default function App() {
 
   // Forms
   const [login, setLogin] = useState({ email: "admin@example.com", password: "Admin12345678!" });
+  // Student Management & Directory State
+  const [studentStatusFilter, setStudentStatusFilter] = useState("active"); // 'active' | 'archived' | 'all'
+  const [studentClassFilter, setStudentClassFilter] = useState("all");
+  const [directoryStudents, setDirectoryStudents] = useState([]);
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [activeMenuStudentId, setActiveMenuStudentId] = useState(null);
+
+  // Modals for Student Management
+  const [viewingStudentProfile, setViewingStudentProfile] = useState(null);
+  const [editingStudent, setEditingStudent] = useState(null);
+  const [transferringStudent, setTransferringStudent] = useState(null);
+  const [transferTargetClassId, setTransferTargetClassId] = useState("");
+  const [attendanceHistoryStudent, setAttendanceHistoryStudent] = useState(null);
+  const [studentAttendanceData, setStudentAttendanceData] = useState(null);
+  const [studentAttendanceLoading, setStudentAttendanceLoading] = useState(false);
+  const [studentConfirmAction, setStudentConfirmAction] = useState(null);
+
+  // Attendance Monitoring State
+  const [monitoringMode, setMonitoringMode] = useState("single"); // 'single' | 'range'
+  const [monitoringClass, setMonitoringClass] = useState("all");
+  const [monitoringDate, setMonitoringDate] = useState(today());
+  const [monitoringStartDate, setMonitoringStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().slice(0, 10);
+  });
+  const [monitoringEndDate, setMonitoringEndDate] = useState(today());
+  const [monitoringSession, setMonitoringSession] = useState("morning");
+  const [monitoringStatus, setMonitoringStatus] = useState("all");
+  const [monitoringSearch, setMonitoringSearch] = useState("");
+  const [monitoringData, setMonitoringData] = useState(null);
+  const [monitoringLoading, setMonitoringLoading] = useState(false);
+  const [monitoringError, setMonitoringError] = useState("");
+  const [confirmedRecords, setConfirmedRecords] = useState({});
+  const [studentHistoryRange, setStudentHistoryRange] = useState({ from: "", to: "" });
+
   const [studentForm, setStudentForm] = useState({
     admissionNo: "",
     name: "",
+    gender: "",
+    dob: "",
     guardianName: "",
     guardianPhone: "",
+    address: "",
+    enrollmentDate: today(),
     consentGiven: true
   });
   const [classPhoto, setClassPhoto] = useState(null);
@@ -184,6 +237,326 @@ export default function App() {
       ),
     [students, search]
   );
+
+  const filteredDirectoryStudents = useMemo(() => {
+    return directoryStudents.filter((s) => {
+      if (studentStatusFilter === "active" && s.active === false) return false;
+      if (studentStatusFilter === "archived" && s.active !== false) return false;
+      if (studentClassFilter !== "all") {
+        const sClassId = String(s.classId?._id || s.classId?.id || s.classId || "");
+        if (sClassId !== String(studentClassFilter)) return false;
+      }
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const match =
+          (s.name || "").toLowerCase().includes(q) ||
+          (s.admissionNo || "").toLowerCase().includes(q) ||
+          (s.guardianName || "").toLowerCase().includes(q) ||
+          (s.guardianPhone || "").toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [directoryStudents, studentStatusFilter, studentClassFilter, search]);
+
+  // Fetch directory students
+  const fetchDirectoryStudents = async (status = studentStatusFilter, classId = studentClassFilter) => {
+    if (!token) return;
+    setDirectoryLoading(true);
+    try {
+      const params = {};
+      if (status) params.status = status;
+      if (classId && classId !== "all") params.classId = classId;
+      const res = await api.get("/students", { params });
+      setDirectoryStudents(res.data);
+      if (res.data.length > 0) {
+        await cacheStudents(res.data, classId !== "all" ? classId : "");
+      }
+    } catch {
+      try {
+        let cached = await offlineDb.students.toArray();
+        if (status === "active") cached = cached.filter((s) => s.active !== false);
+        if (status === "archived") cached = cached.filter((s) => s.active === false);
+        if (classId && classId !== "all") cached = cached.filter((s) => String(s.classId) === String(classId));
+        setDirectoryStudents(cached);
+      } catch (e) {
+        console.error("Failed to load cached students", e);
+      }
+    } finally {
+      setDirectoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!token || !user) return;
+    if (tab === "students") {
+      fetchDirectoryStudents(studentStatusFilter, studentClassFilter);
+    }
+  }, [token, user, tab, studentStatusFilter, studentClassFilter]);
+
+  async function openStudentProfile(student) {
+    setActiveMenuStudentId(null);
+    try {
+      const res = await api.get(`/students/${student._id || student.id}`);
+      setViewingStudentProfile(res.data);
+    } catch {
+      setViewingStudentProfile(student);
+    }
+  }
+
+  function openEditStudent(student) {
+    setActiveMenuStudentId(null);
+    setEditingStudent({
+      id: student._id || student.id,
+      name: student.name || student.fullName || "",
+      admissionNo: student.admissionNo || student.admissionNumber || "",
+      classId: String(student.classId?._id || student.classId?.id || student.classId || selectedClass || ""),
+      gender: student.gender || "",
+      dob: student.dob || "",
+      guardianName: student.guardianName || "",
+      guardianPhone: student.guardianPhone || "",
+      address: student.address || "",
+      enrollmentDate: student.enrollmentDate || today(),
+      active: student.active !== false,
+      consentGiven: student.consentGiven !== false,
+      saving: false,
+      error: ""
+    });
+  }
+
+  async function handleSaveStudentEdit(e) {
+    e.preventDefault();
+    if (!editingStudent) return;
+    if (!editingStudent.name.trim()) {
+      setEditingStudent((prev) => ({ ...prev, error: "Student name is required." }));
+      return;
+    }
+    if (!editingStudent.admissionNo.trim()) {
+      setEditingStudent((prev) => ({ ...prev, error: "Admission number is required." }));
+      return;
+    }
+    if (!editingStudent.classId) {
+      setEditingStudent((prev) => ({ ...prev, error: "Class assignment is required." }));
+      return;
+    }
+    setEditingStudent((prev) => ({ ...prev, saving: true, error: "" }));
+    try {
+      const payload = {
+        name: editingStudent.name.trim(),
+        fullName: editingStudent.name.trim(),
+        classId: editingStudent.classId,
+        gender: editingStudent.gender,
+        dob: editingStudent.dob,
+        guardianName: editingStudent.guardianName,
+        guardianPhone: editingStudent.guardianPhone,
+        address: editingStudent.address,
+        enrollmentDate: editingStudent.enrollmentDate,
+        active: editingStudent.active,
+        consentGiven: editingStudent.consentGiven
+      };
+      if (user.role === "admin") {
+        payload.admissionNo = editingStudent.admissionNo.trim();
+        payload.admissionNumber = editingStudent.admissionNo.trim();
+      }
+      const res = await api.patch(`/students/${editingStudent.id}`, payload);
+      await updateStudentInCache(res.data);
+      setDirectoryStudents((prev) =>
+        prev.map((s) => (String(s._id || s.id) === String(editingStudent.id) ? res.data : s))
+      );
+      setStudents((prev) =>
+        prev.map((s) => (String(s._id || s.id) === String(editingStudent.id) ? res.data : s))
+      );
+      if (viewingStudentProfile && String(viewingStudentProfile._id || viewingStudentProfile.id) === String(editingStudent.id)) {
+        setViewingStudentProfile(res.data);
+      }
+      setNotice(`Student "${res.data.name}" updated successfully.`);
+      setEditingStudent(null);
+    } catch (err) {
+      setEditingStudent((prev) => ({ ...prev, saving: false, error: errText(err) }));
+    }
+  }
+
+  function openTransferClass(student) {
+    setActiveMenuStudentId(null);
+    setTransferringStudent(student);
+    setTransferTargetClassId(String(student.classId?._id || student.classId?.id || student.classId || ""));
+  }
+
+  async function handleConfirmTransfer() {
+    if (!transferringStudent || !transferTargetClassId) return;
+    setLoading(true);
+    try {
+      const res = await api.patch(`/students/${transferringStudent._id || transferringStudent.id}`, {
+        classId: transferTargetClassId
+      });
+      await updateStudentInCache(res.data);
+      setDirectoryStudents((prev) =>
+        prev.map((s) => (String(s._id || s.id) === String(transferringStudent._id || transferringStudent.id) ? res.data : s))
+      );
+      if (viewingStudentProfile && String(viewingStudentProfile._id || viewingStudentProfile.id) === String(transferringStudent._id || transferringStudent.id)) {
+        setViewingStudentProfile(res.data);
+      }
+      const newCls = classes.find((c) => String(c._id || c.id) === String(transferTargetClassId));
+      setNotice(`Transferred ${res.data.name} to ${newCls?.name || "new class"} successfully.`);
+      setTransferringStudent(null);
+      if (selectedClass) {
+        loadStudentsAndAttendanceOfflineFirst(selectedClass, dateKey, sessionKey);
+      }
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function openAttendanceHistory(student, range = null) {
+    setActiveMenuStudentId(null);
+    setAttendanceHistoryStudent(student);
+    setStudentAttendanceLoading(true);
+    setStudentAttendanceData(null);
+    try {
+      const params = {};
+      const from = range?.from !== undefined ? range.from : studentHistoryRange.from;
+      const to = range?.to !== undefined ? range.to : studentHistoryRange.to;
+      if (from) params.startDate = from;
+      if (to) params.endDate = to;
+      const res = await api.get(`/students/${student._id || student.id}/attendance`, { params });
+      setStudentAttendanceData(res.data);
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setStudentAttendanceLoading(false);
+    }
+  }
+
+  async function fetchMonitoringData() {
+    if (!token) return;
+    setMonitoringLoading(true);
+    setMonitoringError("");
+    try {
+      const params = {
+        classId: monitoringClass,
+        sessionKey: monitoringSession,
+        status: monitoringStatus,
+        search: monitoringSearch
+      };
+      if (monitoringMode === "range") {
+        params.startDate = monitoringStartDate;
+        params.endDate = monitoringEndDate;
+      } else {
+        params.dateKey = monitoringDate;
+      }
+      const res = await api.get("/attendance/monitoring", { params });
+      setMonitoringData(res.data);
+    } catch (err) {
+      setMonitoringError(errText(err));
+    } finally {
+      setMonitoringLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "monitoring" && token) {
+      fetchMonitoringData();
+    }
+  }, [
+    tab,
+    token,
+    monitoringMode,
+    monitoringClass,
+    monitoringDate,
+    monitoringStartDate,
+    monitoringEndDate,
+    monitoringSession,
+    monitoringStatus,
+    monitoringSearch
+  ]);
+
+  function requestStudentAction(actionType, student) {
+    setActiveMenuStudentId(null);
+    setStudentConfirmAction({
+      type: actionType,
+      student,
+      confirmAdmNo: "",
+      loading: false,
+      error: ""
+    });
+  }
+
+  async function executeStudentConfirmAction() {
+    if (!studentConfirmAction) return;
+    const { type, student, confirmAdmNo } = studentConfirmAction;
+    const sId = student._id || student.id;
+
+    if (type === "delete" && confirmAdmNo.trim() !== (student.admissionNo || student.admissionNumber)) {
+      setStudentConfirmAction((prev) => ({
+        ...prev,
+        error: `Please type exact admission number "${student.admissionNo || student.admissionNumber}" to confirm permanent deletion.`
+      }));
+      return;
+    }
+
+    setStudentConfirmAction((prev) => ({ ...prev, loading: true, error: "" }));
+    try {
+      if (type === "activate") {
+        const res = await api.patch(`/students/${sId}`, { active: true });
+        await updateStudentInCache(res.data);
+        setDirectoryStudents((prev) => prev.map((s) => (String(s._id || s.id) === String(sId) ? res.data : s)));
+        setNotice(`Student ${res.data.name} activated successfully.`);
+      } else if (type === "deactivate") {
+        const res = await api.patch(`/students/${sId}`, { active: false });
+        await updateStudentInCache(res.data);
+        setDirectoryStudents((prev) => prev.map((s) => (String(s._id || s.id) === String(sId) ? res.data : s)));
+        setNotice(`Student ${res.data.name} deactivated.`);
+      } else if (type === "archive") {
+        const res = await api.post(`/students/${sId}/archive`, { reason: "Archived by Admin" });
+        await updateStudentInCache({ ...student, active: false });
+        setDirectoryStudents((prev) => prev.map((s) => (String(s._id || s.id) === String(sId) ? { ...s, active: false } : s)));
+        setNotice(res.data.message || `Student ${student.name} archived.`);
+      } else if (type === "restore") {
+        const res = await api.post(`/students/${sId}/restore`);
+        await updateStudentInCache({ ...student, active: true });
+        setDirectoryStudents((prev) => prev.map((s) => (String(s._id || s.id) === String(sId) ? { ...s, active: true } : s)));
+        setNotice(res.data.message || `Student ${student.name} restored.`);
+      } else if (type === "delete") {
+        await api.delete(`/students/${sId}`, { data: { confirmAdmissionNo: confirmAdmNo.trim() } });
+        await removeStudentFromCache(sId);
+        setDirectoryStudents((prev) => prev.filter((s) => String(s._id || s.id) !== String(sId)));
+        setStudents((prev) => prev.filter((s) => String(s._id || s.id) !== String(sId)));
+        if (viewingStudentProfile && String(viewingStudentProfile._id || viewingStudentProfile.id) === String(sId)) {
+          setViewingStudentProfile(null);
+        }
+        setNotice(`Student record permanently removed.`);
+      }
+
+      setStudentConfirmAction(null);
+      if (selectedClass) {
+        loadStudentsAndAttendanceOfflineFirst(selectedClass, dateKey, sessionKey);
+      }
+    } catch (err) {
+      setStudentConfirmAction((prev) => ({ ...prev, loading: false, error: errText(err) }));
+    }
+  }
+
+  async function downloadStudentRoster(format = "csv") {
+    setLoading(true);
+    try {
+      const className = studentClassFilter !== "all"
+        ? (classes.find((c) => String(c._id || c.id) === String(studentClassFilter))?.name || "Class")
+        : "All-Students";
+      const filename = `Madrasa-Amanah-${className}-${studentStatusFilter}-${today()}.${format}`;
+      await triggerFileDownload("/students/export", {
+        classId: studentClassFilter !== "all" ? studentClassFilter : undefined,
+        status: studentStatusFilter,
+        format
+      }, filename);
+      setNotice(`Student roster export (${format.toUpperCase()}) completed.`);
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   // Save notifications
   useEffect(() => {
@@ -295,8 +668,10 @@ export default function App() {
   // Load Students and Attendance for Selected Class
   useEffect(() => {
     if (!token || !user || !selectedClass) return;
-    loadStudentsAndAttendanceOfflineFirst(selectedClass, dateKey, sessionKey);
-  }, [token, user, selectedClass, dateKey, sessionKey]);
+    if (tab === "attendance") {
+      loadStudentsAndAttendanceOfflineFirst(selectedClass, dateKey, sessionKey);
+    }
+  }, [token, user, selectedClass, dateKey, sessionKey, tab]);
 
   async function loadStudentsAndAttendanceOfflineFirst(classId, date, session) {
     try {
@@ -314,12 +689,15 @@ export default function App() {
       const res = await api.get("/attendance", { params: { classId, dateKey: date, sessionKey: session } });
       const next = {};
       const noteMap = {};
+      const confirmed = {};
       res.data.forEach((a) => {
         const sid = String(a.studentId?._id || a.studentId?.id || a.studentId);
         next[sid] = { status: a.status };
+        confirmed[sid] = { status: a.status, updatedAt: a.updatedAt || a.createdAt };
         if (a.note) noteMap[sid] = a.note;
       });
       setRecords(next);
+      setConfirmedRecords(confirmed);
       setNotes(noteMap);
     } catch {
       const drafts = await offlineDb.attendanceDrafts
@@ -334,6 +712,7 @@ export default function App() {
         if (d.note) noteMap[d.studentId] = d.note;
       });
       setRecords(next);
+      setConfirmedRecords({});
       setNotes(noteMap);
     }
   }
@@ -613,8 +992,14 @@ export default function App() {
           setStudents((prev) =>
             prev.map((s) => (String(s._id || s.id) === String(studentId) ? data : s))
           );
+          setDirectoryStudents((prev) =>
+            prev.map((s) => (String(s._id || s.id) === String(studentId) ? { ...s, photoUrl: data.photoUrl, referencePhotoUrl: data.photoUrl } : s))
+          );
+          if (viewingStudentProfile && String(viewingStudentProfile._id || viewingStudentProfile.id) === String(studentId)) {
+            setViewingStudentProfile((prev) => ({ ...prev, photoUrl: data.photoUrl, referencePhotoUrl: data.photoUrl }));
+          }
           setViewingStudent(data);
-          await cacheStudents([data], selectedClass);
+          await updateStudentInCache(data);
           addNotification({
             title: "Reference Photo Updated",
             message: `Photo for ${data.name} (${data.admissionNo}) saved to cloud storage.`,
@@ -774,6 +1159,17 @@ export default function App() {
             await refreshSyncStatus();
           }
 
+          // Mark records as confirmed
+          const nextConfirmed = {};
+          studentRecords.forEach((r) => {
+            nextConfirmed[r.studentId] = { status: r.status, updatedAt: res.data.confirmedAt || new Date().toISOString() };
+          });
+          setConfirmedRecords(nextConfirmed);
+
+          if (monitoringData) {
+            fetchMonitoringData();
+          }
+
           // Show Authoritative MongoDB Atlas Confirmation Modal
           setConfirmationModal({
             state: "synced",
@@ -792,7 +1188,10 @@ export default function App() {
             message: `${activeClass?.name || "Class"} (${sessionKey}) - ${students.length} marked. Confirmed by MongoDB Atlas.`,
             type: "success"
           });
-        } catch {
+        } catch (serverErr) {
+          setError(
+            t.savingFailed || "Failed to save attendance to server. Draft preserved locally."
+          );
           // If server failed during request, show accurate local-only confirmation
           setConfirmationModal({
             state: "pending",
@@ -1227,6 +1626,13 @@ export default function App() {
             style={{ justifyContent: "flex-start" }}
           >
             <Camera size={18} /> {t.attendance}
+          </button>
+          <button
+            className={`btn ${tab === "monitoring" ? "primary" : "secondary"}`}
+            onClick={() => setTab("monitoring")}
+            style={{ justifyContent: "flex-start" }}
+          >
+            <Activity size={18} /> {t.monitoring}
           </button>
           <button
             className={`btn ${tab === "sync" ? "primary" : "secondary"}`}
@@ -1786,20 +2192,39 @@ export default function App() {
               {filteredStudents.map((s) => {
                 const sid = s._id || s.id;
                 const cur = records[sid]?.status;
+                const isConfirmed = confirmedRecords[sid]?.status === cur && cur !== undefined;
                 const displayName = localizeStudentName(s.name, lang);
                 return (
                   <div className="student-attendance-card" key={sid}>
                     <div
                       className="student-card-header"
-                      style={{ cursor: "pointer" }}
+                      style={{ cursor: "pointer", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}
                       onClick={() => setViewingStudent(s)}
                     >
-                      <div className="student-card-avatar">
-                        {s.photoUrl ? <img src={s.photoUrl} alt="" /> : (displayName?.[0] || s.name?.[0])?.toUpperCase()}
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div className="student-card-avatar">
+                          {s.photoUrl ? <img src={s.photoUrl} alt="" /> : (displayName?.[0] || s.name?.[0])?.toUpperCase()}
+                        </div>
+                        <div className="student-card-meta">
+                          <strong>{displayName}</strong>
+                          <span>{s.admissionNo} · {t.studentProfile || "Profile"}</span>
+                        </div>
                       </div>
-                      <div className="student-card-meta">
-                        <strong>{displayName}</strong>
-                        <span>{s.admissionNo} · {t.studentProfile || "Profile"}</span>
+
+                      <div>
+                        {cur ? (
+                          <span
+                            className={`student-card-status-indicator ${isConfirmed ? "confirmed" : "draft"}`}
+                            title={isConfirmed ? t.serverConfirmed : t.localDraft}
+                          >
+                            {isConfirmed ? <Check size={13} /> : <Clock size={13} />}
+                            {cur.toUpperCase()} · {isConfirmed ? (t.confirmed || "Confirmed") : (t.localDraft || "Draft")}
+                          </span>
+                        ) : (
+                          <span className="student-card-status-indicator unmarked">
+                            <HelpCircle size={13} /> {t.notMarked}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -1859,6 +2284,414 @@ export default function App() {
                 <Check size={18} />
                 <span>{isOnline ? (t.saveAttendance || "Save Attendance") : (t.saveOffline || "Save on this device")}</span>
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: ATTENDANCE MONITORING */}
+        {tab === "monitoring" && (
+          <div>
+            {/* Page Header */}
+            <div className="tab-header" style={{ marginBottom: 16 }}>
+              <div>
+                <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
+                  <Activity size={24} style={{ color: "var(--primary)" }} /> {t.monitoring}
+                </h2>
+                <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: 13 }}>
+                  {t.monitoringSubtitle}
+                </p>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                {/* Single Date vs Range Toggle */}
+                <div style={{ display: "flex", background: "var(--canvas)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: 2 }}>
+                  <button
+                    type="button"
+                    className={`btn ${monitoringMode === "single" ? "primary" : "secondary"}`}
+                    style={{ minHeight: 32, padding: "4px 12px", fontSize: 12, border: "none" }}
+                    onClick={() => setMonitoringMode("single")}
+                  >
+                    <Calendar size={14} /> {t.singleDate}
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${monitoringMode === "range" ? "primary" : "secondary"}`}
+                    style={{ minHeight: 32, padding: "4px 12px", fontSize: 12, border: "none" }}
+                    onClick={() => setMonitoringMode("range")}
+                  >
+                    <History size={14} /> {t.dateRange}
+                  </button>
+                </div>
+
+                <button
+                  className="btn secondary"
+                  onClick={fetchMonitoringData}
+                  disabled={monitoringLoading}
+                  style={{ minHeight: 36, padding: "6px 12px", fontSize: 13 }}
+                >
+                  <RefreshCw size={15} className={monitoringLoading ? "spinning" : ""} /> {t.retry}
+                </button>
+              </div>
+            </div>
+
+            {/* Filters Toolbar */}
+            <div className="monitoring-toolbar">
+              <div className="monitoring-filter-row">
+                {/* Class Selector */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--muted)", display: "block", marginBottom: 4 }}>
+                    {t.class}
+                  </label>
+                  <select
+                    value={monitoringClass}
+                    onChange={(e) => setMonitoringClass(e.target.value)}
+                    style={{ width: "100%", minHeight: 40 }}
+                  >
+                    {user.role === "admin" && <option value="all">{t.allClasses}</option>}
+                    {classes.map((c) => (
+                      <option key={c._id || c.id} value={c._id || c.id}>
+                        {formatClassLabel(c, lang)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Session Selector */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--muted)", display: "block", marginBottom: 4 }}>
+                    {t.session}
+                  </label>
+                  <select
+                    value={monitoringSession}
+                    onChange={(e) => setMonitoringSession(e.target.value)}
+                    style={{ width: "100%", minHeight: 40 }}
+                  >
+                    <option value="all">{t.allSessions}</option>
+                    <option value="morning">{t.morning}</option>
+                    <option value="afternoon">{t.afternoon}</option>
+                    <option value="evening">{t.evening}</option>
+                    <option value="full-day">{t.fullDay}</option>
+                  </select>
+                </div>
+
+                {/* Date / Range Selector */}
+                {monitoringMode === "single" ? (
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--muted)", display: "block", marginBottom: 4 }}>
+                      {t.date}
+                    </label>
+                    <input
+                      type="date"
+                      value={monitoringDate}
+                      onChange={(e) => setMonitoringDate(e.target.value)}
+                      style={{ width: "100%", minHeight: 40 }}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--muted)", display: "block", marginBottom: 4 }}>
+                        {t.startDate}
+                      </label>
+                      <input
+                        type="date"
+                        value={monitoringStartDate}
+                        onChange={(e) => setMonitoringStartDate(e.target.value)}
+                        style={{ width: "100%", minHeight: 40 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--muted)", display: "block", marginBottom: 4 }}>
+                        {t.endDate}
+                      </label>
+                      <input
+                        type="date"
+                        value={monitoringEndDate}
+                        onChange={(e) => setMonitoringEndDate(e.target.value)}
+                        style={{ width: "100%", minHeight: 40 }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Search */}
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--muted)", display: "block", marginBottom: 4 }}>
+                    {t.search}
+                  </label>
+                  <div className="search-input-wrap" style={{ margin: 0 }}>
+                    <Search size={16} className="search-icon-pos" />
+                    <input
+                      type="text"
+                      placeholder={t.search}
+                      value={monitoringSearch}
+                      onChange={(e) => setMonitoringSearch(e.target.value)}
+                      style={{ minHeight: 40 }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Filter Pills */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+                <div className="monitoring-status-pills">
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", marginRight: 4 }}>
+                    {t.statusFilter}:
+                  </span>
+                  <button
+                    type="button"
+                    className={`status-pill-btn ${monitoringStatus === "all" ? "active" : ""}`}
+                    onClick={() => setMonitoringStatus("all")}
+                  >
+                    {t.allStatuses}
+                  </button>
+                  <button
+                    type="button"
+                    className={`status-pill-btn pill-present ${monitoringStatus === "present" ? "active" : ""}`}
+                    onClick={() => setMonitoringStatus("present")}
+                  >
+                    <Check size={13} /> {t.present}
+                  </button>
+                  <button
+                    type="button"
+                    className={`status-pill-btn pill-absent ${monitoringStatus === "absent" ? "active" : ""}`}
+                    onClick={() => setMonitoringStatus("absent")}
+                  >
+                    <X size={13} /> {t.absent}
+                  </button>
+                  <button
+                    type="button"
+                    className={`status-pill-btn pill-late ${monitoringStatus === "late" ? "active" : ""}`}
+                    onClick={() => setMonitoringStatus("late")}
+                  >
+                    <Clock size={13} /> {t.late}
+                  </button>
+                  <button
+                    type="button"
+                    className={`status-pill-btn pill-excused ${monitoringStatus === "excused" ? "active" : ""}`}
+                    onClick={() => setMonitoringStatus("excused")}
+                  >
+                    <AlertCircle size={13} /> {t.excused}
+                  </button>
+                  <button
+                    type="button"
+                    className={`status-pill-btn pill-unmarked ${monitoringStatus === "unmarked" ? "active" : ""}`}
+                    onClick={() => setMonitoringStatus("unmarked")}
+                  >
+                    <HelpCircle size={13} /> {t.notMarked}
+                  </button>
+                </div>
+
+                <small style={{ color: "var(--muted)", fontStyle: "italic", fontSize: 11 }}>
+                  {t.rateFormulaNotice}
+                </small>
+              </div>
+            </div>
+
+            {/* Error state */}
+            {monitoringError && (
+              <div className="alert danger" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                <span>{monitoringError}</span>
+                <button className="btn secondary" onClick={fetchMonitoringData} style={{ minHeight: 32, fontSize: 12, padding: "4px 10px" }}>
+                  {t.retry}
+                </button>
+              </div>
+            )}
+
+            {/* Summary KPI Cards */}
+            {monitoringData?.summary && (
+              <div className="monitoring-kpi-grid">
+                <div className="monitoring-kpi-card kpi-eligible">
+                  <div className="monitoring-kpi-label"><Users size={14} /> {t.eligibleStudents}</div>
+                  <div className="monitoring-kpi-value">{monitoringData.summary.totalEligible ?? 0}</div>
+                  <div className="monitoring-kpi-sub">{t.activeStudents || "Active enrolled"}</div>
+                </div>
+                <div className="monitoring-kpi-card kpi-present">
+                  <div className="monitoring-kpi-label"><Check size={14} /> {t.present}</div>
+                  <div className="monitoring-kpi-value" style={{ color: "var(--success)" }}>{monitoringData.summary.present ?? 0}</div>
+                  <div className="monitoring-kpi-sub">On-time attendees</div>
+                </div>
+                <div className="monitoring-kpi-card kpi-absent">
+                  <div className="monitoring-kpi-label"><X size={14} /> {t.absent}</div>
+                  <div className="monitoring-kpi-value" style={{ color: "var(--danger)" }}>{monitoringData.summary.absent ?? 0}</div>
+                  <div className="monitoring-kpi-sub">Unexcused absences</div>
+                </div>
+                <div className="monitoring-kpi-card kpi-late">
+                  <div className="monitoring-kpi-label"><Clock size={14} /> {t.late}</div>
+                  <div className="monitoring-kpi-value" style={{ color: "#D69E2E" }}>{monitoringData.summary.late ?? 0}</div>
+                  <div className="monitoring-kpi-sub">Late arrivals</div>
+                </div>
+                <div className="monitoring-kpi-card kpi-excused">
+                  <div className="monitoring-kpi-label"><AlertCircle size={14} /> {t.excused}</div>
+                  <div className="monitoring-kpi-value" style={{ color: "var(--info)" }}>{monitoringData.summary.excused ?? 0}</div>
+                  <div className="monitoring-kpi-sub">Authorized leave</div>
+                </div>
+                <div className="monitoring-kpi-card kpi-unmarked">
+                  <div className="monitoring-kpi-label"><HelpCircle size={14} /> {t.notMarked}</div>
+                  <div className="monitoring-kpi-value" style={{ color: "#718096" }}>{monitoringData.summary.notMarked ?? 0}</div>
+                  <div className="monitoring-kpi-sub">Awaiting mark</div>
+                </div>
+                <div className="monitoring-kpi-card kpi-rate">
+                  <div className="monitoring-kpi-label"><Activity size={14} /> {t.attendanceRate}</div>
+                  <div className="monitoring-kpi-value" style={{ color: "var(--primary)" }}>{monitoringData.summary.attendanceRate ?? 0}%</div>
+                  <div className="monitoring-kpi-sub">Present / Eligible</div>
+                </div>
+              </div>
+            )}
+
+            {/* Date Range Daily Breakdown Table */}
+            {monitoringMode === "range" && monitoringData?.dailyTotals?.length > 0 && (
+              <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+                <h3 style={{ margin: "0 0 12px", fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
+                  <Calendar size={18} /> {t.dailyBreakdown}
+                </h3>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="monitoring-table">
+                    <thead>
+                      <tr>
+                        <th>{t.date}</th>
+                        <th>{t.eligibleStudents}</th>
+                        <th>{t.present}</th>
+                        <th>{t.absent}</th>
+                        <th>{t.late}</th>
+                        <th>{t.excused}</th>
+                        <th>{t.notMarked}</th>
+                        <th>{t.attendanceRate}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monitoringData.dailyTotals.map((d) => (
+                        <tr key={d.dateKey}>
+                          <td><strong>{d.dateKey}</strong></td>
+                          <td>{d.totalEligible}</td>
+                          <td style={{ color: "var(--success)", fontWeight: 700 }}>{d.present}</td>
+                          <td style={{ color: "var(--danger)", fontWeight: 700 }}>{d.absent}</td>
+                          <td style={{ color: "#D69E2E", fontWeight: 700 }}>{d.late}</td>
+                          <td style={{ color: "var(--info)", fontWeight: 700 }}>{d.excused}</td>
+                          <td style={{ color: "#718096", fontWeight: 700 }}>{d.notMarked}</td>
+                          <td>
+                            <span style={{ fontWeight: 800, color: d.attendanceRate >= 80 ? "var(--success)" : d.attendanceRate >= 50 ? "#D69E2E" : "var(--danger)" }}>
+                              {d.attendanceRate}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Live Attendance Table */}
+            <div className="monitoring-table-container">
+              <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h3 style={{ margin: 0, fontSize: 15 }}>
+                  {monitoringMode === "range" ? (t.studentWise || "Student Records Across Range") : (t.monitoring || "Live Attendance Records")}
+                  {" "}
+                  <span style={{ color: "var(--muted)", fontSize: 13, fontWeight: 400 }}>
+                    ({monitoringData?.records?.length ?? 0} {t.recorded || "records"})
+                  </span>
+                </h3>
+              </div>
+
+              {monitoringLoading ? (
+                <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
+                  <RefreshCw size={24} className="spinning" style={{ marginBottom: 8 }} />
+                  <div>{t.loading}</div>
+                </div>
+              ) : !monitoringData?.records?.length ? (
+                <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
+                  <HelpCircle size={32} style={{ marginBottom: 8, opacity: 0.5 }} />
+                  <p style={{ margin: 0, fontSize: 14 }}>{t.noAttendanceRecorded}</p>
+                  <button
+                    className="btn secondary"
+                    style={{ marginTop: 12, minHeight: 34, fontSize: 12 }}
+                    onClick={() => {
+                      setMonitoringStatus("all");
+                      setMonitoringSearch("");
+                    }}
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Desktop Table View */}
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="monitoring-table">
+                      <thead>
+                        <tr>
+                          <th>{t.name}</th>
+                          <th>{t.admissionNo}</th>
+                          <th>{t.class}</th>
+                          <th>{t.date}</th>
+                          <th>{t.session}</th>
+                          <th>{t.statusFilter}</th>
+                          <th>{t.lastUpdated}</th>
+                          <th>{t.updatedBy}</th>
+                          <th style={{ textAlign: "right" }}>{t.actions}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monitoringData.records.map((r) => {
+                          const sName = localizeStudentName(r.name, lang);
+                          return (
+                            <tr key={`${r.studentId}-${r.date}-${r.session}`}>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                  <div className="student-card-avatar" style={{ width: 34, height: 34, fontSize: 13 }}>
+                                    {r.photoUrl ? <img src={r.photoUrl} alt="" /> : (sName?.[0] || r.name?.[0])?.toUpperCase()}
+                                  </div>
+                                  <strong>{sName}</strong>
+                                </div>
+                              </td>
+                              <td><code style={{ fontSize: 12 }}>{r.admissionNo}</code></td>
+                              <td>{r.class ? `${r.class.name}${r.class.section ? ` (${r.class.section})` : ""}` : "-"}</td>
+                              <td>{r.date}</td>
+                              <td>{localizeSection(r.session, lang)}</td>
+                              <td>
+                                <span className={`accessible-status-badge status-${r.status}`}>
+                                  {r.status === "present" && <Check size={13} />}
+                                  {r.status === "absent" && <X size={13} />}
+                                  {r.status === "late" && <Clock size={13} />}
+                                  {r.status === "excused" && <AlertCircle size={13} />}
+                                  {r.status === "unmarked" && <HelpCircle size={13} />}
+                                  <span>{t[r.status] || (r.status === "unmarked" ? t.notMarked : r.status)}</span>
+                                </span>
+                              </td>
+                              <td style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                                {r.lastUpdated ? new Date(r.lastUpdated).toLocaleString() : "-"}
+                              </td>
+                              <td style={{ fontSize: 12, color: "var(--muted)" }}>
+                                {r.updatedBy?.name || "-"}
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                <button
+                                  type="button"
+                                  className="btn secondary"
+                                  style={{ minHeight: 30, padding: "4px 10px", fontSize: 11 }}
+                                  onClick={() => {
+                                    const foundStudent = students.find((s) => String(s._id || s.id) === String(r.studentId)) || {
+                                      _id: r.studentId,
+                                      id: r.studentId,
+                                      name: r.name,
+                                      admissionNo: r.admissionNo,
+                                      photoUrl: r.photoUrl
+                                    };
+                                    openAttendanceHistory(foundStudent);
+                                  }}
+                                >
+                                  <History size={13} /> {t.viewHistory}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -1953,65 +2786,374 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 4: STUDENTS DIRECTORY */}
+        {/* TAB 4: STUDENTS DIRECTORY & MANAGEMENT */}
         {tab === "students" && (
           <div>
-            <div className="section-title">
+            <div className="section-title" style={{ flexWrap: "wrap", gap: 10 }}>
               <div>
                 <h2>{t.students}</h2>
-                <p className="muted">Tap any student to view profile and update reference photo.</p>
+                <p className="muted" style={{ margin: 0 }}>
+                  Manage student profiles, class transfers, admission numbers, and attendance records.
+                </p>
               </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button
+                    className="btn secondary"
+                    onClick={() => downloadStudentRoster("csv")}
+                    title="Export filtered roster to CSV"
+                    style={{ minHeight: 40, padding: "6px 12px", fontSize: 13 }}
+                    disabled={loading || directoryLoading}
+                  >
+                    <Download size={15} /> CSV
+                  </button>
+                  <button
+                    className="btn secondary"
+                    onClick={() => downloadStudentRoster("xlsx")}
+                    title="Export filtered roster to Excel (.xlsx)"
+                    style={{ minHeight: 40, padding: "6px 12px", fontSize: 13 }}
+                    disabled={loading || directoryLoading}
+                  >
+                    <FileSpreadsheet size={15} /> Excel
+                  </button>
+                </div>
+                <button
+                  className="btn primary"
+                  onClick={() => {
+                    setStudentForm({
+                      admissionNo: "",
+                      name: "",
+                      gender: "",
+                      dob: "",
+                      guardianName: "",
+                      guardianPhone: "",
+                      address: "",
+                      enrollmentDate: today(),
+                      consentGiven: true
+                    });
+                    setTab("add-student");
+                  }}
+                  style={{ minHeight: 40, padding: "6px 14px", fontSize: 13 }}
+                >
+                  <Plus size={16} /> {t.addStudent}
+                </button>
+              </div>
+            </div>
+
+            {/* FILTERS & SEARCH TOOLBAR */}
+            <div className="card" style={{ padding: "12px 14px", marginBottom: 12 }}>
+              <div className="student-filter-bar">
+                {/* Status Tabs: Active | Archived | All */}
+                <div className="student-status-tabs">
+                  <button
+                    type="button"
+                    className={`student-status-tab-btn ${studentStatusFilter === "active" ? "active" : ""}`}
+                    onClick={() => setStudentStatusFilter("active")}
+                  >
+                    <UserCheck size={14} />
+                    <span>{t.activeStudents || "Active"}</span>
+                    <span style={{ fontSize: 10, background: "rgba(0,0,0,0.06)", padding: "2px 6px", borderRadius: 10 }}>
+                      {directoryStudents.filter(s => s.active !== false).length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`student-status-tab-btn ${studentStatusFilter === "archived" ? "active" : ""}`}
+                    onClick={() => setStudentStatusFilter("archived")}
+                  >
+                    <Archive size={14} />
+                    <span>{t.archivedStudents || "Archived"}</span>
+                    <span style={{ fontSize: 10, background: "rgba(0,0,0,0.06)", padding: "2px 6px", borderRadius: 10 }}>
+                      {directoryStudents.filter(s => s.active === false).length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`student-status-tab-btn ${studentStatusFilter === "all" ? "active" : ""}`}
+                    onClick={() => setStudentStatusFilter("all")}
+                  >
+                    <Users size={14} />
+                    <span>{t.allStudents || "All"}</span>
+                    <span style={{ fontSize: 10, background: "rgba(0,0,0,0.06)", padding: "2px 6px", borderRadius: 10 }}>
+                      {directoryStudents.length}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Class Filter */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Filter size={15} color="var(--muted)" />
+                  <select
+                    className="student-filter-select"
+                    value={studentClassFilter}
+                    onChange={(e) => setStudentClassFilter(e.target.value)}
+                  >
+                    {user?.role === "admin" && (
+                      <option value="all">{t.allClasses || "All Classes"}</option>
+                    )}
+                    {classes.map((c) => (
+                      <option key={c._id || c.id} value={c._id || c.id}>
+                        {formatClassLabel(c, lang)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Search bar */}
+              <div className="search-input-wrap" style={{ marginBottom: 0 }}>
+                <Search size={18} className="search-icon-pos" />
+                <input
+                  type="text"
+                  placeholder="Search by student name, admission number, or guardian contact..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  style={{ minHeight: 42 }}
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch("")}
+                    style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--muted)", padding: 4, cursor: "pointer", minHeight: "auto" }}
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* RESULTS COUNT & RELOAD */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, fontSize: 12, color: "var(--muted)" }}>
+              <span>
+                Showing <strong>{filteredDirectoryStudents.length}</strong> {studentStatusFilter === "active" ? "active" : studentStatusFilter === "archived" ? "archived" : ""} student(s)
+              </span>
               <button
-                className="btn primary"
-                onClick={() => setTab("add-student")}
-                style={{ minHeight: 44, padding: "8px 14px" }}
+                onClick={() => fetchDirectoryStudents(studentStatusFilter, studentClassFilter)}
+                style={{ background: "none", border: "none", color: "var(--primary)", display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12, padding: 0, minHeight: "auto", fontWeight: 600 }}
               >
-                <Plus size={16} /> {t.addStudent}
+                <RefreshCw size={13} className={directoryLoading ? "spin" : ""} /> Refresh
               </button>
             </div>
 
-            <div className="search-input-wrap">
-              <Search size={18} className="search-icon-pos" />
-              <input
-                type="text"
-                placeholder={t.search}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
+            {/* STUDENT ROSTER LIST */}
             <div style={{ display: "grid", gap: 8 }}>
-              {filteredStudents.map((s) => (
-                <div
-                  key={s._id || s.id}
-                  className="card"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: 12,
-                    marginBottom: 0,
-                    cursor: "pointer"
-                  }}
-                  onClick={() => setViewingStudent(s)}
-                >
-                  <div className="student-card-avatar">
-                    {s.photoUrl ? <img src={s.photoUrl} alt="" /> : (localizeStudentName(s.name, lang)?.[0] || s.name?.[0])?.toUpperCase()}
+              {filteredDirectoryStudents.map((s) => {
+                const sId = String(s._id || s.id);
+                const isMenuOpen = activeMenuStudentId === sId;
+                const studentClass = s.classId?.name
+                  ? `${s.classId.name}${s.classId.section ? ` (${s.classId.section})` : ""}`
+                  : (classes.find(c => String(c._id || c.id) === String(s.classId))?.name || "Unassigned");
+
+                return (
+                  <div
+                    key={sId}
+                    className="card"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 14px",
+                      marginBottom: 0,
+                      position: "relative"
+                    }}
+                  >
+                    {/* Student Avatar */}
+                    <div
+                      className="student-card-avatar"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => openStudentProfile(s)}
+                      title="View complete profile"
+                    >
+                      {s.photoUrl ? (
+                        <img src={s.photoUrl} alt="" />
+                      ) : (
+                        (localizeStudentName(s.name, lang)?.[0] || s.name?.[0])?.toUpperCase()
+                      )}
+                    </div>
+
+                    {/* Student Info */}
+                    <div
+                      style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
+                      onClick={() => openStudentProfile(s)}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <strong style={{ fontSize: 14 }}>{localizeStudentName(s.name, lang)}</strong>
+                        <span style={{ fontSize: 11, background: "var(--canvas)", padding: "1px 6px", borderRadius: 4, color: "var(--text)", fontWeight: 600 }}>
+                          {s.admissionNo || s.admissionNumber}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, fontSize: 12, color: "var(--muted)" }}>
+                        <span>{studentClass}</span>
+                        {s.guardianPhone && <span>· {s.guardianPhone}</span>}
+                      </div>
+                      {s.consentGiven && (
+                        <small style={{ display: "block", color: "var(--success)", fontSize: 10, fontWeight: 700, marginTop: 2 }}>
+                          Photo Consent Recorded ✓
+                        </small>
+                      )}
+                    </div>
+
+                    {/* Status Pill */}
+                    <span className={`status-pill ${s.active !== false ? "neutral" : "offline"}`} style={{ flexShrink: 0 }}>
+                      {s.active !== false ? (t.active || "Active") : (t.archived || "Archived")}
+                    </span>
+
+                    {/* Quick Profile & Edit Buttons */}
+                    <button
+                      className="btn secondary"
+                      onClick={() => openStudentProfile(s)}
+                      title={t.viewProfile || "View Profile"}
+                      style={{ minHeight: 34, padding: "6px 10px", fontSize: 12 }}
+                    >
+                      <Eye size={15} />
+                    </button>
+
+                    <button
+                      className="btn secondary"
+                      onClick={() => openEditStudent(s)}
+                      title={t.editDetails || "Edit Details"}
+                      style={{ minHeight: 34, padding: "6px 10px", fontSize: 12 }}
+                    >
+                      <Edit3 size={15} />
+                    </button>
+
+                    {/* Actions Menu Trigger */}
+                    <div style={{ position: "relative" }}>
+                      <button
+                        className="student-action-menu-trigger"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMenuStudentId(isMenuOpen ? null : sId);
+                        }}
+                        title={t.actions || "Actions"}
+                      >
+                        <MoreHorizontal size={18} />
+                      </button>
+
+                      {/* Dropdown Menu */}
+                      {isMenuOpen && (
+                        <>
+                          <div
+                            style={{ position: "fixed", inset: 0, zIndex: 40 }}
+                            onClick={() => setActiveMenuStudentId(null)}
+                          />
+                          <div className="student-action-dropdown" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="student-action-item"
+                              onClick={() => openStudentProfile(s)}
+                            >
+                              <Eye size={15} color="var(--primary)" />
+                              <span>{t.viewProfile || "View Profile"}</span>
+                            </button>
+
+                            <button
+                              className="student-action-item"
+                              onClick={() => openEditStudent(s)}
+                            >
+                              <Edit3 size={15} color="var(--primary)" />
+                              <span>{t.editDetails || "Edit Details"}</span>
+                            </button>
+
+                            <button
+                              className="student-action-item"
+                              onClick={() => {
+                                setActiveMenuStudentId(null);
+                                setViewingStudent(s);
+                              }}
+                            >
+                              <Camera size={15} color="var(--primary)" />
+                              <span>{t.changePhoto || "Change Photo"}</span>
+                            </button>
+
+                            <button
+                              className="student-action-item"
+                              onClick={() => openTransferClass(s)}
+                            >
+                              <ArrowRightLeft size={15} color="var(--primary)" />
+                              <span>{t.changeClass || "Change Class"}</span>
+                            </button>
+
+                            <button
+                              className="student-action-item"
+                              onClick={() => openAttendanceHistory(s)}
+                            >
+                              <History size={15} color="var(--primary)" />
+                              <span>{t.attendanceHistory || "Attendance History"}</span>
+                            </button>
+
+                            <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+
+                            {/* Activate / Deactivate Toggle */}
+                            {s.active !== false ? (
+                              <button
+                                className="student-action-item"
+                                style={{ color: "var(--warning)" }}
+                                onClick={() => requestStudentAction("deactivate", s)}
+                              >
+                                <UserX size={15} />
+                                <span>{t.deactivate || "Deactivate"}</span>
+                              </button>
+                            ) : (
+                              <button
+                                className="student-action-item success"
+                                onClick={() => requestStudentAction("activate", s)}
+                              >
+                                <UserCheck size={15} />
+                                <span>{t.activate || "Activate"}</span>
+                              </button>
+                            )}
+
+                            {/* Archive / Restore (Admin only) */}
+                            {user?.role === "admin" && (
+                              s.active !== false ? (
+                                <button
+                                  className="student-action-item"
+                                  style={{ color: "var(--warning)" }}
+                                  onClick={() => requestStudentAction("archive", s)}
+                                >
+                                  <Archive size={15} />
+                                  <span>{t.archive || "Archive"}</span>
+                                </button>
+                              ) : (
+                                <button
+                                  className="student-action-item success"
+                                  onClick={() => requestStudentAction("restore", s)}
+                                >
+                                  <ArchiveRestore size={15} />
+                                  <span>{t.restore || "Restore"}</span>
+                                </button>
+                              )
+                            )}
+
+                            {/* Permanent Removal (Admin only) */}
+                            {user?.role === "admin" && (
+                              <button
+                                className="student-action-item danger"
+                                onClick={() => requestStudentAction("delete", s)}
+                              >
+                                <Trash2 size={15} />
+                                <span>{t.removeStudent || "Delete Student"}</span>
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <strong style={{ display: "block", fontSize: 14 }}>{localizeStudentName(s.name, lang)}</strong>
-                    <span style={{ fontSize: 12, color: "var(--muted)" }}>{s.admissionNo}</span>
-                    {s.consentGiven && (
-                      <small style={{ display: "block", color: "var(--success)", fontSize: 10, fontWeight: 700 }}>
-                        Consent Recorded ✓
-                      </small>
-                    )}
-                  </div>
-                  <span className={`status-pill ${s.active !== false ? "neutral" : "offline"}`}>
-                    {s.active !== false ? t.active : t.inactive}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
+
+              {!filteredDirectoryStudents.length && (
+                <Empty
+                  title="No students found"
+                  subtitle={
+                    search
+                      ? "No students match your search criteria. Try a different term or clear filters."
+                      : studentStatusFilter === "archived"
+                      ? "No archived students in this class or Madrasa."
+                      : "No active students enrolled in this class yet."
+                  }
+                />
+              )}
             </div>
           </div>
         )}
@@ -2022,9 +3164,13 @@ export default function App() {
             <div className="section-title">
               <div>
                 <h2>{t.addStudent}</h2>
-                <p className="muted">Enrol student with optional photo consent.</p>
+                <p className="muted">Enrol a new student with complete details and photo consent.</p>
               </div>
-              <button className="btn secondary" onClick={() => setTab("students")} style={{ minHeight: 38 }}>
+              <button
+                className="btn secondary"
+                onClick={() => setTab("students")}
+                style={{ minHeight: 38 }}
+              >
                 Cancel
               </button>
             </div>
@@ -2037,19 +3183,35 @@ export default function App() {
                 setNotice("");
                 setLoading(true);
                 try {
+                  const targetClassId = studentForm.classId || selectedClass || classes[0]?._id;
+                  if (!targetClassId) {
+                    throw new Error("Please select a class for enrollment.");
+                  }
                   const r = await api.post("/students", {
                     ...studentForm,
-                    classId: selectedClass
+                    classId: targetClassId
                   });
                   setStudents((prev) => {
                     const map = new Map(prev.map((s) => [String(s._id || s.id), s]));
                     map.set(String(r.data._id || r.data.id), r.data);
                     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
                   });
-                  await cacheStudents([r.data], selectedClass);
-                  setStudentForm({ admissionNo: "", name: "", guardianName: "", guardianPhone: "", consentGiven: true });
-                  setNotice(`Student enrolled: ${r.data.name} (${r.data.admissionNo})`);
+                  setDirectoryStudents((prev) => [r.data, ...prev.filter(s => String(s._id || s.id) !== String(r.data._id || r.data.id))]);
+                  await cacheStudents([r.data], targetClassId);
+                  setStudentForm({
+                    admissionNo: "",
+                    name: "",
+                    gender: "",
+                    dob: "",
+                    guardianName: "",
+                    guardianPhone: "",
+                    address: "",
+                    enrollmentDate: today(),
+                    consentGiven: true
+                  });
+                  setNotice(`Student enrolled successfully: ${r.data.name} (${r.data.admissionNo})`);
                   setTab("students");
+                  fetchDirectoryStudents(studentStatusFilter, studentClassFilter);
                 } catch (err) {
                   setError(errText(err));
                 } finally {
@@ -2058,29 +3220,38 @@ export default function App() {
               }}
               style={{ display: "grid", gap: 14 }}
             >
-              <label>
-                {t.class}
-                <select value={selectedClass} required onChange={(e) => setSelectedClass(e.target.value)}>
-                  {classes.map((c) => (
-                    <option key={c._id || c.id} value={c._id || c.id}>
-                      {formatClassLabel(c, lang)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label>
+                  {t.class} *
+                  <select
+                    value={studentForm.classId || selectedClass}
+                    required
+                    onChange={(e) => {
+                      setStudentForm({ ...studentForm, classId: e.target.value });
+                      setSelectedClass(e.target.value);
+                    }}
+                  >
+                    {classes.map((c) => (
+                      <option key={c._id || c.id} value={c._id || c.id}>
+                        {formatClassLabel(c, lang)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  {t.admissionNo} *
+                  <input
+                    required
+                    value={studentForm.admissionNo}
+                    onChange={(e) => setStudentForm({ ...studentForm, admissionNo: e.target.value })}
+                    placeholder="e.g. ADM-106"
+                  />
+                </label>
+              </div>
 
               <label>
-                {t.admissionNo}
-                <input
-                  required
-                  value={studentForm.admissionNo}
-                  onChange={(e) => setStudentForm({ ...studentForm, admissionNo: e.target.value })}
-                  placeholder="e.g. ADM-106"
-                />
-              </label>
-
-              <label>
-                {t.name}
+                {t.name} *
                 <input
                   required
                   value={studentForm.name}
@@ -2089,37 +3260,82 @@ export default function App() {
                 />
               </label>
 
-              <label>
-                {t.guardian}
-                <input
-                  value={studentForm.guardianName}
-                  onChange={(e) => setStudentForm({ ...studentForm, guardianName: e.target.value })}
-                  placeholder="Guardian name"
-                />
-              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label>
+                  {t.gender || "Gender"}
+                  <select
+                    value={studentForm.gender}
+                    onChange={(e) => setStudentForm({ ...studentForm, gender: e.target.value })}
+                  >
+                    <option value="">Unspecified</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                  </select>
+                </label>
 
-              <label>
-                {t.phone}
-                <input
-                  type="tel"
-                  value={studentForm.guardianPhone}
-                  onChange={(e) => setStudentForm({ ...studentForm, guardianPhone: e.target.value })}
-                  placeholder="Phone number"
-                />
-              </label>
+                <label>
+                  {t.dob || "Date of Birth"}
+                  <input
+                    type="date"
+                    value={studentForm.dob}
+                    onChange={(e) => setStudentForm({ ...studentForm, dob: e.target.value })}
+                  />
+                </label>
+              </div>
 
-              <label style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label>
+                  {t.guardian}
+                  <input
+                    value={studentForm.guardianName}
+                    onChange={(e) => setStudentForm({ ...studentForm, guardianName: e.target.value })}
+                    placeholder="Parent or guardian name"
+                  />
+                </label>
+
+                <label>
+                  {t.phone}
+                  <input
+                    type="tel"
+                    value={studentForm.guardianPhone}
+                    onChange={(e) => setStudentForm({ ...studentForm, guardianPhone: e.target.value })}
+                    placeholder="Guardian phone number"
+                  />
+                </label>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label>
+                  {t.address || "Address"}
+                  <input
+                    value={studentForm.address}
+                    onChange={(e) => setStudentForm({ ...studentForm, address: e.target.value })}
+                    placeholder="Residential address / locality"
+                  />
+                </label>
+
+                <label>
+                  {t.enrollmentDate || "Enrollment Date"}
+                  <input
+                    type="date"
+                    value={studentForm.enrollmentDate}
+                    onChange={(e) => setStudentForm({ ...studentForm, enrollmentDate: e.target.value })}
+                  />
+                </label>
+              </div>
+
+              <label style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 }}>
                 <input
                   type="checkbox"
                   checked={studentForm.consentGiven}
                   onChange={(e) => setStudentForm({ ...studentForm, consentGiven: e.target.checked })}
                   style={{ width: 22, minHeight: 22 }}
                 />
-                <span style={{ fontSize: 12 }}>{t.consent}</span>
+                <span style={{ fontSize: 13 }}>{t.consent}</span>
               </label>
 
               <button className="btn primary full" disabled={loading} style={{ minHeight: 48, marginTop: 10 }}>
-                {loading ? t.loading : "Save Student"}
+                {loading ? t.loading : "Enrol Student"}
               </button>
             </form>
           </div>
@@ -2686,6 +3902,712 @@ export default function App() {
         </div>
       )}
 
+      {/* =========================================================
+          STUDENT COMPLETE PROFILE MODAL
+          ========================================================= */}
+      {viewingStudentProfile && (
+        <div className="sheet-overlay" onClick={() => setViewingStudentProfile(null)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <p className="eyebrow">{t.studentProfile || "STUDENT PROFILE"}</p>
+                <h2 style={{ marginBottom: 2 }}>{localizeStudentName(viewingStudentProfile.name, lang)}</h2>
+                <small className="muted">
+                  Admission No: <strong>{viewingStudentProfile.admissionNo || viewingStudentProfile.admissionNumber}</strong> · Class: {viewingStudentProfile.classId?.name || "Unassigned"}
+                </small>
+              </div>
+              <button
+                onClick={() => setViewingStudentProfile(null)}
+                style={{ background: "transparent", border: "none", color: "var(--muted)", padding: 6, cursor: "pointer" }}
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            {/* Avatar & Header Card */}
+            <div className="card" style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px", marginBottom: 14 }}>
+              <div
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: "50%",
+                  overflow: "hidden",
+                  background: "var(--primary-subtle)",
+                  display: "grid",
+                  placeItems: "center",
+                  fontSize: 26,
+                  fontWeight: 700,
+                  color: "var(--primary)",
+                  flexShrink: 0,
+                  border: "2px solid var(--border)"
+                }}
+              >
+                {viewingStudentProfile.photoUrl || viewingStudentProfile.referencePhotoUrl ? (
+                  <img
+                    src={viewingStudentProfile.photoUrl || viewingStudentProfile.referencePhotoUrl}
+                    alt=""
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                ) : (
+                  (localizeStudentName(viewingStudentProfile.name, lang)?.[0] || viewingStudentProfile.name?.[0])?.toUpperCase()
+                )}
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <strong style={{ fontSize: 16 }}>{localizeStudentName(viewingStudentProfile.name, lang)}</strong>
+                  <span className={`status-pill ${viewingStudentProfile.active !== false ? "neutral" : "offline"}`}>
+                    {viewingStudentProfile.active !== false ? (t.active || "Active") : (t.archived || "Archived")}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  {viewingStudentProfile.classId?.name} {viewingStudentProfile.classId?.section ? `(${viewingStudentProfile.classId.section})` : ""}
+                  {viewingStudentProfile.classId?.academicYear ? ` · ${viewingStudentProfile.classId.academicYear}` : ""}
+                </div>
+                <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button
+                    className="btn secondary"
+                    onClick={() => {
+                      setViewingStudent(viewingStudentProfile);
+                    }}
+                    style={{ minHeight: 30, padding: "4px 10px", fontSize: 11 }}
+                  >
+                    <Camera size={13} /> {t.changePhoto || "Change Photo"}
+                  </button>
+                  <button
+                    className="btn secondary"
+                    onClick={() => {
+                      openEditStudent(viewingStudentProfile);
+                    }}
+                    style={{ minHeight: 30, padding: "4px 10px", fontSize: 11 }}
+                  >
+                    <Edit3 size={13} /> {t.editDetails || "Edit Details"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Profile Detailed Fields */}
+            <div className="card" style={{ padding: "16px", marginBottom: 14 }}>
+              <h3 style={{ fontSize: 14, marginBottom: 12, borderBottom: "1px solid var(--border)", paddingBottom: 6 }}>
+                Student Details
+              </h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 14px", fontSize: 13 }}>
+                <div>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Full Name</span>
+                  <strong>{viewingStudentProfile.name || viewingStudentProfile.fullName}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Admission No</span>
+                  <strong>{viewingStudentProfile.admissionNo || viewingStudentProfile.admissionNumber}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Gender</span>
+                  <span>{viewingStudentProfile.gender || "Unspecified"}</span>
+                </div>
+                <div>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Date of Birth</span>
+                  <span>{viewingStudentProfile.dob || "Not recorded"}</span>
+                </div>
+                <div>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Enrollment Date</span>
+                  <span>{viewingStudentProfile.enrollmentDate || "Not recorded"}</span>
+                </div>
+                <div>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Photo Consent</span>
+                  <span style={{ color: viewingStudentProfile.consentGiven ? "var(--success)" : "var(--muted)", fontWeight: 600 }}>
+                    {viewingStudentProfile.consentGiven ? "Granted ✓" : "Opted out"}
+                  </span>
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Guardian / Parent</span>
+                  <strong>{localizeGuardianName(viewingStudentProfile.guardianName, lang) || "Not recorded"}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Guardian Phone</span>
+                  {viewingStudentProfile.guardianPhone ? (
+                    <a href={`tel:${viewingStudentProfile.guardianPhone}`} style={{ color: "var(--primary)", fontWeight: 600 }}>
+                      {viewingStudentProfile.guardianPhone}
+                    </a>
+                  ) : (
+                    <span style={{ color: "var(--muted)" }}>Not recorded</span>
+                  )}
+                </div>
+                <div>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Address / Area</span>
+                  <span>{viewingStudentProfile.address || "Not recorded"}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Action Bar inside Profile */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <button
+                className="btn secondary"
+                onClick={() => openTransferClass(viewingStudentProfile)}
+                style={{ minHeight: 40 }}
+              >
+                <ArrowRightLeft size={16} /> {t.transferClass || "Transfer Class"}
+              </button>
+              <button
+                className="btn primary"
+                onClick={() => openAttendanceHistory(viewingStudentProfile)}
+                style={{ minHeight: 40 }}
+              >
+                <History size={16} /> {t.attendanceHistory || "Attendance History"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          EDIT STUDENT MODAL
+          ========================================================= */}
+      {editingStudent && (
+        <div className="sheet-overlay" onClick={() => !editingStudent.saving && setEditingStudent(null)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <p className="eyebrow">{t.editStudent || "EDIT STUDENT"}</p>
+                <h2 style={{ marginBottom: 0 }}>{editingStudent.name || "Student"}</h2>
+              </div>
+              <button
+                disabled={editingStudent.saving}
+                onClick={() => setEditingStudent(null)}
+                style={{ background: "transparent", border: "none", color: "var(--muted)", padding: 6, cursor: "pointer" }}
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            {editingStudent.error && (
+              <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", color: "#991B1B", padding: "10px 14px", borderRadius: 12, marginBottom: 14, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+                <AlertCircle size={18} />
+                <span>{editingStudent.error}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveStudentEdit} style={{ display: "grid", gap: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label>
+                  {t.class} *
+                  <select
+                    value={editingStudent.classId}
+                    required
+                    onChange={(e) => setEditingStudent({ ...editingStudent, classId: e.target.value })}
+                  >
+                    {classes.map((c) => (
+                      <option key={c._id || c.id} value={c._id || c.id}>
+                        {formatClassLabel(c, lang)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  {t.admissionNo} *
+                  <input
+                    required
+                    disabled={user?.role !== "admin"}
+                    value={editingStudent.admissionNo}
+                    onChange={(e) => setEditingStudent({ ...editingStudent, admissionNo: e.target.value })}
+                    title={user?.role !== "admin" ? "Only Administrators can modify admission numbers" : "Admission number"}
+                  />
+                  {user?.role !== "admin" ? (
+                    <small style={{ color: "var(--muted)", fontSize: 10 }}>Admin only</small>
+                  ) : (
+                    <small style={{ color: "var(--muted)", fontSize: 10 }}>Validated for uniqueness</small>
+                  )}
+                </label>
+              </div>
+
+              <label>
+                {t.name} *
+                <input
+                  required
+                  value={editingStudent.name}
+                  onChange={(e) => setEditingStudent({ ...editingStudent, name: e.target.value })}
+                  placeholder="Student full name"
+                />
+              </label>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label>
+                  {t.gender || "Gender"}
+                  <select
+                    value={editingStudent.gender}
+                    onChange={(e) => setEditingStudent({ ...editingStudent, gender: e.target.value })}
+                  >
+                    <option value="">Unspecified</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                  </select>
+                </label>
+
+                <label>
+                  {t.dob || "Date of Birth"}
+                  <input
+                    type="date"
+                    value={editingStudent.dob}
+                    onChange={(e) => setEditingStudent({ ...editingStudent, dob: e.target.value })}
+                  />
+                </label>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label>
+                  {t.guardian}
+                  <input
+                    value={editingStudent.guardianName}
+                    onChange={(e) => setEditingStudent({ ...editingStudent, guardianName: e.target.value })}
+                    placeholder="Parent or guardian name"
+                  />
+                </label>
+
+                <label>
+                  {t.phone}
+                  <input
+                    type="tel"
+                    value={editingStudent.guardianPhone}
+                    onChange={(e) => setEditingStudent({ ...editingStudent, guardianPhone: e.target.value })}
+                    placeholder="Guardian phone number"
+                  />
+                </label>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label>
+                  {t.address || "Address"}
+                  <input
+                    value={editingStudent.address}
+                    onChange={(e) => setEditingStudent({ ...editingStudent, address: e.target.value })}
+                    placeholder="Residential address / locality"
+                  />
+                </label>
+
+                <label>
+                  {t.enrollmentDate || "Enrollment Date"}
+                  <input
+                    type="date"
+                    value={editingStudent.enrollmentDate}
+                    onChange={(e) => setEditingStudent({ ...editingStudent, enrollmentDate: e.target.value })}
+                  />
+                </label>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+                <label style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={editingStudent.active}
+                    onChange={(e) => setEditingStudent({ ...editingStudent, active: e.target.checked })}
+                    style={{ width: 20, minHeight: 20 }}
+                  />
+                  <span>Active Student Account (uncheck to deactivate)</span>
+                </label>
+
+                <label style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={editingStudent.consentGiven}
+                    onChange={(e) => setEditingStudent({ ...editingStudent, consentGiven: e.target.checked })}
+                    style={{ width: 20, minHeight: 20 }}
+                  />
+                  <span>{t.consent}</span>
+                </label>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={editingStudent.saving}
+                  onClick={() => setEditingStudent(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn primary"
+                  disabled={editingStudent.saving}
+                  style={{ minWidth: 120 }}
+                >
+                  {editingStudent.saving ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <RefreshCw size={14} className="spin" /> Saving...
+                    </span>
+                  ) : (
+                    "Save Changes"
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          TRANSFER CLASS MODAL
+          ========================================================= */}
+      {transferringStudent && (
+        <div className="sheet-overlay" onClick={() => !loading && setTransferringStudent(null)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <p className="eyebrow">CLASS REASSIGNMENT</p>
+                <h2 style={{ marginBottom: 0 }}>Transfer Student</h2>
+              </div>
+              <button
+                disabled={loading}
+                onClick={() => setTransferringStudent(null)}
+                style={{ background: "transparent", border: "none", color: "var(--muted)", padding: 6, cursor: "pointer" }}
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <div className="card" style={{ padding: "14px", marginBottom: 14, background: "var(--canvas)" }}>
+              <div style={{ fontSize: 13 }}>
+                Student: <strong>{transferringStudent.name}</strong> ({transferringStudent.admissionNo || transferringStudent.admissionNumber})
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                Current Class: <strong>{transferringStudent.classId?.name || "Unassigned"} {transferringStudent.classId?.section ? `(${transferringStudent.classId.section})` : ""}</strong>
+              </div>
+            </div>
+
+            <label style={{ marginBottom: 14 }}>
+              Select New Target Class *
+              <select
+                value={transferTargetClassId}
+                onChange={(e) => setTransferTargetClassId(e.target.value)}
+                style={{ minHeight: 46 }}
+              >
+                <option value="">-- Choose destination class --</option>
+                {classes.map((c) => (
+                  <option key={c._id || c.id} value={c._id || c.id}>
+                    {formatClassLabel(c, lang)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div style={{ background: "var(--info-bg)", border: "1px solid #BAE6FD", color: "#0369A1", padding: "10px 14px", borderRadius: 12, marginBottom: 16, fontSize: 12, display: "flex", alignItems: "flex-start", gap: 8 }}>
+              <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>
+                <strong>Historical Register Continuity:</strong> Past attendance records will remain safely attached to the class and date on which they were taken.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={loading}
+                onClick={() => setTransferringStudent(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={loading || !transferTargetClassId || String(transferTargetClassId) === String(transferringStudent.classId?._id || transferringStudent.classId)}
+                onClick={handleConfirmTransfer}
+              >
+                {loading ? "Transferring..." : "Confirm Class Transfer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          ATTENDANCE HISTORY MODAL
+          ========================================================= */}
+      {attendanceHistoryStudent && (
+        <div className="sheet-overlay" onClick={() => setAttendanceHistoryStudent(null)}>
+          <div className="sheet-content" style={{ maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <p className="eyebrow">{t.attendanceHistory || "ATTENDANCE RECORD"}</p>
+                <h2 style={{ marginBottom: 2 }}>{attendanceHistoryStudent.name}</h2>
+                <small className="muted">
+                  Admission No: <strong>{attendanceHistoryStudent.admissionNo || attendanceHistoryStudent.admissionNumber}</strong> · Class: {attendanceHistoryStudent.classId?.name || "Enrolled"}
+                </small>
+              </div>
+              <button
+                onClick={() => setAttendanceHistoryStudent(null)}
+                style={{ background: "transparent", border: "none", color: "var(--muted)", padding: 6, cursor: "pointer" }}
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            {studentAttendanceLoading && (
+              <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)" }}>
+                <RefreshCw size={24} className="spin" style={{ margin: "0 auto 10px" }} />
+                <p>Loading authoritative attendance ledger...</p>
+              </div>
+            )}
+
+            {!studentAttendanceLoading && studentAttendanceData && (
+              <>
+                {/* KPI Summary Cards */}
+                <div className="att-stats-grid">
+                  <div className="att-stat-box" style={{
+                    borderColor:
+                      studentAttendanceData.stats?.rate >= 80 ? "var(--success)" :
+                      studentAttendanceData.stats?.rate >= 60 ? "var(--warning)" : "var(--danger)"
+                  }}>
+                    <strong style={{
+                      color:
+                        studentAttendanceData.stats?.rate >= 80 ? "var(--success)" :
+                        studentAttendanceData.stats?.rate >= 60 ? "var(--warning)" : "var(--danger)"
+                    }}>
+                      {studentAttendanceData.stats?.rate ?? 0}%
+                    </strong>
+                    <span>Attendance Rate</span>
+                  </div>
+                  <div className="att-stat-box">
+                    <strong style={{ color: "var(--success)" }}>{studentAttendanceData.stats?.present || 0}</strong>
+                    <span>Present</span>
+                  </div>
+                  <div className="att-stat-box">
+                    <strong style={{ color: "var(--danger)" }}>{studentAttendanceData.stats?.absent || 0}</strong>
+                    <span>Absent</span>
+                  </div>
+                  <div className="att-stat-box">
+                    <strong style={{ color: "var(--warning)" }}>
+                      {(studentAttendanceData.stats?.late || 0) + (studentAttendanceData.stats?.excused || 0)}
+                    </strong>
+                    <span>Late / Excused</span>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, fontSize: 12, color: "var(--muted)" }}>
+                  <span>Total Recorded Sessions: <strong>{studentAttendanceData.stats?.totalSessions || 0}</strong></span>
+                  <button
+                    onClick={() => openAttendanceHistory(attendanceHistoryStudent)}
+                    style={{ background: "none", border: "none", color: "var(--primary)", display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12, padding: 0, minHeight: "auto", fontWeight: 600 }}
+                  >
+                    <RefreshCw size={12} /> Reload History
+                  </button>
+                </div>
+
+                {/* Date-Range Filter Controls for Student History */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "10px 0 14px", flexWrap: "wrap", background: "var(--canvas)", padding: "10px 12px", borderRadius: "var(--radius-md)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 200 }}>
+                    <small style={{ fontWeight: 700, color: "var(--muted)" }}>{t.from || "From"}:</small>
+                    <input
+                      type="date"
+                      value={studentHistoryRange.from}
+                      onChange={(e) => setStudentHistoryRange((prev) => ({ ...prev, from: e.target.value }))}
+                      style={{ minHeight: 32, fontSize: 12, flex: 1 }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 200 }}>
+                    <small style={{ fontWeight: 700, color: "var(--muted)" }}>{t.to || "To"}:</small>
+                    <input
+                      type="date"
+                      value={studentHistoryRange.to}
+                      onChange={(e) => setStudentHistoryRange((prev) => ({ ...prev, to: e.target.value }))}
+                      style={{ minHeight: 32, fontSize: 12, flex: 1 }}
+                    />
+                  </div>
+                  <button
+                    className="btn primary"
+                    style={{ minHeight: 32, fontSize: 12, padding: "4px 12px" }}
+                    onClick={() => openAttendanceHistory(attendanceHistoryStudent, studentHistoryRange)}
+                  >
+                    <Filter size={13} /> {t.filterByRange || "Filter Range"}
+                  </button>
+                  {(studentHistoryRange.from || studentHistoryRange.to) && (
+                    <button
+                      className="btn secondary"
+                      style={{ minHeight: 32, fontSize: 12, padding: "4px 8px" }}
+                      onClick={() => {
+                        setStudentHistoryRange({ from: "", to: "" });
+                        openAttendanceHistory(attendanceHistoryStudent, { from: "", to: "" });
+                      }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {/* History Ledger List */}
+                <div style={{ maxHeight: "45vh", overflowY: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-md)" }}>
+                  {studentAttendanceData.records?.length > 0 ? (
+                    <table style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr>
+                          <th>{t.date}</th>
+                          <th>{t.session}</th>
+                          <th>{t.statusFilter}</th>
+                          <th>{t.class}</th>
+                          <th>{t.lastUpdated}</th>
+                          <th>{t.updatedBy}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {studentAttendanceData.records.map((r) => (
+                          <tr key={r._id || `${r.dateKey}-${r.sessionKey}`}>
+                            <td style={{ fontWeight: 600 }}>{r.dateKey}</td>
+                            <td style={{ textTransform: "capitalize", fontSize: 12 }}>{localizeSection(r.sessionKey, lang)}</td>
+                            <td>
+                              <span className={`accessible-status-badge status-${r.status}`}>
+                                {r.status === "present" && <Check size={13} />}
+                                {r.status === "absent" && <X size={13} />}
+                                {r.status === "late" && <Clock size={13} />}
+                                {r.status === "excused" && <AlertCircle size={13} />}
+                                <span>{t[r.status] || r.status}</span>
+                              </span>
+                            </td>
+                            <td style={{ fontSize: 12 }}>{r.classId?.name || "Class"}</td>
+                            <td style={{ fontSize: 11, color: "var(--muted)" }}>
+                              {r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "-"}
+                            </td>
+                            <td style={{ fontSize: 11, color: "var(--muted)" }}>
+                              {r.updatedBy?.name || r.markedBy?.name || "Teacher"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div style={{ padding: 30, textAlign: "center", color: "var(--muted)" }}>
+                      <History size={32} style={{ margin: "0 auto 8px", opacity: 0.5 }} />
+                      <p style={{ margin: 0, fontSize: 13 }}>No attendance records found for this student.</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="btn secondary" onClick={() => setAttendanceHistoryStudent(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          CONFIRMATION DIALOG MODAL
+          ========================================================= */}
+      {studentConfirmAction && (
+        <div className="sheet-overlay" onClick={() => !studentConfirmAction.loading && setStudentConfirmAction(null)}>
+          <div className="confirm-dialog-content" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-dialog-header">
+              <div
+                className="confirm-dialog-icon"
+                style={{
+                  background:
+                    studentConfirmAction.type === "delete" ? "var(--danger-bg)" :
+                    studentConfirmAction.type === "archive" || studentConfirmAction.type === "deactivate" ? "var(--warning-bg)" : "var(--success-bg)",
+                  color:
+                    studentConfirmAction.type === "delete" ? "var(--danger)" :
+                    studentConfirmAction.type === "archive" || studentConfirmAction.type === "deactivate" ? "var(--warning)" : "var(--success)"
+                }}
+              >
+                {studentConfirmAction.type === "delete" ? <Trash2 size={20} /> :
+                 studentConfirmAction.type === "archive" ? <Archive size={20} /> :
+                 studentConfirmAction.type === "restore" ? <ArchiveRestore size={20} /> :
+                 studentConfirmAction.type === "deactivate" ? <UserX size={20} /> : <UserCheck size={20} />}
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16 }}>
+                  {studentConfirmAction.type === "delete" ? "Permanently Delete Student?" :
+                   studentConfirmAction.type === "archive" ? "Archive Student?" :
+                   studentConfirmAction.type === "restore" ? "Restore Student to Active?" :
+                   studentConfirmAction.type === "deactivate" ? "Deactivate Student?" : "Activate Student?"}
+                </h3>
+                <small className="muted">
+                  {studentConfirmAction.student?.name} ({studentConfirmAction.student?.admissionNo || studentConfirmAction.student?.admissionNumber})
+                </small>
+              </div>
+            </div>
+
+            {studentConfirmAction.error && (
+              <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", color: "#991B1B", padding: "8px 12px", borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
+                {studentConfirmAction.error}
+              </div>
+            )}
+
+            <p style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.5, margin: "0 0 12px" }}>
+              {studentConfirmAction.type === "delete" && (
+                <>
+                  <strong style={{ color: "var(--danger)" }}>DANGER:</strong> This action cannot be undone. Permanently removing this student record will also delete all historical attendance records linked to this admission number.
+                </>
+              )}
+              {studentConfirmAction.type === "archive" && (
+                "Archiving safely moves this student to the Madrasa archives. All previous attendance history and registers remain intact and can be restored at any time."
+              )}
+              {studentConfirmAction.type === "restore" && (
+                "Restoring this student will make them active and available for class attendance registers again."
+              )}
+              {studentConfirmAction.type === "deactivate" && (
+                "Deactivating this student will keep their records safe but exclude them from regular daily attendance registers."
+              )}
+              {studentConfirmAction.type === "activate" && (
+                "Re-activating this student enables them for daily attendance registers in their assigned class."
+              )}
+            </p>
+
+            {studentConfirmAction.type === "delete" && (
+              <label style={{ margin: "10px 0" }}>
+                <span style={{ fontSize: 12 }}>
+                  Type admission number <strong>{studentConfirmAction.student?.admissionNo || studentConfirmAction.student?.admissionNumber}</strong> to confirm:
+                </span>
+                <input
+                  type="text"
+                  placeholder={studentConfirmAction.student?.admissionNo || studentConfirmAction.student?.admissionNumber}
+                  value={studentConfirmAction.confirmAdmNo}
+                  onChange={(e) => setStudentConfirmAction({ ...studentConfirmAction, confirmAdmNo: e.target.value })}
+                  style={{ minHeight: 40, marginTop: 4 }}
+                />
+              </label>
+            )}
+
+            <div className="confirm-dialog-actions">
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={studentConfirmAction.loading}
+                onClick={() => setStudentConfirmAction(null)}
+                style={{ minHeight: 38 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={`btn ${studentConfirmAction.type === "delete" ? "danger" : studentConfirmAction.type === "archive" ? "warning" : "primary"}`}
+                disabled={
+                  studentConfirmAction.loading ||
+                  (studentConfirmAction.type === "delete" &&
+                    studentConfirmAction.confirmAdmNo.trim() !== (studentConfirmAction.student?.admissionNo || studentConfirmAction.student?.admissionNumber))
+                }
+                onClick={executeStudentConfirmAction}
+                style={{
+                  minHeight: 38,
+                  background:
+                    studentConfirmAction.type === "delete" ? "var(--danger)" :
+                    studentConfirmAction.type === "archive" || studentConfirmAction.type === "deactivate" ? "var(--warning)" : "var(--primary)",
+                  color: "#fff"
+                }}
+              >
+                {studentConfirmAction.loading ? "Processing..." :
+                 studentConfirmAction.type === "delete" ? "Delete Permanently" :
+                 studentConfirmAction.type === "archive" ? "Archive Student" :
+                 studentConfirmAction.type === "restore" ? "Restore Student" :
+                 studentConfirmAction.type === "deactivate" ? "Deactivate" : "Activate"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* LIVE CAMERA MODAL (GETUSERMEDIA) */}
       {cameraActive && (
         <div className="camera-modal-overlay">
@@ -2741,6 +4663,14 @@ export default function App() {
         >
           <Camera size={20} />
           <span>{t.attendance}</span>
+        </button>
+
+        <button
+          className={`bottom-nav-item ${tab === "monitoring" ? "active" : ""}`}
+          onClick={() => setTab("monitoring")}
+        >
+          <Activity size={20} />
+          <span>{t.monitoring}</span>
         </button>
 
         <button
