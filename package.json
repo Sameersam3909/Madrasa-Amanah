@@ -2,12 +2,15 @@
   "name": "madrasa-smart-attendance-system",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Mobile-first, offline-ready smart attendance system for Madrasa Amanah",
   "scripts": {
     "install:all": "npm --prefix server install && npm --prefix client install",
     "dev:server": "npm --prefix server run dev",
     "dev:client": "npm --prefix client run dev",
     "build:client": "npm --prefix client run build",
-    "start:server": "npm --prefix server start"
+    "start:server": "npm --prefix server start",
+    "backup:monthly": "node scripts/export-monthly-backup.js",
+    "test:monthly-backup": "node server/test-monthly-backup.js"
   }
 }

@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "seed:admin": "node src/seedAdmin.js",
     "test": "node test-student-management.js && node test-e2e.js",
-    "test:student-mgmt": "node test-student-management.js"
+    "test:student-mgmt": "node test-student-management.js",
+    "test:monthly-backup": "node test-monthly-backup.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

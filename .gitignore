@@ -22,10 +22,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Backups & Archives
-backups/
+# Backups & Archives (allow structured monthly excel backups, ignore raw database dumps)
+backups/*.archive.gz
 *.archive.gz
-*.sha256
+!backups/
+!backups/**/*.xlsx
+!backups/**/*.sha256
 
 # Local Database Stores
 .mongo-local-store/

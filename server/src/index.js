@@ -13,6 +13,13 @@ import { requireAuth, requireAdmin, canAccessClass } from "./auth.js";
 import { uploadImageDataUrl } from "./cloudinary.js";
 import { connectDB, getDatabaseInfo } from "./db.js";
 import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport } from "./weeklyReportService.js";
+import {
+  getPreviousReportingMonth,
+  parseReportingMonth,
+  generateMonthlyExcelWorkbook,
+  verifyMonthlyExcelBackup,
+  exportAndSaveMonthlyBackup
+} from "./monthlyBackupService.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -1315,6 +1322,54 @@ app.get("/api/admin/backup/export", requireAdmin, async (req, res) => {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`);
   res.send(JSON.stringify(backupPackage, null, 2));
+});
+
+// --- AUTOMATED MONTHLY EXCEL BACKUP ENDPOINTS ---
+// GET /api/admin/backup/monthly-excel
+// Authenticated with Admin JWT or restricted x-backup-token / BACKUP_SERVICE_TOKEN
+app.get("/api/admin/backup/monthly-excel", requireAdmin, async (req, res) => {
+  const monthParam = req.query.month;
+  const monthMeta = monthParam
+    ? parseReportingMonth(monthParam)
+    : getPreviousReportingMonth(new Date(), process.env.REPORT_TIMEZONE || "Asia/Kolkata");
+
+  if (req.query.download === "true" || req.query.download === "1") {
+    const { workbook } = await generateMonthlyExcelWorkbook({
+      from: monthMeta.from,
+      to: monthMeta.to,
+      monthLabel: monthMeta.monthLabel,
+      monthKey: monthMeta.monthKey
+    });
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${monthMeta.filename}"; filename*=UTF-8''${encodeURIComponent(monthMeta.filename)}`);
+    await workbook.xlsx.write(res);
+    return res.end();
+  }
+
+  // Verification / Status check mode
+  const result = await exportAndSaveMonthlyBackup({
+    targetMonth: monthParam,
+    force: req.query.force === "true",
+    actorId: req.user._id
+  });
+
+  res.json(result);
+});
+
+// POST /api/admin/backup/monthly-export
+// Executes export, saves to backups/YYYY/YYYY-MM-attendance.xlsx, generates sha256, verifies integrity
+app.post("/api/admin/backup/monthly-export", requireAdmin, async (req, res) => {
+  const targetMonth = req.body.month;
+  const force = Boolean(req.body.force);
+
+  const result = await exportAndSaveMonthlyBackup({
+    targetMonth,
+    force,
+    actorId: req.user._id
+  });
+
+  res.json(result);
 });
 
 // Admin User Management

@@ -1,0 +1,164 @@
+# ──────────────────────────────────────────────────────────────
+# Madrasa Amanah — Automated Monthly Attendance Backup
+# ──────────────────────────────────────────────────────────────
+# On the first day of every month at 2:00 AM IST (20:30 UTC on
+# month-end), exports the previous calendar month's attendance
+# records from MongoDB Atlas into a verified, multi-sheet Excel
+# workbook and commits it securely to the repository under backups/YYYY/.
+# ──────────────────────────────────────────────────────────────
+
+name: Monthly Attendance Backup to GitHub
+
+on:
+  schedule:
+    # 20:30 UTC on the 28th-31st of each month.
+    # In Asia/Kolkata (UTC + 5:30), 20:30 UTC is exactly 02:00 AM IST of the next calendar day.
+    # The timezone guard ensures execution occurs strictly on day 01 in Asia/Kolkata.
+    - cron: "30 20 28-31 * *"
+  workflow_dispatch:
+    inputs:
+      target_month:
+        description: "Target reporting month in YYYY-MM format (e.g. 2026-09). Leave empty for previous calendar month."
+        required: false
+        default: ""
+      force:
+        description: "Force regeneration even if a verified backup already exists for this period"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: monthly-attendance-backup-${{ inputs.target_month || 'auto' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    name: Monthly Excel Export & Secure Git Backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BACKUP_REPO_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Timezone & Day-1 Schedule Guard (Asia/Kolkata)
+        id: guard
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            IST_DAY=$(TZ="Asia/Kolkata" date +%d)
+            IST_DATE=$(TZ="Asia/Kolkata" date +%Y-%m-%d)
+            IST_TIME=$(TZ="Asia/Kolkata" date +%H:%M:%S)
+            echo "Current date and time in Asia/Kolkata: ${IST_DATE} ${IST_TIME} IST (Day: ${IST_DAY})"
+            if [ "${IST_DAY}" != "01" ]; then
+              echo "ℹ️ Current day in Asia/Kolkata is ${IST_DAY}, not the 1st of the month."
+              echo "Skipping scheduled execution until 02:00 AM IST on the 1st of the month."
+              echo "run_backup=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "✅ Confirmed: Today is the 1st of the month in Asia/Kolkata."
+          else
+            echo "⚡ Manual workflow_dispatch trigger detected. Proceeding with backup."
+          fi
+          echo "run_backup=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate database credentials
+        if: steps.guard.outputs.run_backup == 'true'
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          if [ -z "${MONGODB_URI:-}" ]; then
+            echo "::error::Secret MONGODB_URI is not configured in this repository."
+            echo ""
+            echo "To configure your MongoDB connection:"
+            echo "  1. Go to repository Settings -> Secrets and variables -> Actions -> Secrets"
+            echo "  2. Click 'New repository secret'"
+            echo "  3. Name:  MONGODB_URI"
+            echo "  4. Value: mongodb+srv://<USER>:<PASS>@<CLUSTER>.mongodb.net/madrasa_attendance"
+            echo ""
+            exit 1
+          fi
+          echo "✅ MongoDB database connection secret verified."
+
+      - name: Set up Node.js
+        if: steps.guard.outputs.run_backup == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: "server/package-lock.json"
+
+      - name: Install server dependencies
+        if: steps.guard.outputs.run_backup == 'true'
+        run: |
+          npm --prefix server ci
+
+      - name: Execute Monthly Excel Backup & 8-Step Verification
+        id: export
+        if: steps.guard.outputs.run_backup == 'true'
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          BACKUP_SERVICE_TOKEN: ${{ secrets.BACKUP_SERVICE_TOKEN }}
+          REPORT_TIMEZONE: "Asia/Kolkata"
+        run: |
+          MONTH_ARG=""
+          if [ -n "${{ inputs.target_month }}" ]; then
+            MONTH_ARG="--month=${{ inputs.target_month }}"
+          fi
+          FORCE_ARG=""
+          if [ "${{ inputs.force }}" = "true" ]; then
+            FORCE_ARG="--force"
+          fi
+
+          node scripts/export-monthly-backup.js $MONTH_ARG $FORCE_ARG
+
+      - name: Commit and push backup to repository
+        if: steps.guard.outputs.run_backup == 'true'
+        env:
+          BACKUP_REPO_PAT: ${{ secrets.BACKUP_REPO_PAT }}
+          BACKUP_REPO_URL: ${{ secrets.BACKUP_REPO_URL }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Stage backup folder
+          git add backups/
+
+          if git diff --staged --quiet; then
+            echo "ℹ️  No changes detected. Backup file already exists and is verified up to date in repository."
+          else
+            MONTH_KEY="${{ steps.export.outputs.month_key }}"
+            COMMIT_MSG="Monthly attendance backup: ${MONTH_KEY}"
+            echo "Committing backup: ${COMMIT_MSG}"
+            git commit -m "${COMMIT_MSG}"
+
+            # Check if pushing to a dedicated private backup repository or local origin
+            if [ -n "${BACKUP_REPO_PAT:-}" ]; then
+              TARGET_REPO="${BACKUP_REPO_URL:-https://github.com/Sameersam3909/-Madrasa_Attandace.git}"
+              AUTH_REMOTE_URL=$(echo "$TARGET_REPO" | sed -E "s#https://#https://${BACKUP_REPO_PAT}@#")
+              echo "Pushing backup to external private repository..."
+              git push "$AUTH_REMOTE_URL" HEAD:main || git push "$AUTH_REMOTE_URL" HEAD:${{ github.ref_name }}
+            else
+              echo "Pushing backup to current repository with GITHUB_TOKEN..."
+              git push origin HEAD:${{ github.ref_name }}
+            fi
+
+            echo "✅ Backup committed and pushed successfully!"
+          fi
+
+      - name: Upload backup artifact to GitHub Actions Run
+        if: steps.guard.outputs.run_backup == 'true' && steps.export.outputs.backup_file != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-attendance-backup-${{ steps.export.outputs.month_key }}
+          path: |
+            ${{ steps.export.outputs.backup_file }}
+            ${{ steps.export.outputs.checksum_file }}
+          retention-days: 90
