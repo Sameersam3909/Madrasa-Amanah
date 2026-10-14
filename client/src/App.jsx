@@ -170,6 +170,18 @@ export default function App() {
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [activeMenuStudentId, setActiveMenuStudentId] = useState(null);
 
+  // Close student action menu on Escape key press
+  useEffect(() => {
+    if (!activeMenuStudentId) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setActiveMenuStudentId(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeMenuStudentId]);
+
   // Modals for Student Management
   const [viewingStudentProfile, setViewingStudentProfile] = useState(null);
   const [editingStudent, setEditingStudent] = useState(null);
@@ -1759,7 +1771,7 @@ export default function App() {
 
           <span className={`status-pill ${isOnline ? "online" : "offline"}`}>
             {isOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
-            {isOnline ? t.online : t.offline}
+            <span>{isOnline ? t.online : t.offline}</span>
           </span>
           <LanguageSelect lang={lang} setLang={setLang} />
         </div>
@@ -2944,199 +2956,271 @@ export default function App() {
                   : (classes.find(c => String(c._id || c.id) === String(s.classId))?.name || "Unassigned");
 
                 return (
-                  <div
-                    key={sId}
-                    className="card"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: "12px 14px",
-                      marginBottom: 0,
-                      position: "relative"
-                    }}
-                  >
-                    {/* Student Avatar */}
-                    <div
-                      className="student-card-avatar"
-                      style={{ cursor: "pointer" }}
-                      onClick={() => openStudentProfile(s)}
-                      title="View complete profile"
-                    >
-                      {s.photoUrl ? (
-                        <img src={s.photoUrl} alt="" />
-                      ) : (
-                        (localizeStudentName(s.name, lang)?.[0] || s.name?.[0])?.toUpperCase()
-                      )}
-                    </div>
-
-                    {/* Student Info */}
-                    <div
-                      style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
-                      onClick={() => openStudentProfile(s)}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                        <strong style={{ fontSize: 14 }}>{localizeStudentName(s.name, lang)}</strong>
-                        <span style={{ fontSize: 11, background: "var(--canvas)", padding: "1px 6px", borderRadius: 4, color: "var(--text)", fontWeight: 600 }}>
-                          {s.admissionNo || s.admissionNumber}
-                        </span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, fontSize: 12, color: "var(--muted)" }}>
-                        <span>{studentClass}</span>
-                        {s.guardianPhone && <span>· {s.guardianPhone}</span>}
-                      </div>
-                      {s.consentGiven && (
-                        <small style={{ display: "block", color: "var(--success)", fontSize: 10, fontWeight: 700, marginTop: 2 }}>
-                          Photo Consent Recorded ✓
-                        </small>
-                      )}
-                    </div>
-
-                    {/* Status Pill */}
-                    <span className={`status-pill ${s.active !== false ? "neutral" : "offline"}`} style={{ flexShrink: 0 }}>
-                      {s.active !== false ? (t.active || "Active") : (t.archived || "Archived")}
-                    </span>
-
-                    {/* Quick Profile & Edit Buttons */}
-                    <button
-                      className="btn secondary"
-                      onClick={() => openStudentProfile(s)}
-                      title={t.viewProfile || "View Profile"}
-                      style={{ minHeight: 34, padding: "6px 10px", fontSize: 12 }}
-                    >
-                      <Eye size={15} />
-                    </button>
-
-                    <button
-                      className="btn secondary"
-                      onClick={() => openEditStudent(s)}
-                      title={t.editDetails || "Edit Details"}
-                      style={{ minHeight: 34, padding: "6px 10px", fontSize: 12 }}
-                    >
-                      <Edit3 size={15} />
-                    </button>
-
-                    {/* Actions Menu Trigger */}
-                    <div style={{ position: "relative" }}>
-                      <button
-                        className="student-action-menu-trigger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveMenuStudentId(isMenuOpen ? null : sId);
-                        }}
-                        title={t.actions || "Actions"}
+                  <div key={sId} className="student-card">
+                    {/* Top Row: Avatar + Name / Admission Badge + Status Pill */}
+                    <div className="student-card-top">
+                      <div
+                        className="student-card-avatar"
+                        style={{ cursor: "pointer" }}
+                        onClick={() => openStudentProfile(s)}
+                        title="View complete profile"
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openStudentProfile(s); }}
                       >
-                        <MoreHorizontal size={18} />
-                      </button>
+                        {s.photoUrl ? (
+                          <img src={s.photoUrl} alt="" />
+                        ) : (
+                          (localizeStudentName(s.name, lang)?.[0] || s.name?.[0])?.toUpperCase()
+                        )}
+                      </div>
 
-                      {/* Dropdown Menu */}
-                      {isMenuOpen && (
-                        <>
-                          <div
-                            style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                            onClick={() => setActiveMenuStudentId(null)}
-                          />
-                          <div className="student-action-dropdown" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              className="student-action-item"
-                              onClick={() => openStudentProfile(s)}
-                            >
-                              <Eye size={15} color="var(--primary)" />
-                              <span>{t.viewProfile || "View Profile"}</span>
-                            </button>
+                      <div
+                        className="student-card-main-info"
+                        style={{ cursor: "pointer" }}
+                        onClick={() => openStudentProfile(s)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openStudentProfile(s); }}
+                      >
+                        <div className="student-card-name-row">
+                          <strong>{localizeStudentName(s.name, lang)}</strong>
+                          {(s.admissionNo || s.admissionNumber) && (
+                            <span className="student-card-admission-badge">
+                              {s.admissionNo || s.admissionNumber}
+                            </span>
+                          )}
+                        </div>
+                        {s.consentGiven && (
+                          <small style={{ display: "block", color: "var(--success)", fontSize: 10, fontWeight: 700, marginTop: 1 }}>
+                            Photo Consent Recorded ✓
+                          </small>
+                        )}
+                      </div>
 
-                            <button
-                              className="student-action-item"
-                              onClick={() => openEditStudent(s)}
-                            >
-                              <Edit3 size={15} color="var(--primary)" />
-                              <span>{t.editDetails || "Edit Details"}</span>
-                            </button>
+                      <span className={`status-pill ${s.active !== false ? "neutral" : "offline"}`} style={{ flexShrink: 0 }}>
+                        {s.active !== false ? (t.active || "Active") : (t.archived || "Archived")}
+                      </span>
+                    </div>
 
-                            <button
-                              className="student-action-item"
-                              onClick={() => {
-                                setActiveMenuStudentId(null);
-                                setViewingStudent(s);
-                              }}
-                            >
-                              <Camera size={15} color="var(--primary)" />
-                              <span>{t.changePhoto || "Change Photo"}</span>
-                            </button>
+                    {/* Bottom Row: Class & Guardian Phone on left, Quick Actions & Menu on right */}
+                    <div className="student-card-bottom">
+                      <div className="student-card-meta-line">
+                        <span>{studentClass}</span>
+                        {s.guardianPhone && (
+                          <span>· <a href={`tel:${s.guardianPhone}`} style={{ color: "var(--muted)", textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>{s.guardianPhone}</a></span>
+                        )}
+                      </div>
 
-                            <button
-                              className="student-action-item"
-                              onClick={() => openTransferClass(s)}
-                            >
-                              <ArrowRightLeft size={15} color="var(--primary)" />
-                              <span>{t.changeClass || "Change Class"}</span>
-                            </button>
+                      <div className="student-card-actions-group">
+                        <button
+                          type="button"
+                          className="btn secondary"
+                          onClick={() => openStudentProfile(s)}
+                          title={t.viewProfile || "View Profile"}
+                          aria-label={`${t.viewProfile || "View Profile"} - ${localizeStudentName(s.name, lang)}`}
+                          style={{ minHeight: 34, padding: "5px 9px", fontSize: 12 }}
+                        >
+                          <Eye size={15} />
+                        </button>
 
-                            <button
-                              className="student-action-item"
-                              onClick={() => openAttendanceHistory(s)}
-                            >
-                              <History size={15} color="var(--primary)" />
-                              <span>{t.attendanceHistory || "Attendance History"}</span>
-                            </button>
+                        <button
+                          type="button"
+                          className="btn secondary"
+                          onClick={() => openEditStudent(s)}
+                          title={t.editDetails || "Edit Details"}
+                          aria-label={`${t.editDetails || "Edit Details"} - ${localizeStudentName(s.name, lang)}`}
+                          style={{ minHeight: 34, padding: "5px 9px", fontSize: 12 }}
+                        >
+                          <Edit3 size={15} />
+                        </button>
 
-                            <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+                        <div style={{ position: "relative" }}>
+                          <button
+                            type="button"
+                            className="student-action-menu-trigger"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenuStudentId(isMenuOpen ? null : sId);
+                            }}
+                            aria-expanded={isMenuOpen}
+                            aria-haspopup="true"
+                            title={t.actions || "Actions"}
+                            aria-label={`${t.actions || "Actions"} - ${localizeStudentName(s.name, lang)}`}
+                          >
+                            <MoreHorizontal size={18} />
+                          </button>
 
-                            {/* Activate / Deactivate Toggle */}
-                            {s.active !== false ? (
-                              <button
-                                className="student-action-item"
-                                style={{ color: "var(--warning)" }}
-                                onClick={() => requestStudentAction("deactivate", s)}
+                          {/* Mobile Action Sheet / Desktop Dropdown Menu */}
+                          {isMenuOpen && (
+                            <>
+                              <div
+                                className="student-action-sheet-backdrop"
+                                onClick={() => setActiveMenuStudentId(null)}
+                              />
+                              <div
+                                className="student-action-sheet"
+                                onClick={(e) => e.stopPropagation()}
+                                role="dialog"
+                                aria-modal="true"
+                                aria-label={`Actions for ${localizeStudentName(s.name, lang)}`}
                               >
-                                <UserX size={15} />
-                                <span>{t.deactivate || "Deactivate"}</span>
-                              </button>
-                            ) : (
-                              <button
-                                className="student-action-item success"
-                                onClick={() => requestStudentAction("activate", s)}
-                              >
-                                <UserCheck size={15} />
-                                <span>{t.activate || "Activate"}</span>
-                              </button>
-                            )}
+                                <div className="student-action-sheet-header">
+                                  <h4>
+                                    <Users size={16} />
+                                    <span>{localizeStudentName(s.name, lang)}</span>
+                                  </h4>
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveMenuStudentId(null)}
+                                    style={{ background: "transparent", border: "none", padding: 4, cursor: "pointer", color: "var(--muted)", display: "flex", alignItems: "center" }}
+                                    aria-label="Close"
+                                  >
+                                    <X size={18} />
+                                  </button>
+                                </div>
 
-                            {/* Archive / Restore (Admin only) */}
-                            {user?.role === "admin" && (
-                              s.active !== false ? (
-                                <button
-                                  className="student-action-item"
-                                  style={{ color: "var(--warning)" }}
-                                  onClick={() => requestStudentAction("archive", s)}
-                                >
-                                  <Archive size={15} />
-                                  <span>{t.archive || "Archive"}</span>
-                                </button>
-                              ) : (
-                                <button
-                                  className="student-action-item success"
-                                  onClick={() => requestStudentAction("restore", s)}
-                                >
-                                  <ArchiveRestore size={15} />
-                                  <span>{t.restore || "Restore"}</span>
-                                </button>
-                              )
-                            )}
+                                <div className="student-action-sheet-list">
+                                  <button
+                                    type="button"
+                                    className="student-action-item"
+                                    onClick={() => {
+                                      setActiveMenuStudentId(null);
+                                      openStudentProfile(s);
+                                    }}
+                                  >
+                                    <Eye size={15} color="var(--primary)" />
+                                    <span>{t.viewProfile || "View Profile"}</span>
+                                  </button>
 
-                            {/* Permanent Removal (Admin only) */}
-                            {user?.role === "admin" && (
-                              <button
-                                className="student-action-item danger"
-                                onClick={() => requestStudentAction("delete", s)}
-                              >
-                                <Trash2 size={15} />
-                                <span>{t.removeStudent || "Delete Student"}</span>
-                              </button>
-                            )}
-                          </div>
-                        </>
-                      )}
+                                  <button
+                                    type="button"
+                                    className="student-action-item"
+                                    onClick={() => {
+                                      setActiveMenuStudentId(null);
+                                      openEditStudent(s);
+                                    }}
+                                  >
+                                    <Edit3 size={15} color="var(--primary)" />
+                                    <span>{t.editDetails || "Edit Details"}</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="student-action-item"
+                                    onClick={() => {
+                                      setActiveMenuStudentId(null);
+                                      setViewingStudent(s);
+                                    }}
+                                  >
+                                    <Camera size={15} color="var(--primary)" />
+                                    <span>{t.changePhoto || "Change Photo"}</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="student-action-item"
+                                    onClick={() => {
+                                      setActiveMenuStudentId(null);
+                                      openTransferClass(s);
+                                    }}
+                                  >
+                                    <ArrowRightLeft size={15} color="var(--primary)" />
+                                    <span>{t.changeClass || "Change Class"}</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="student-action-item"
+                                    onClick={() => {
+                                      setActiveMenuStudentId(null);
+                                      openAttendanceHistory(s);
+                                    }}
+                                  >
+                                    <History size={15} color="var(--primary)" />
+                                    <span>{t.attendanceHistory || "Attendance History"}</span>
+                                  </button>
+
+                                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+
+                                  {/* Activate / Deactivate Toggle */}
+                                  {s.active !== false ? (
+                                    <button
+                                      type="button"
+                                      className="student-action-item"
+                                      style={{ color: "var(--warning)" }}
+                                      onClick={() => {
+                                        setActiveMenuStudentId(null);
+                                        requestStudentAction("deactivate", s);
+                                      }}
+                                    >
+                                      <UserX size={15} />
+                                      <span>{t.deactivate || "Deactivate"}</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="student-action-item success"
+                                      onClick={() => {
+                                        setActiveMenuStudentId(null);
+                                        requestStudentAction("activate", s);
+                                      }}
+                                    >
+                                      <UserCheck size={15} />
+                                      <span>{t.activate || "Activate"}</span>
+                                    </button>
+                                  )}
+
+                                  {/* Archive / Restore (Admin only) */}
+                                  {user?.role === "admin" && (
+                                    s.active !== false ? (
+                                      <button
+                                        type="button"
+                                        className="student-action-item"
+                                        style={{ color: "var(--warning)" }}
+                                        onClick={() => {
+                                          setActiveMenuStudentId(null);
+                                          requestStudentAction("archive", s);
+                                        }}
+                                      >
+                                        <Archive size={15} />
+                                        <span>{t.archive || "Archive"}</span>
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="student-action-item success"
+                                        onClick={() => {
+                                          setActiveMenuStudentId(null);
+                                          requestStudentAction("restore", s);
+                                        }}
+                                      >
+                                        <ArchiveRestore size={15} />
+                                        <span>{t.restore || "Restore"}</span>
+                                      </button>
+                                    )
+                                  )}
+
+                                  {/* Permanent Removal (Admin only) */}
+                                  {user?.role === "admin" && (
+                                    <button
+                                      type="button"
+                                      className="student-action-item danger"
+                                      onClick={() => {
+                                        setActiveMenuStudentId(null);
+                                        requestStudentAction("delete", s);
+                                      }}
+                                    >
+                                      <Trash2 size={15} />
+                                      <span>{t.removeStudent || "Delete Student"}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
@@ -3220,7 +3304,7 @@ export default function App() {
               }}
               style={{ display: "grid", gap: 14 }}
             >
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="responsive-grid-2">
                 <label>
                   {t.class} *
                   <select
@@ -3260,7 +3344,7 @@ export default function App() {
                 />
               </label>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="responsive-grid-2">
                 <label>
                   {t.gender || "Gender"}
                   <select
@@ -3283,7 +3367,7 @@ export default function App() {
                 </label>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="responsive-grid-2">
                 <label>
                   {t.guardian}
                   <input
@@ -3304,7 +3388,7 @@ export default function App() {
                 </label>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="responsive-grid-2">
                 <label>
                   {t.address || "Address"}
                   <input
@@ -3377,7 +3461,7 @@ export default function App() {
                 </button>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+              <div className="responsive-grid-2" style={{ marginTop: 10 }}>
                 <label>
                   {t.from}
                   <input
@@ -3407,20 +3491,20 @@ export default function App() {
 
             {/* Weekly Multi-Sheet Excel & Email Automation */}
             <div className="card">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                <h3>Weekly Report Automation</h3>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+                <h3 style={{ margin: 0 }}>Weekly Report Automation</h3>
                 <span className="status-pill online">Automated</span>
               </div>
               <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
                 Executive 3-sheet Excel report covering attendance summary, detailed audit log, and class breakdown.
               </p>
 
-              <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
-                <div><strong>Scheduled Recipient:</strong> 2300030621cseh1@gmail.com</div>
+              <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8, marginBottom: 12, fontSize: 13, wordBreak: "break-word" }}>
+                <div><strong>Scheduled Recipient:</strong> <span style={{ wordBreak: "break-all" }}>2300030621cseh1@gmail.com</span></div>
                 <div style={{ color: "var(--muted)", marginTop: 2 }}>Weekly Schedule: Mondays at 06:00 AM (Previous Mon–Sun)</div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="responsive-grid-2">
                 <button
                   className="btn secondary"
                   onClick={downloadWeeklyReport}
@@ -3446,7 +3530,7 @@ export default function App() {
               <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
                 Export clean student roster with admission numbers, guardian contacts, and photo consent flags.
               </p>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="responsive-grid-2">
                 <button
                   className="btn secondary"
                   onClick={() => downloadStudentsRoster("csv")}
@@ -4089,7 +4173,7 @@ export default function App() {
             )}
 
             <form onSubmit={handleSaveStudentEdit} style={{ display: "grid", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="responsive-grid-2">
                 <label>
                   {t.class} *
                   <select
@@ -4132,7 +4216,7 @@ export default function App() {
                 />
               </label>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="responsive-grid-2">
                 <label>
                   {t.gender || "Gender"}
                   <select
@@ -4155,7 +4239,7 @@ export default function App() {
                 </label>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="responsive-grid-2">
                 <label>
                   {t.guardian}
                   <input
@@ -4176,7 +4260,7 @@ export default function App() {
                 </label>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="responsive-grid-2">
                 <label>
                   {t.address || "Address"}
                   <input
@@ -4396,7 +4480,7 @@ export default function App() {
 
                 {/* Date-Range Filter Controls for Student History */}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "10px 0 14px", flexWrap: "wrap", background: "var(--canvas)", padding: "10px 12px", borderRadius: "var(--radius-md)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 200 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 120 }}>
                     <small style={{ fontWeight: 700, color: "var(--muted)" }}>{t.from || "From"}:</small>
                     <input
                       type="date"
@@ -4405,7 +4489,7 @@ export default function App() {
                       style={{ minHeight: 32, fontSize: 12, flex: 1 }}
                     />
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 200 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 120 }}>
                     <small style={{ fontWeight: 700, color: "var(--muted)" }}>{t.to || "To"}:</small>
                     <input
                       type="date"
