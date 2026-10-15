@@ -6522,7 +6522,7 @@ export default function App() {
         </div>
       )}
 
-      {/* MOBILE BOTTOM NAVIGATION — PROFESSIONAL SINGLE-ROW FIXED LAYOUT */}
+      {/* MOBILE BOTTOM NAVIGATION — PROFESSIONAL SINGLE-ROW FIXED LAYOUT (ALL 6 ITEMS) */}
       <nav className="bottom-nav" aria-label="Mobile Navigation">
         {/* Item 1: Dashboard */}
         <button
@@ -6532,7 +6532,7 @@ export default function App() {
           aria-label={t.dashboard}
           aria-current={tab === "dashboard" ? "page" : undefined}
         >
-          <LayoutGrid size={20} strokeWidth={1.8} />
+          <LayoutGrid size={19} strokeWidth={1.8} />
           <span>{t.dashboard}</span>
         </button>
 
@@ -6544,7 +6544,7 @@ export default function App() {
           aria-label={t.takeAttendanceAction || t.attendance}
           aria-current={tab === "attendance" ? "page" : undefined}
         >
-          <Camera size={20} strokeWidth={1.8} />
+          <Camera size={19} strokeWidth={1.8} />
           <span>{t.takeAttendanceAction || t.attendance}</span>
         </button>
 
@@ -6556,7 +6556,7 @@ export default function App() {
           aria-label={t.monitoring}
           aria-current={tab === "monitoring" ? "page" : undefined}
         >
-          <Activity size={20} strokeWidth={1.8} />
+          <Activity size={19} strokeWidth={1.8} />
           <span>{t.monitoring}</span>
         </button>
 
@@ -6568,20 +6568,32 @@ export default function App() {
           aria-label={t.syncCenter}
           aria-current={tab === "sync" ? "page" : undefined}
         >
-          <RefreshCw size={20} strokeWidth={1.8} />
+          <RefreshCw size={19} strokeWidth={1.8} />
           <span>{t.syncCenter}</span>
           {pendingCount > 0 && <span className="bottom-badge">{pendingCount}</span>}
         </button>
 
-        {/* Item 5: More (Access Students, Reports, Settings, Add Student) */}
+        {/* Item 5: Students */}
         <button
           type="button"
-          className={`bottom-nav-item ${["more", "students", "reports", "settings", "add-student"].includes(tab) ? "active" : ""}`}
+          className={`bottom-nav-item ${tab === "students" ? "active" : ""}`}
+          onClick={() => setTab("students")}
+          aria-label={t.students}
+          aria-current={tab === "students" ? "page" : undefined}
+        >
+          <Users size={19} strokeWidth={1.8} />
+          <span>{t.students}</span>
+        </button>
+
+        {/* Item 6: More */}
+        <button
+          type="button"
+          className={`bottom-nav-item ${["more", "reports", "settings", "add-student"].includes(tab) ? "active" : ""}`}
           onClick={() => setTab("more")}
           aria-label={t.more}
-          aria-current={["more", "students", "reports", "settings", "add-student"].includes(tab) ? "page" : undefined}
+          aria-current={["more", "reports", "settings", "add-student"].includes(tab) ? "page" : undefined}
         >
-          <MoreHorizontal size={20} strokeWidth={1.8} />
+          <MoreHorizontal size={19} strokeWidth={1.8} />
           <span>{t.more}</span>
         </button>
       </nav>

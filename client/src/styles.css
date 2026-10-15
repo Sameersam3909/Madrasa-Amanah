@@ -411,7 +411,7 @@ small {
   }
 }
 
-/* BOTTOM NAVIGATION — PROFESSIONAL SINGLE-ROW FIXED LAYOUT */
+/* BOTTOM NAVIGATION — PROFESSIONAL SINGLE-ROW FIXED LAYOUT (ALL 6 ITEMS) */
 .bottom-nav {
   position: fixed;
   bottom: 0;
@@ -421,11 +421,11 @@ small {
   max-width: 100%;
   height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px));
   min-height: var(--bottom-nav-height);
-  padding: 0 2px env(safe-area-inset-bottom, 0px);
+  padding: 0 1px env(safe-area-inset-bottom, 0px);
   background: #FFFFFF;
   border-top: 1px solid var(--border);
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   align-items: stretch;
   z-index: 50;
   box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.04);
@@ -445,7 +445,7 @@ small {
   border: none;
   border-radius: 0;
   color: var(--muted);
-  padding: 4px 2px;
+  padding: 3px 1px;
   position: relative;
   cursor: pointer;
   touch-action: manipulation;
@@ -481,17 +481,17 @@ small {
 
 .bottom-nav-item svg {
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+  width: 19px;
+  height: 19px;
   stroke: currentColor;
   stroke-width: 1.8;
   transition: stroke 0.15s ease, transform 0.15s ease;
 }
 
 .bottom-nav-item span {
-  font-size: 10.5px;
+  font-size: clamp(9px, 2.5vw, 10.5px);
   font-weight: 500;
-  line-height: 1.15;
+  line-height: 1.12;
   text-align: center;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -501,7 +501,7 @@ small {
   overflow-wrap: break-word;
   max-width: 100%;
   padding: 0 1px;
-  letter-spacing: -0.15px;
+  letter-spacing: -0.2px;
 }
 
 /* Active route highlighting */
@@ -511,7 +511,7 @@ small {
 }
 
 .bottom-nav-item.active::before {
-  width: 24px;
+  width: 20px;
 }
 
 .bottom-nav-item.active svg {
@@ -522,22 +522,22 @@ small {
 /* RTL layout support for Urdu */
 [dir="rtl"] .bottom-nav-item span {
   letter-spacing: normal;
-  font-size: 11px;
+  font-size: clamp(9.5px, 2.6vw, 11px);
 }
 
 /* Badge for pending sync items */
 .bottom-nav-item .bottom-badge {
   position: absolute;
-  top: 4px;
-  right: calc(50% - 18px);
+  top: 3px;
+  right: calc(50% - 15px);
   background: var(--danger);
   color: #fff;
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 700;
   min-width: 14px;
   height: 14px;
   line-height: 14px;
-  padding: 0 3px;
+  padding: 0 2px;
   border-radius: 999px;
   border: 1.5px solid #FFFFFF;
   text-align: center;
@@ -546,7 +546,7 @@ small {
 
 [dir="rtl"] .bottom-nav-item .bottom-badge {
   right: auto;
-  left: calc(50% - 18px);
+  left: calc(50% - 15px);
 }
 
 /* BUTTONS */
