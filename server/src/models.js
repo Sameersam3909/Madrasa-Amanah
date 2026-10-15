@@ -17,6 +17,7 @@ const classSchema = new mongoose.Schema({
   active: { type: Boolean, default: true }
 }, { timestamps: true });
 classSchema.index({ name: 1, section: 1, academicYear: 1 }, { unique: true });
+classSchema.index({ teacherIds: 1, active: 1 });
 
 const studentSchema = new mongoose.Schema({
   admissionNo: { type: String, required: true, unique: true, trim: true },
@@ -34,6 +35,8 @@ const studentSchema = new mongoose.Schema({
   consentGiven: { type: Boolean, default: true },
   active: { type: Boolean, default: true, index: true }
 }, { timestamps: true });
+studentSchema.index({ classId: 1, active: 1, name: 1 });
+studentSchema.index({ admissionNo: 1, active: 1 });
 
 const attendanceSchema = new mongoose.Schema({
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: "Student", required: true },

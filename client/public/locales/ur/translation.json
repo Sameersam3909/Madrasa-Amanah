@@ -399,5 +399,40 @@
     "viewProfileOf": "پروفائل دیکھیں - {{name}}",
     "editDetailsOf": "تفصیلات میں ترمیم - {{name}}",
     "actionsFor": "اعمال برائے {{name}}"
+  },
+  "session": {
+    "warningTitle": "سیشن ختم ہونے والا ہے",
+    "warningMessage": "غیر فعالیت کی وجہ سے آپ کا سیشن {{time}} میں خودکار طور پر بند ہو جائے گا۔",
+    "warningAttendanceSaved": "آپ کی حاضری کا ڈرافٹ اس ڈیوائس پر محفوظ کر لیا گیا ہے۔",
+    "continueSession": "سیشن جاری رکھیں",
+    "signOut": "سائن آؤٹ کریں",
+    "inactivityExpired": "2 گھنٹے غیر فعال رہنے کی وجہ سے آپ کا سیشن ختم ہو گیا ہے۔ براہ کرم دوبارہ سائن ان کریں۔",
+    "maxLifetimeExpired": "3 گھنٹے کی زیادہ سے زیادہ سیشن مدت مکمل ہو گئی۔ براہ کرم دوبارہ سائن ان کریں۔",
+    "refreshSuccess": "سیشن کی مدت کامیابی سے بڑھا دی گئی۔"
+  },
+  "healthMonitoring": {
+    "title": "بیک اینڈ ہیلتھ اور سروس کی صورتحال",
+    "subtitle": "Render API اور MongoDB Atlas کے رابطے کی لائیو نگرانی۔",
+    "status": "صورتحال",
+    "healthy": "صحت مند (فعال)",
+    "degraded": "متاثرہ",
+    "unavailable": "دستیاب نہیں",
+    "checking": "جانچ پڑتال جاری ہے…",
+    "databaseStatus": "ڈیٹابیس (MongoDB)",
+    "connected": "منسلک",
+    "disconnected": "غیر منسلک",
+    "responseTime": "جواب کا وقت",
+    "lastCheck": "آخری جانچ",
+    "consecutiveFailures": "مسلسل ناکامیاں",
+    "checkNow": "ابھی چیک کریں",
+    "renderFreeTierNote": "Render مفت سروسز 15 منٹ کی عدم سرگرمی کے بعد بند ہو جاتی ہیں۔ 10 منٹ کا خودکار چیک سروس کو فعال رکھنے میں مدد کرتا ہے۔ مکمل بلاتعطل رسائی کے لیے ہمیشہ آن پلان استعمال کیا جا سکتا ہے۔",
+    "deploymentLogs": "Render لاگز",
+    "workflowRuns": "GitHub Actions مانیٹر"
+  },
+  "dataStatus": {
+    "cachedData": "محفوظ شدہ ڈیٹا (آف لائن)",
+    "freshlySynced": "تازہ ترین مطابقت پذیر",
+    "lastUpdated": "آخری بار اپ ڈیٹ {{time}}",
+    "loadingData": "کلاؤڈ سے تازہ ڈیٹا لوڈ ہو رہا ہے…"
   }
 }

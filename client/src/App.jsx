@@ -79,7 +79,9 @@ import {
   setLastSyncTime,
   checkStorageEstimate,
   cacheAttendanceHistory,
-  cleanOldAttendance
+  cleanOldAttendance,
+  isolateUserCache,
+  clearUserCache
 } from "./offlineDb";
 
 const today = () => new Date().toLocaleDateString("en-CA");
@@ -121,6 +123,29 @@ export default function App() {
   const [sessionKey, setSessionKey] = useState("morning");
   const [records, setRecords] = useState({});
   const [notes, setNotes] = useState({});
+
+  // Fast Loading & Freshness Indicators
+  const [classesLoading, setClassesLoading] = useState(false);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceFreshness, setAttendanceFreshness] = useState(null); // { type: 'cached'|'synced', time: string }
+
+  // Session Security (2h Inactivity, 3h Max Lifetime, 5m Warning Dialog)
+  const [sessionExpiryWarning, setSessionExpiryWarning] = useState(false);
+  const [sessionCountdown, setSessionCountdown] = useState(300);
+  const [sessionExtending, setSessionExtending] = useState(false);
+  const lastActivityRef = useRef(Date.now());
+
+  // Render Backend Health Monitoring (Admin)
+  const [healthStatus, setHealthStatus] = useState({
+    status: "healthy",
+    database: "connected",
+    responseTime: 0,
+    lastCheck: null,
+    consecutiveFailures: 0,
+    loading: false,
+    lastIncident: null,
+    lastRecovery: null
+  });
 
   // Active Student Profile View Modal & Camera
   const [viewingStudent, setViewingStudent] = useState(null);
@@ -690,32 +715,160 @@ export default function App() {
       });
   }, [token]);
 
-  // Load Classes (Network first, then IndexedDB fallback)
+  // User Cache Isolation on Mount / User change
+  useEffect(() => {
+    if (user?._id || user?.id) {
+      isolateUserCache(user._id || user.id);
+    }
+  }, [user]);
+
+  // Track meaningful user activity (pointer, keys, touch, scroll)
+  // Background polling/refreshes do NOT trigger these
+  useEffect(() => {
+    if (!token) return;
+    const updateActivity = () => {
+      lastActivityRef.current = Date.now();
+    };
+    window.addEventListener("pointerdown", updateActivity, { passive: true });
+    window.addEventListener("keydown", updateActivity, { passive: true });
+    window.addEventListener("touchstart", updateActivity, { passive: true });
+    window.addEventListener("scroll", updateActivity, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", updateActivity);
+      window.removeEventListener("keydown", updateActivity);
+      window.removeEventListener("touchstart", updateActivity);
+      window.removeEventListener("scroll", updateActivity);
+    };
+  }, [token]);
+
+  // Auto-save attendance drafts before automatic logout
+  const autoSaveCurrentAttendance = async () => {
+    try {
+      if (selectedClass && records && Object.keys(records).length > 0) {
+        const studentRecords = Object.entries(records).map(([studentId, data]) => ({
+          studentId,
+          status: data.status,
+          note: notes[studentId] || ""
+        }));
+        await saveAttendanceLocally({
+          classId: selectedClass,
+          dateKey,
+          sessionKey,
+          records: studentRecords,
+          source: "auto-session-save"
+        });
+        console.log("[Session Security] Attendance draft safely preserved in local IndexedDB outbox.");
+      }
+    } catch (e) {
+      console.warn("autoSaveCurrentAttendance note:", e.message);
+    }
+  };
+
+  // Continuous Session Inactivity (2 hours) & Maximum Session Lifetime (3 hours) Enforcement
+  useEffect(() => {
+    if (!token) return;
+
+    const interval = setInterval(async () => {
+      const now = Date.now();
+      const inactivitySec = Math.floor((now - lastActivityRef.current) / 1000);
+      const sessionStart = parseInt(localStorage.getItem("madrasa_session_start") || String(now), 10);
+      const totalSessionSec = Math.floor((now - sessionStart) / 1000);
+
+      const maxLifetimeSec = 3 * 3600; // 3 hours absolute max
+      const inactivityLimitSec = 2 * 3600; // 2 hours inactivity limit
+      const warningWindowSec = 300; // 5 minutes warning
+
+      // 1. Check absolute 3-hour maximum session lifetime
+      if (totalSessionSec >= maxLifetimeSec) {
+        await autoSaveCurrentAttendance();
+        logout(t("session.maxLifetimeExpired", "Maximum session lifetime of 3 hours reached. Please sign in again."));
+        return;
+      }
+
+      // 2. Check 2-hour inactivity timeout
+      if (inactivitySec >= inactivityLimitSec) {
+        await autoSaveCurrentAttendance();
+        logout(t("session.inactivityExpired", "Your session has expired due to 2 hours of inactivity. Please sign in again."));
+        return;
+      }
+
+      // 3. Check if within 5-minute warning window
+      const remainingInactivity = inactivityLimitSec - inactivitySec;
+      const remainingTotal = maxLifetimeSec - totalSessionSec;
+      const effectiveRemaining = Math.min(remainingInactivity, remainingTotal);
+
+      if (effectiveRemaining <= warningWindowSec) {
+        if (!sessionExpiryWarning) {
+          await autoSaveCurrentAttendance();
+        }
+        setSessionCountdown(Math.max(0, effectiveRemaining));
+        setSessionExpiryWarning(true);
+      } else if (sessionExpiryWarning && effectiveRemaining > warningWindowSec) {
+        setSessionExpiryWarning(false);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [token, sessionExpiryWarning, selectedClass, records, notes, dateKey, sessionKey]);
+
+  async function handleContinueSession() {
+    setSessionExtending(true);
+    try {
+      const res = await api.post("/auth/refresh-session");
+      if (res.data?.token) {
+        localStorage.setItem("madrasa_token", res.data.token);
+        setToken(res.data.token);
+        lastActivityRef.current = Date.now();
+        setSessionExpiryWarning(false);
+        setNotice(t("session.refreshSuccess", "Session extended successfully."));
+      }
+    } catch (err) {
+      if (err.response?.status === 401) {
+        logout(err.response?.data?.message || t("session.maxLifetimeExpired", "Maximum session lifetime reached. Please sign in again."));
+      } else {
+        setError(errText(err));
+      }
+    } finally {
+      setSessionExtending(false);
+    }
+  }
+
+  // Stale-While-Revalidate: Instant Local Load + Background Revalidation
   useEffect(() => {
     if (!token || !user) return;
     loadClassesOfflineFirst();
   }, [token, user]);
 
   async function loadClassesOfflineFirst() {
+    // Phase 1: Instant load from IndexedDB cache (<10ms)
     try {
+      const cached = await offlineDb.classes.toArray();
+      if (cached && cached.length) {
+        setClasses(cached);
+        if (!selectedClass) setSelectedClass(cached[0]._id || cached[0].id);
+      }
+    } catch (e) {
+      console.warn("Cached classes read error:", e.message);
+    }
+
+    // Phase 2: Background revalidation via network
+    try {
+      setClassesLoading(true);
       const res = await api.get("/classes");
       setClasses(res.data);
       await cacheClasses(res.data);
-      if (!selectedClass && res.data.length) setSelectedClass(res.data[0]._id || res.data[0].id);
+      if (!selectedClass && res.data.length) {
+        setSelectedClass(res.data[0]._id || res.data[0].id);
+      }
     } catch (err) {
-      // Do not treat 401 or 403 responses as offline network failures!
-      if (err.response?.status === 401 || err.response?.status === 403) {
-        return;
-      }
-      const cached = await offlineDb.classes.toArray();
-      if (cached.length) {
-        setClasses(cached);
-        if (!selectedClass) setSelectedClass(cached[0].id);
-      }
+      if (err.response?.status === 401 || err.response?.status === 403) return;
+      console.warn("Network classes revalidation note:", err.message);
+    } finally {
+      setClassesLoading(false);
     }
   }
 
-  // Load Students and Attendance for Selected Class
+  // Load Students and Attendance for Selected Class (Parallel Network Requests)
   useEffect(() => {
     if (!token || !user || !selectedClass) return;
     if (tab === "attendance") {
@@ -724,54 +877,118 @@ export default function App() {
   }, [token, user, selectedClass, dateKey, sessionKey, tab]);
 
   async function loadStudentsAndAttendanceOfflineFirst(classId, date, session) {
+    if (!classId) return;
+    setAttendanceLoading(true);
+
+    // Phase 1: Instant cache hydration
     try {
-      const res = await api.get("/students", { params: { classId } });
-      const unique = Array.from(new Map(res.data.map((s) => [String(s._id || s.id), s])).values());
-      setStudents(unique);
-      await cacheStudents(unique, classId);
-    } catch (err) {
-      if (err.response?.status === 401 || err.response?.status === 403) {
-        return;
+      const [cachedStudents, cachedDrafts] = await Promise.all([
+        offlineDb.students.where("classId").equals(String(classId)).toArray(),
+        offlineDb.attendanceDrafts
+          .where("classId")
+          .equals(String(classId))
+          .filter((d) => d.dateKey === date && (d.sessionKey === session || !d.sessionKey))
+          .toArray()
+      ]);
+
+      if (cachedStudents.length) {
+        const unique = Array.from(new Map(cachedStudents.map((s) => [String(s._id || s.id), s])).values());
+        setStudents(unique);
       }
-      const cached = await offlineDb.students.where("classId").equals(String(classId)).toArray();
-      const unique = Array.from(new Map(cached.map((s) => [String(s._id || s.id), s])).values());
-      setStudents(unique);
+
+      if (cachedDrafts.length) {
+        const next = {};
+        const noteMap = {};
+        cachedDrafts.forEach((d) => {
+          next[d.studentId] = { status: d.status };
+          if (d.note) noteMap[d.studentId] = d.note;
+        });
+        setRecords(next);
+        setNotes(noteMap);
+        setAttendanceFreshness({ type: "cached", time: new Date().toLocaleTimeString() });
+      }
+    } catch (e) {
+      console.warn("Cached attendance hydration note:", e.message);
     }
 
+    // Phase 2: Parallel network fetching — eliminate sequential waterfall delay
     try {
-      const res = await api.get("/attendance", { params: { classId, dateKey: date, sessionKey: session } });
-      const next = {};
-      const noteMap = {};
-      const confirmed = {};
-      res.data.forEach((a) => {
-        const sid = String(a.studentId?._id || a.studentId?.id || a.studentId);
-        next[sid] = { status: a.status };
-        confirmed[sid] = { status: a.status, updatedAt: a.updatedAt || a.createdAt };
-        if (a.note) noteMap[sid] = a.note;
-      });
-      setRecords(next);
-      setConfirmedRecords(confirmed);
-      setNotes(noteMap);
-    } catch (err) {
-      if (err.response?.status === 401 || err.response?.status === 403) {
-        return;
+      const [studentsRes, attendanceRes] = await Promise.allSettled([
+        api.get("/students", { params: { classId } }),
+        api.get("/attendance", { params: { classId, dateKey: date, sessionKey: session } })
+      ]);
+
+      if (studentsRes.status === "fulfilled") {
+        const unique = Array.from(new Map(studentsRes.value.data.map((s) => [String(s._id || s.id), s])).values());
+        setStudents(unique);
+        await cacheStudents(unique, classId);
       }
-      const drafts = await offlineDb.attendanceDrafts
-        .where("classId")
-        .equals(String(classId))
-        .filter((d) => d.dateKey === date && (d.sessionKey === session || !d.sessionKey))
-        .toArray();
-      const next = {};
-      const noteMap = {};
-      drafts.forEach((d) => {
-        next[d.studentId] = { status: d.status };
-        if (d.note) noteMap[d.studentId] = d.note;
-      });
-      setRecords(next);
-      setConfirmedRecords({});
-      setNotes(noteMap);
+
+      if (attendanceRes.status === "fulfilled") {
+        const next = {};
+        const noteMap = {};
+        const confirmed = {};
+        attendanceRes.value.data.forEach((a) => {
+          const sid = String(a.studentId?._id || a.studentId?.id || a.studentId);
+          next[sid] = { status: a.status };
+          confirmed[sid] = { status: a.status, updatedAt: a.updatedAt || a.createdAt };
+          if (a.note) noteMap[sid] = a.note;
+        });
+        setRecords(next);
+        setConfirmedRecords(confirmed);
+        setNotes(noteMap);
+        setAttendanceFreshness({ type: "synced", time: new Date().toLocaleTimeString() });
+      }
+    } catch (err) {
+      console.warn("Parallel fetch error:", err.message);
+    } finally {
+      setAttendanceLoading(false);
     }
   }
+
+  // Render Health Check Probe for Admin
+  async function fetchHealthCheck() {
+    setHealthStatus((prev) => ({ ...prev, loading: true }));
+    const startTime = Date.now();
+    try {
+      const res = await api.get("/health");
+      const duration = Date.now() - startTime;
+      const isOk = res.status === 200 && (res.data?.status === "ok" || res.data?.status === "healthy");
+      const isDbConnected = res.data?.database === "connected" || res.data?.database?.state === "connected";
+      setHealthStatus((prev) => ({
+        status: isOk && isDbConnected ? "healthy" : isOk ? "degraded" : "unavailable",
+        database: isDbConnected ? "connected" : "disconnected",
+        responseTime: duration,
+        lastCheck: new Date().toLocaleTimeString(),
+        consecutiveFailures: 0,
+        loading: false,
+        lastIncident: prev.lastIncident,
+        lastRecovery: prev.consecutiveFailures > 0 ? new Date().toLocaleTimeString() : prev.lastRecovery
+      }));
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      setHealthStatus((prev) => ({
+        status: "unavailable",
+        database: "disconnected",
+        responseTime: duration,
+        lastCheck: new Date().toLocaleTimeString(),
+        consecutiveFailures: prev.consecutiveFailures + 1,
+        loading: false,
+        lastIncident: new Date().toLocaleTimeString(),
+        lastRecovery: prev.lastRecovery
+      }));
+    }
+  }
+
+  // Periodic Admin Health Check (Only while settings/reports tab is open)
+  useEffect(() => {
+    if (!token || !user || user.role !== "admin") return;
+    if (tab === "more" || tab === "reports") {
+      fetchHealthCheck();
+      const interval = setInterval(fetchHealthCheck, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [token, user, tab]);
 
   // Refresh Sync Status
   async function refreshSyncStatus() {
@@ -800,14 +1017,19 @@ export default function App() {
     }
   }
 
-  function logout(msg = "") {
+  async function logout(msg = "") {
     localStorage.removeItem("madrasa_token");
     localStorage.removeItem("madrasa_user");
+    localStorage.removeItem("madrasa_session_start");
     setToken("");
     setUser(null);
     setClasses([]);
     setStudents([]);
+    setRecords({});
+    setNotes({});
+    setSessionExpiryWarning(false);
     stopCamera();
+    await clearUserCache();
     if (msg) {
       setError(msg);
     }
@@ -1026,10 +1248,14 @@ export default function App() {
     setLoading(true);
     try {
       const r = await api.post("/auth/login", login);
+      const sessionStart = r.data.session?.sessionStart ? r.data.session.sessionStart * 1000 : Date.now();
       localStorage.setItem("madrasa_token", r.data.token);
       localStorage.setItem("madrasa_user", JSON.stringify(r.data.user));
+      localStorage.setItem("madrasa_session_start", String(sessionStart));
+      lastActivityRef.current = Date.now();
       setToken(r.data.token);
       setUser(r.data.user);
+      await isolateUserCache(r.data.user.id || r.data.user._id);
       triggerSync();
     } catch (e) {
       setError(errText(e));
@@ -2187,6 +2413,30 @@ export default function App() {
         {/* TAB 2: FAST ATTENDANCE REGISTER */}
         {tab === "attendance" && (
           <div>
+            {/* Live Cache & Freshness Indicator */}
+            {attendanceFreshness && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "var(--muted)", marginBottom: 8, padding: "5px 10px", background: "var(--canvas)", borderRadius: 8 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  {attendanceFreshness.type === "synced" ? (
+                    <span style={{ color: "var(--success)", display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 600 }}>
+                      <CheckCircle2 size={13} /> {t("dataStatus.freshlySynced", "Synchronized")}
+                    </span>
+                  ) : (
+                    <span style={{ color: "#d97706", display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 600 }}>
+                      <Clock size={13} /> {t("dataStatus.cachedData", "Cached (Offline)")}
+                    </span>
+                  )}
+                </span>
+                <span>{t("dataStatus.lastUpdated", { time: attendanceFreshness.time })}</span>
+              </div>
+            )}
+            {attendanceLoading && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--primary)", padding: "4px 8px", marginBottom: 6 }}>
+                <RefreshCw size={13} className="spin" />
+                <span>{t("dataStatus.loadingData", "Loading fresh data from cloud…")}</span>
+              </div>
+            )}
+
             {/* 2.1 Clear, Mobile-Friendly Attendance Header */}
             <div className="card" style={{ padding: "14px", marginBottom: 12 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
@@ -4060,6 +4310,90 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Render Backend Health & Service Status Monitoring */}
+                <div className="card">
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                    <div>
+                      <h3 style={{ margin: 0 }}>{t("healthMonitoring.title", "Backend Health & Service Status")}</h3>
+                      <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                        {t("healthMonitoring.subtitle", "Real-time health monitoring of Render API and MongoDB Atlas connection.")}
+                      </p>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className={`status-pill ${healthStatus.status === "healthy" ? "online" : healthStatus.status === "degraded" ? "warning" : "offline"}`}>
+                        <Activity size={13} />
+                        {healthStatus.loading ? t("healthMonitoring.checking", "Checking…") : t(`healthMonitoring.${healthStatus.status}`, healthStatus.status)}
+                      </span>
+                      <button
+                        className="btn secondary"
+                        onClick={fetchHealthCheck}
+                        disabled={healthStatus.loading}
+                        style={{ minHeight: 34, fontSize: 12, padding: "4px 10px" }}
+                      >
+                        <RefreshCw size={13} className={healthStatus.loading ? "spin" : ""} /> {t("healthMonitoring.checkNow", "Check Now")}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="responsive-grid-2" style={{ gap: 10, marginBottom: 12 }}>
+                    <div style={{ background: "var(--canvas)", padding: "10px 14px", borderRadius: "var(--radius-md)", fontSize: 13 }}>
+                      <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{t("healthMonitoring.databaseStatus", "Database (MongoDB)")}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: healthStatus.database === "connected" ? "var(--success)" : "var(--danger)" }} />
+                        <span>{t(`healthMonitoring.${healthStatus.database}`, healthStatus.database)}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ background: "var(--canvas)", padding: "10px 14px", borderRadius: "var(--radius-md)", fontSize: 13 }}>
+                      <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{t("healthMonitoring.responseTime", "Response Time")}</div>
+                      <div style={{ fontWeight: 600 }}>
+                        {healthStatus.responseTime} ms {healthStatus.responseTime > 0 && healthStatus.responseTime < 500 ? "⚡" : ""}
+                      </div>
+                    </div>
+
+                    <div style={{ background: "var(--canvas)", padding: "10px 14px", borderRadius: "var(--radius-md)", fontSize: 13 }}>
+                      <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{t("healthMonitoring.lastCheck", "Last Checked")}</div>
+                      <div style={{ fontWeight: 600 }}>{healthStatus.lastCheck || "Just now"}</div>
+                    </div>
+
+                    <div style={{ background: "var(--canvas)", padding: "10px 14px", borderRadius: "var(--radius-md)", fontSize: 13 }}>
+                      <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>{t("healthMonitoring.consecutiveFailures", "Consecutive Failures")}</div>
+                      <div style={{ fontWeight: 600, color: healthStatus.consecutiveFailures > 0 ? "var(--danger)" : "var(--success)" }}>
+                        {formatNumber(healthStatus.consecutiveFailures, lang)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Render Free Plan & Cold-Start Explanatory Notice */}
+                  <div style={{ background: "rgba(2, 132, 199, 0.08)", border: "1px solid rgba(2, 132, 199, 0.25)", color: "#0369a1", padding: "10px 14px", borderRadius: "var(--radius-md)", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+                      <div>{t("healthMonitoring.renderFreeTierNote", "Render free services spin down after 15 minutes of inactivity. The scheduled 10-minute check keeps the service warm, but occasional cold-starts (15–30s) may still occur. For continuous uptime, consider an always-on Render plan.")}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <a
+                      href="https://dashboard.render.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn secondary"
+                      style={{ fontSize: 12, minHeight: 36, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      <HardDrive size={14} /> {t("healthMonitoring.deploymentLogs", "Render Logs")}
+                    </a>
+                    <a
+                      href="https://github.com/Sameersam3909/Madrasa-Amanah/actions/workflows/render-health-check.yml"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn secondary"
+                      style={{ fontSize: 12, minHeight: 36, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      <Activity size={14} /> {t("healthMonitoring.workflowRuns", "GitHub Actions Checks")}
+                    </a>
+                  </div>
+                </div>
+
                 {/* Secondary MongoDB Atlas Storage Rotation */}
                 <div className="card">
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
@@ -5498,6 +5832,51 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          SESSION INACTIVITY & LIFETIME EXPIRY WARNING MODAL
+          ========================================================= */}
+      {sessionExpiryWarning && (
+        <div className="sheet-overlay" style={{ zIndex: 9999 }}>
+          <div className="sheet-content" style={{ maxWidth: 440, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "inline-flex", padding: 14, background: "rgba(234, 88, 12, 0.12)", color: "#ea580c", borderRadius: "50%", marginBottom: 12 }}>
+              <Clock size={36} />
+            </div>
+            <h2 style={{ marginBottom: 8 }}>{t("session.warningTitle", "Session About to Expire")}</h2>
+            <p className="muted" style={{ fontSize: 14, marginBottom: 16 }}>
+              {t("session.warningMessage", "You will be automatically signed out due to inactivity in {{time}}.", {
+                time: `${Math.floor(sessionCountdown / 60)}:${String(sessionCountdown % 60).padStart(2, "0")}`
+              })}
+            </p>
+            {selectedClass && Object.keys(records).length > 0 && (
+              <div style={{ background: "var(--info-bg)", border: "1px solid #BAE6FD", color: "#0369A1", padding: "10px 14px", borderRadius: 10, marginBottom: 16, fontSize: 13, display: "flex", alignItems: "center", gap: 8, textAlign: "start" }}>
+                <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
+                <span>{t("session.warningAttendanceSaved", "Your attendance draft has been securely saved to this device.")}</span>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => logout(t("session.inactivityExpired", "Your session has expired. Please sign in again."))}
+                style={{ minHeight: 44, flex: 1 }}
+              >
+                <LogOut size={16} /> {t("session.signOut", "Sign Out")}
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={sessionExtending}
+                onClick={handleContinueSession}
+                style={{ minHeight: 44, flex: 1 }}
+              >
+                {sessionExtending ? <RefreshCw size={16} className="spin" /> : <ShieldCheck size={16} />}
+                <span>{t("session.continueSession", "Continue Session")}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

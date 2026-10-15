@@ -363,3 +363,37 @@ export async function cleanOldAttendance(days = 180) {
   }
 }
 
+// User Cache Isolation: Prevents one teacher or account from viewing another account's cached classes/students
+export async function isolateUserCache(userId) {
+  if (!userId) return;
+  try {
+    const record = await offlineDb.metadata.get("cachedUserId");
+    const previousUserId = record?.value;
+    if (previousUserId && String(previousUserId) !== String(userId)) {
+      console.log(`[Cache Isolation] User changed from ${previousUserId} to ${userId}. Purging stale user-specific roster cache.`);
+      await offlineDb.transaction("rw", offlineDb.classes, offlineDb.students, offlineDb.attendanceHistory, async () => {
+        await offlineDb.classes.clear();
+        await offlineDb.students.clear();
+        await offlineDb.attendanceHistory.clear();
+      });
+    }
+    await offlineDb.metadata.put({ key: "cachedUserId", value: String(userId) });
+  } catch (err) {
+    console.warn("User cache isolation note:", err.message);
+  }
+}
+
+export async function clearUserCache() {
+  try {
+    await offlineDb.transaction("rw", offlineDb.classes, offlineDb.students, offlineDb.attendanceHistory, offlineDb.metadata, async () => {
+      await offlineDb.classes.clear();
+      await offlineDb.students.clear();
+      await offlineDb.attendanceHistory.clear();
+      await offlineDb.metadata.delete("cachedUserId");
+    });
+    console.log("[Cache Isolation] User cache cleared on sign out.");
+  } catch (err) {
+    console.warn("clearUserCache note:", err.message);
+  }
+}
+

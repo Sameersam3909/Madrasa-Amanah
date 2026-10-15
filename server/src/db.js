@@ -18,7 +18,14 @@ export async function connectDB() {
     }
     console.log("Connecting to Production MongoDB Atlas at:", uri.replace(/:([^@]+)@/, ":****@"));
     try {
-      await mongoose.connect(uri, { serverSelectionTimeoutMS: 15000 });
+      await mongoose.connect(uri, {
+        serverSelectionTimeoutMS: 8000,
+        maxPoolSize: 20,
+        minPoolSize: 2,
+        socketTimeoutMS: 30000,
+        connectTimeoutMS: 10000,
+        family: 4
+      });
       dbEngine = "MongoDB Atlas (Production)";
       console.log("Connected to MongoDB Atlas cluster successfully.");
       return;
@@ -33,7 +40,14 @@ export async function connectDB() {
   if (uri && !uri.includes("127.0.0.1") && !uri.includes("localhost")) {
     try {
       console.log("Attempting MongoDB Atlas connection at:", uri.replace(/:([^@]+)@/, ":****@"));
-      await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
+      await mongoose.connect(uri, {
+        serverSelectionTimeoutMS: 5000,
+        maxPoolSize: 10,
+        minPoolSize: 2,
+        socketTimeoutMS: 30000,
+        connectTimeoutMS: 8000,
+        family: 4
+      });
       dbEngine = "MongoDB Atlas";
       console.log("Connected to MongoDB Atlas cluster successfully.");
       return;

@@ -399,5 +399,40 @@
     "viewProfileOf": "View Profile - {{name}}",
     "editDetailsOf": "Edit Details - {{name}}",
     "actionsFor": "Actions for {{name}}"
+  },
+  "session": {
+    "warningTitle": "Session About to Expire",
+    "warningMessage": "You will be automatically signed out due to inactivity in {{time}}.",
+    "warningAttendanceSaved": "Your attendance draft has been securely saved to this device.",
+    "continueSession": "Continue Session",
+    "signOut": "Sign Out",
+    "inactivityExpired": "Your session has expired due to 2 hours of inactivity. Please sign in again.",
+    "maxLifetimeExpired": "Maximum session lifetime of 3 hours reached. Please sign in again.",
+    "refreshSuccess": "Session extended successfully."
+  },
+  "healthMonitoring": {
+    "title": "Backend Health & Service Status",
+    "subtitle": "Real-time health monitoring of Render API and MongoDB Atlas connection.",
+    "status": "Status",
+    "healthy": "Healthy",
+    "degraded": "Degraded",
+    "unavailable": "Unavailable",
+    "checking": "Checking…",
+    "databaseStatus": "Database (MongoDB)",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "responseTime": "Response Time",
+    "lastCheck": "Last Checked",
+    "consecutiveFailures": "Consecutive Failures",
+    "checkNow": "Check Now",
+    "renderFreeTierNote": "Render free services spin down after 15 minutes of inactivity. The scheduled 10-minute check keeps the service warm, but occasional cold-starts (15–30s) may still occur. For continuous uptime, consider an always-on Render plan.",
+    "deploymentLogs": "Render Logs",
+    "workflowRuns": "GitHub Actions Checks"
+  },
+  "dataStatus": {
+    "cachedData": "Cached (Offline)",
+    "freshlySynced": "Synchronized",
+    "lastUpdated": "Last updated {{time}}",
+    "loadingData": "Loading fresh data from cloud…"
   }
 }

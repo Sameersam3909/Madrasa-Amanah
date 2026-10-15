@@ -6,7 +6,7 @@ services:
     buildCommand: npm install
     startCommand: node src/index.js
     plan: free
-    healthCheckPath: /api/health
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production

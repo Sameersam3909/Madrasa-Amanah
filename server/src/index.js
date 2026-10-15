@@ -45,6 +45,27 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
 
+// Request Performance Measurement Middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  const origWriteHead = res.writeHead;
+  res.writeHead = function (...args) {
+    const duration = Date.now() - start;
+    if (!res.headersSent) {
+      res.setHeader("X-Response-Time", `${duration}ms`);
+    }
+    return origWriteHead.apply(this, args);
+  };
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    if (process.env.NODE_ENV !== "production" || duration > 1000) {
+      const cleanUrl = (req.originalUrl || req.url).split("?")[0];
+      console.log(`[PERF] ${req.method} ${cleanUrl} -> ${res.statusCode} (${duration}ms)`);
+    }
+  });
+  next();
+});
+
 // Auto-rewrite requests missing /api prefix so clients calling /auth/login or /students never 404
 app.use((req, _res, next) => {
   if (!req.url.startsWith("/api") && !req.url.startsWith("/health")) {
@@ -56,17 +77,19 @@ app.use((req, _res, next) => {
 // Health Check — lightweight, credential-safe, fast (no expensive queries)
 const healthHandler = (_req, res) => {
   const dbInfo = getDatabaseInfo();
-  const httpStatus = dbInfo.connected ? 200 : 503;
+  const isHealthy = dbInfo.connected;
+  const httpStatus = isHealthy ? 200 : 503;
   res.status(httpStatus).json({
-    status: dbInfo.connected ? "healthy" : "unhealthy",
+    status: isHealthy ? "ok" : "unhealthy",
     service: "madrasa-attendance-api",
-    database: {
+    database: isHealthy ? "connected" : "disconnected",
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+    databaseDetails: {
       provider: dbInfo.engine,
       state: dbInfo.status,
       name: dbInfo.databaseName
-    },
-    uptime: Math.floor(process.uptime()),
-    timestamp: new Date().toISOString()
+    }
   });
 };
 app.get("/health", healthHandler);
@@ -80,7 +103,23 @@ app.post("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, limit: 20 }), 
   if (!user || !user.active || !(await bcrypt.compare(password, user.passwordHash))) {
     return res.status(401).json({ message: "Email or password is incorrect." });
   }
-  const token = jwt.sign({ sub: user._id }, process.env.JWT_SECRET, { expiresIn: "12h" });
+
+  // Session Policy: 2 hours inactivity timeout, 3 hours absolute maximum lifetime
+  const now = Math.floor(Date.now() / 1000);
+  const inactivitySeconds = parseInt(req.headers["x-test-session-inactivity"] || process.env.SESSION_INACTIVITY_SECONDS || 2 * 3600, 10);
+  const maxLifetimeSeconds = parseInt(req.headers["x-test-session-max"] || process.env.SESSION_MAX_LIFETIME_SECONDS || 3 * 3600, 10);
+  const tokenLifetime = Math.min(inactivitySeconds, maxLifetimeSeconds);
+
+  const token = jwt.sign(
+    {
+      sub: user._id,
+      sessionStart: now,
+      lastActivity: now
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: tokenLifetime }
+  );
+
   await AuditLog.create({
     actorId: user._id,
     action: "auth.login",
@@ -88,6 +127,7 @@ app.post("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, limit: 20 }), 
     entityId: String(user._id),
     details: { ip: req.ip }
   });
+
   res.json({
     token,
     user: {
@@ -96,7 +136,45 @@ app.post("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, limit: 20 }), 
       email: user.email,
       role: user.role,
       assignedClasses: user.assignedClasses
+    },
+    session: {
+      inactivitySeconds,
+      maxLifetimeSeconds,
+      sessionStart: now
     }
+  });
+});
+
+app.post("/api/auth/refresh-session", requireAuth, (req, res) => {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = req.sessionPayload || {};
+  const sessionStart = payload.sessionStart || now;
+  const maxLifetimeSeconds = parseInt(req.headers["x-test-session-max"] || process.env.SESSION_MAX_LIFETIME_SECONDS || 3 * 3600, 10);
+  const inactivitySeconds = parseInt(req.headers["x-test-session-inactivity"] || process.env.SESSION_INACTIVITY_SECONDS || 2 * 3600, 10);
+  const remainingTotalSeconds = (sessionStart + maxLifetimeSeconds) - now;
+
+  if (remainingTotalSeconds <= 0) {
+    return res.status(401).json({
+      message: "Maximum session lifetime of 3 hours reached. Please sign in again.",
+      code: "SESSION_MAX_EXCEEDED"
+    });
+  }
+
+  const nextWindow = Math.min(inactivitySeconds, remainingTotalSeconds);
+  const newToken = jwt.sign(
+    {
+      sub: req.user._id,
+      sessionStart,
+      lastActivity: now
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: nextWindow }
+  );
+
+  res.json({
+    token: newToken,
+    expiresIn: nextWindow,
+    remainingTotalSeconds
   });
 });
 
@@ -137,7 +215,7 @@ app.get("/api/classes", async (req, res) => {
   const filter = req.user.role === "admin"
     ? { active: true }
     : { active: true, $or: [{ teacherIds: req.user._id }, { _id: { $in: req.user.assignedClasses.map(c => c._id || c) } }] };
-  const classes = await Class.find(filter).sort({ name: 1 }).populate("teacherIds", "name email");
+  const classes = await Class.find(filter).sort({ name: 1 }).populate("teacherIds", "name email").lean();
   res.json(classes);
 });
 
@@ -183,7 +261,7 @@ app.get("/api/students/face-index", async (req, res) => {
   const { classId } = req.query;
   if (!classId) return res.status(400).json({ message: "classId is required." });
   if (!(await canAccessClass(req.user, classId))) return res.status(403).json({ message: "Class access denied." });
-  const students = await Student.find({ classId, active: true }).select("+faceDescriptor admissionNo name photoUrl consentGiven");
+  const students = await Student.find({ classId, active: true }).select("+faceDescriptor admissionNo name photoUrl consentGiven").lean();
   res.json(students.map(s => ({
     id: s._id,
     name: s.name,
@@ -209,7 +287,7 @@ app.get("/api/students", async (req, res) => {
     if (!(await canAccessClass(req.user, req.query.classId))) return res.status(403).json({ message: "Class access denied." });
     filter.classId = req.query.classId;
   } else if (req.user.role !== "admin") {
-    const classes = await Class.find({ $or: [{ teacherIds: req.user._id }, { _id: { $in: req.user.assignedClasses.map(c => c._id || c) } }] }).select("_id");
+    const classes = await Class.find({ $or: [{ teacherIds: req.user._id }, { _id: { $in: req.user.assignedClasses.map(c => c._id || c) } }] }).select("_id").lean();
     filter.classId = { $in: classes.map(c => c._id) };
   }
 
@@ -223,19 +301,32 @@ app.get("/api/students", async (req, res) => {
     ];
   }
 
-  const students = await Student.find(filter)
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.max(0, parseInt(req.query.limit, 10) || 0);
+
+  let query = Student.find(filter)
     .select("-faceDescriptor")
     .populate("classId", "name section academicYear")
-    .sort({ name: 1 });
+    .sort({ name: 1 })
+    .lean();
 
-  res.json(students.map(s => {
-    const obj = s.toObject();
-    obj.id = String(obj._id);
-    obj.fullName = obj.name;
-    obj.admissionNumber = obj.admissionNo;
-    obj.referencePhotoUrl = obj.photoUrl;
-    return obj;
-  }));
+  if (limit > 0) {
+    const total = await Student.countDocuments(filter);
+    res.setHeader("X-Total-Count", total);
+    res.setHeader("X-Page", page);
+    res.setHeader("X-Limit", limit);
+    query = query.skip((page - 1) * limit).limit(limit);
+  }
+
+  const students = await query;
+
+  res.json(students.map(s => ({
+    ...s,
+    id: String(s._id),
+    fullName: s.name,
+    admissionNumber: s.admissionNo,
+    referencePhotoUrl: s.photoUrl
+  })));
 });
 
 app.post("/api/students", requireAdmin, async (req, res) => {
@@ -617,7 +708,8 @@ app.get("/api/attendance", async (req, res) => {
     .populate("studentId", "name admissionNo photoUrl")
     .populate("markedBy", "name email")
     .populate("updatedBy", "name email")
-    .sort({ studentId: 1 });
+    .sort({ studentId: 1 })
+    .lean();
   res.json(records);
 });
 

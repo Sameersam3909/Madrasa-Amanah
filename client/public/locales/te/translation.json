@@ -399,5 +399,40 @@
     "viewProfileOf": "ప్రొఫైల్ చూడండి - {{name}}",
     "editDetailsOf": "వివరాలను సవరించండి - {{name}}",
     "actionsFor": "{{name}} కొరకు చర్యలు"
+  },
+  "session": {
+    "warningTitle": "సెషన్ ముగియబోతోంది",
+    "warningMessage": "నిష్క్రియాత్మకత కారణంగా మీ సెషన్ {{time}} లో ఆటోమేటిక్‌గా ముగుస్తుంది.",
+    "warningAttendanceSaved": "మీ హాజరు డ్రాఫ్ట్ ఈ పరికరంలో భద్రపరచబడింది.",
+    "continueSession": "సెషన్ కొనసాగించండి",
+    "signOut": "సైన్ అవుట్ చేయండి",
+    "inactivityExpired": "2 గంటల నిష్క్రియాత్మకత కారణంగా మీ సెషన్ ముగిసింది. దయచేసి మళ్ళీ సైన్ ఇన్ చేయండి.",
+    "maxLifetimeExpired": "గరిష్టంగా 3 గంటల సెషన్ సమయం ముగిసింది. దయచేసి మళ్ళీ సైన్ ఇన్ చేయండి.",
+    "refreshSuccess": "సెషన్ సమయం విజయవంతంగా పొడిగించబడింది."
+  },
+  "healthMonitoring": {
+    "title": "బ్యాకెండ్ హెల్త్ & సర్వీస్ స్థితి",
+    "subtitle": "Render API మరియు MongoDB Atlas కనెక్టివిటీ ప్రత్యక్ష పర్యవేక్షణ.",
+    "status": "స్థితి",
+    "healthy": "ఆరోగ్యకరమైనది (చురుకుగా ఉంది)",
+    "degraded": "క్షీణించింది",
+    "unavailable": "అందుబాటులో లేదు",
+    "checking": "తనిఖీ చేస్తోంది…",
+    "databaseStatus": "డేటాబేస్ (MongoDB)",
+    "connected": "కనెక్ట్ చేయబడింది",
+    "disconnected": "కనెక్షన్ తెగిపోయింది",
+    "responseTime": "ప్రతిస్పందన సమయం",
+    "lastCheck": "చివరి తనిఖీ",
+    "consecutiveFailures": "వరుస వైఫల్యాలు",
+    "checkNow": "ఇప్పుడే తనిఖీ చేయండి",
+    "renderFreeTierNote": "Render ఉచిత సర్వీసులు 15 నిమిషాల నిష్క్రియాత్మకత తర్వాత స్లీప్ అవుతాయి. ప్రతి 10 నిమిషాల తనిఖీ సర్వీస్‌ను చురుకుగా ఉంచుతుంది. నిరంతర సేవల కోసం ఆల్వేస్-ఆన్ ప్లాన్ ఉపయోగించవచ్చు.",
+    "deploymentLogs": "Render లాగ్స్",
+    "workflowRuns": "GitHub Actions తనిఖీలు"
+  },
+  "dataStatus": {
+    "cachedData": "కాష్ చేసిన డేటా (ఆఫ్‌లైన్)",
+    "freshlySynced": "తాజాగా సింక్ చేయబడింది",
+    "lastUpdated": "చివరిగా అప్‌డేట్ చేసిన సమయం {{time}}",
+    "loadingData": "క్లౌడ్ నుండి తాజా డేటా లోడ్ అవుతోంది…"
   }
 }

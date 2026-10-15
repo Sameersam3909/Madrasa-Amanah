@@ -34,7 +34,7 @@ jobs:
     steps:
       - name: Validate configuration
         env:
-          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || secrets.RENDER_HEALTH_URL || 'https://madrasa-attendance-api.onrender.com/api/health' }}
+          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || secrets.RENDER_HEALTH_URL || 'https://madrasa-attendance-api.onrender.com/health' }}
         run: |
           if [ -z "${HEALTH_URL:-}" ]; then
             echo "::error::Health URL is not set."
@@ -44,7 +44,7 @@ jobs:
 
       - name: Ping health endpoint (with retries)
         env:
-          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || secrets.RENDER_HEALTH_URL || 'https://madrasa-attendance-api.onrender.com/api/health' }}
+          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || secrets.RENDER_HEALTH_URL || 'https://madrasa-attendance-api.onrender.com/health' }}
         run: |
           set -euo pipefail
 
@@ -87,19 +87,22 @@ jobs:
           import sys, json
           try:
               data = json.load(sys.stdin)
-              db = data.get('database', {})
-              print(db.get('state', ''))
+              db = data.get('database')
+              if isinstance(db, dict):
+                  print(db.get('state', ''))
+              else:
+                  print(str(db or ''))
           except:
               print('')
           " 2>/dev/null || echo "")
 
-              if [ "$STATUS" = "healthy" ] && [ "$DB_STATE" = "connected" ]; then
+              if [ "$STATUS" = "ok" -o "$STATUS" = "healthy" ] && [ "$DB_STATE" = "connected" -o "$DB_STATE" = "ok" ]; then
                 echo ""
                 echo "✅ Service is healthy — database connected"
                 SUCCESS=true
                 break
               else
-                echo "⚠️  HTTP 200 but status='${STATUS}', database.state='${DB_STATE}'"
+                echo "⚠️  HTTP 200 but status='${STATUS}', database='${DB_STATE}'"
               fi
 
             elif [ "$HTTP_CODE" = "503" ]; then
