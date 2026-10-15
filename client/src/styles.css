@@ -703,26 +703,46 @@ small {
   color: var(--muted);
 }
 
-/* FAST ATTENDANCE REGISTER */
+/* FAST ATTENDANCE REGISTER — RESPONSIVE 3-TIER LAYOUT */
+.attendance-student-list {
+  padding-bottom: calc(var(--bottom-nav-height) + 84px + env(safe-area-inset-bottom, 16px));
+}
+
+@media (min-width: 1024px) {
+  .attendance-student-list {
+    padding-bottom: 96px;
+  }
+}
+
 .student-attendance-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 14px;
-  margin-bottom: 10px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.03);
+  margin-bottom: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
 }
 
-.student-card-header {
+/* ROW 1: AVATAR, NAME & ADMISSION NUMBER */
+.student-card-top-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+  width: 100%;
+  min-width: 0;
+  cursor: pointer;
 }
 
 .student-card-avatar {
   width: 44px;
   height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: var(--radius-md);
   overflow: hidden;
   display: grid;
@@ -731,6 +751,8 @@ small {
   color: var(--primary);
   flex-shrink: 0;
   font-weight: 700;
+  font-size: 16px;
+  border: 1px solid rgba(23, 75, 54, 0.12);
 }
 
 .student-card-avatar img {
@@ -739,96 +761,178 @@ small {
   object-fit: cover;
 }
 
-.student-card-meta {
-  flex: 1;
+.student-card-identity {
+  flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.student-card-meta strong {
-  display: block;
+.student-card-name {
   font-size: 15px;
+  font-weight: 700;
   color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.35;
+  margin: 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
-.student-card-meta span {
+.student-card-id-tag {
   font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ROW 2: CLASS NAME & SECONDARY STATUS / ACTIONS */
+.student-card-middle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--canvas);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.student-card-class-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--muted);
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* THUMB-FRIENDLY STATUS GRID */
+.student-card-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.student-card-status-indicator.confirmed {
+  background: #EAF5EE;
+  color: #174B36;
+  border: 1px solid rgba(40, 167, 69, 0.35);
+}
+
+.student-card-status-indicator.draft {
+  background: #FEF9EB;
+  color: #B7791F;
+  border: 1px solid rgba(214, 158, 46, 0.35);
+}
+
+.student-card-status-indicator.unmarked {
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+/* ROW 3: FOUR ATTENDANCE ACTIONS (RESPONSIVE 2X2 GRID ON MOBILE <= 480PX, 4-COL ON WIDER) */
 .status-grid-large {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+@media (min-width: 480px) {
+  .status-grid-large {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .status-touch-btn {
-  min-height: 48px;
+  min-height: 46px;
+  height: 46px;
   border-radius: var(--radius-md);
   border: 1.5px solid var(--border);
   background: var(--canvas);
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--text);
+  font-size: 12.5px;
   font-weight: 700;
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  padding: 6px 2px;
-  transition: all 0.12s ease;
+  gap: 8px;
+  padding: 0 8px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: all 0.15s ease;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+[dir="rtl"] .status-touch-btn {
+  flex-direction: row-reverse;
 }
 
 .status-touch-btn:active {
-  transform: scale(0.96);
+  transform: scale(0.97);
 }
 
 .status-touch-btn.present.active {
   background: #EAF5EE;
-  border-color: #38A169;
-  color: var(--success);
-  box-shadow: 0 2px 6px rgba(40, 167, 69, 0.2);
+  border-color: #2E7D32;
+  color: #1B5E20;
+  box-shadow: 0 2px 6px rgba(46, 125, 50, 0.22);
 }
 
 .status-touch-btn.absent.active {
   background: #FDF0F0;
-  border-color: #E53E3E;
-  color: var(--danger);
-  box-shadow: 0 2px 6px rgba(220, 53, 69, 0.2);
+  border-color: #D32F2F;
+  color: #C62828;
+  box-shadow: 0 2px 6px rgba(211, 47, 47, 0.22);
 }
 
 .status-touch-btn.late.active {
   background: #FEF9EB;
-  border-color: #D69E2E;
-  color: var(--warning);
-  box-shadow: 0 2px 6px rgba(214, 158, 46, 0.2);
+  border-color: #D97706;
+  color: #B45309;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.22);
 }
 
 .status-touch-btn.excused.active {
-  background: #EEF4F8;
-  border-color: #3182CE;
-  color: var(--info);
-  box-shadow: 0 2px 6px rgba(49, 130, 206, 0.2);
+  background: #EFF6FF;
+  border-color: #2563EB;
+  color: #1D4ED8;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.22);
 }
 
-/* STICKY BOTTOM SAVE ACTION BAR */
+/* STICKY BOTTOM SAVE ACTION BAR — ELEVATED OVER BOTTOM NAV & SAFE AREA */
 .mobile-sticky-save {
   position: fixed;
-  bottom: var(--bottom-nav-height);
+  bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px));
   left: 0;
   right: 0;
   background: var(--surface);
   border-top: 1px solid var(--border);
-  padding: 12px 16px;
+  padding: 10px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   z-index: 45;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.08);
+  box-sizing: border-box;
 }
 
 @media (min-width: 1024px) {
@@ -839,6 +943,7 @@ small {
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
 }
+
 
 .save-summary-col {
   display: flex;
@@ -873,6 +978,115 @@ small {
 .save-action-btn:active {
   background: var(--primary-hover);
   transform: scale(0.98);
+}
+
+/* FACE SUGGESTIONS & REVIEW COMPONENT */
+.face-suggestions-panel {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+
+.face-suggestion-card {
+  position: relative;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.face-suggestion-card.confirmed {
+  background: #EAF5EE;
+  border-color: #38A169;
+}
+
+.face-suggestion-card.has-conflict {
+  border-color: #DC2626;
+  background: #FFF5F5;
+}
+
+.face-suggestion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.face-candidate-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+  min-width: 0;
+}
+
+.face-confidence-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.face-confidence-tag.high {
+  background: #EAF5EE;
+  color: #174B36;
+  border: 1px solid rgba(40, 167, 69, 0.3);
+}
+
+.face-confidence-tag.medium {
+  background: #FEF9EB;
+  color: #B7791F;
+  border: 1px solid rgba(214, 158, 46, 0.3);
+}
+
+.face-confidence-tag.low {
+  background: #FDF0F0;
+  color: #DC2626;
+  border: 1px solid rgba(220, 38, 38, 0.3);
+}
+
+.face-status-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2.5px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.face-status-badge.confirmed {
+  background: #174B36;
+  color: #fff;
+}
+
+.face-status-badge.suggested {
+  background: #FEF9EB;
+  color: #B7791F;
+  border: 1px solid rgba(214, 158, 46, 0.3);
+}
+
+.face-status-badge.manual {
+  background: #EEF4F8;
+  color: #2563EB;
+  border: 1px solid rgba(37, 99, 235, 0.3);
+}
+
+.face-suggestion-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 
 /* SEARCH BAR */

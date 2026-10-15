@@ -39,7 +39,8 @@ async function runTests() {
     const token = loginData.token;
     const authHeaders = {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
+      'Authorization': `Bearer ${token}`,
+      'x-export-pin': '12@12'
     };
 
     // 4. Fetch classes
@@ -193,7 +194,7 @@ async function runTests() {
     const formats = ['csv', 'xlsx', 'pdf'];
     for (const fmt of formats) {
       const exportRes = await fetch(`${API_BASE}/reports/export?classId=${targetClassId}&startDate=${testDate}&endDate=${testDate}&format=${fmt}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: authHeaders
       });
 
       assert(exportRes.status === 200, `${fmt.toUpperCase()} export responded with 200 OK`);
@@ -220,7 +221,7 @@ async function runTests() {
     // 12. Weekly Excel Report & Email Automation Tests
     console.log('--- Testing Weekly Excel Reports & Email Automation ---');
     const weeklyExcelRes = await fetch(`${API_BASE}/reports/weekly-excel`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: authHeaders
     });
     assert(weeklyExcelRes.status === 200, 'Weekly Excel report responded with 200 OK');
     const weeklyDisp = weeklyExcelRes.headers.get('content-disposition') || '';

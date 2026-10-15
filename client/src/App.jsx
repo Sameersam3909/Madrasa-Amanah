@@ -24,6 +24,7 @@ import {
   History,
   Image,
   LayoutDashboard,
+  Lock,
   LogOut,
   MapPin,
   MoreHorizontal,
@@ -83,6 +84,8 @@ import {
   isolateUserCache,
   clearUserCache
 } from "./offlineDb";
+import StudentSearchDropdown from "./components/StudentSearchDropdown.jsx";
+import { getStudentDisplayName, getStudentNameDir, matchesStudentSearch } from "./utils/studentName.js";
 
 const today = () => new Date().toLocaleDateString("en-CA");
 const errText = (e) => e?.response?.data?.message || e?.message || "Something went wrong.";
@@ -312,6 +315,12 @@ export default function App() {
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [passwordNotice, setPasswordNotice] = useState("");
   const [passwordError, setPasswordError] = useState("");
+
+  // Security: PIN-Protected File Downloads (PIN: 12@12)
+  const [downloadPinModal, setDownloadPinModal] = useState(null);
+  const [downloadPinInput, setDownloadPinInput] = useState("");
+  const [downloadPinError, setDownloadPinError] = useState("");
+  const [downloadPinLoading, setDownloadPinLoading] = useState(false);
 
   const t = useMemo(() => createTranslator(lang), [lang]);
   const activeClass = classes.find((c) => String(c._id || c.id) === String(selectedClass));
@@ -1909,22 +1918,50 @@ export default function App() {
         index = localStudents.filter((s) => Array.isArray(s.faceDescriptor) && s.faceDescriptor.length);
       }
 
+      // Assign candidates while strictly preventing duplicate automatic assignments across faces
+      const assignedCandidateIds = new Set();
       const matches = found.map((face, i) => {
         const d = Array.from(face.descriptor);
         const ranked = index
           .map((s) => ({ student: s, distance: distance(d, s.faceDescriptor) }))
           .sort((a, b) => a.distance - b.distance);
-        const best = ranked[0];
-        const confident = best && best.distance < 0.58;
-        const confidencePct = best ? Math.max(0, Math.min(100, Math.round((1 - best.distance) * 100))) : 0;
+
+        // Best unassigned candidate for this face
+        const best = ranked.find((r) => !assignedCandidateIds.has(String(r.student.id || r.student._id)));
+        const secondBest = ranked.find((r) => r !== best);
+
+        const isAmbiguous = Boolean(
+          best &&
+          secondBest &&
+          (secondBest.distance - best.distance < 0.04) &&
+          best.distance > 0.42
+        );
+
+        // Acceptance threshold: distance < 0.52 and not ambiguous
+        const confident = Boolean(best && best.distance < 0.52 && !isAmbiguous);
+        const confidencePct = best
+          ? Math.max(0, Math.min(100, Math.round(Math.max(0, 1 - (best.distance / 0.70)) * 100)))
+          : 0;
+
+        const assignedStudent = confident ? best.student : null;
+        const assignedStudentId = assignedStudent ? String(assignedStudent.id || assignedStudent._id) : "";
+        if (assignedStudentId) {
+          assignedCandidateIds.add(assignedStudentId);
+        }
+
         return {
           faceNo: i + 1,
           descriptor: d,
-          studentId: confident ? best.student.id || best.student._id : "",
-          matchName: confident ? best.student.name : "",
-          matchAdmissionNo: confident ? (best.student.admissionNo || best.student.admissionNumber || "") : "",
+          studentId: assignedStudentId,
+          matchName: assignedStudent ? (assignedStudent.name || "") : (best?.student?.name || ""),
+          matchAdmissionNo: assignedStudent
+            ? (assignedStudent.admissionNo || assignedStudent.admissionNumber || "")
+            : (best?.student?.admissionNo || best?.student?.admissionNumber || ""),
+          photoUrl: assignedStudent?.photoUrl || best?.student?.photoUrl || null,
           distance: best ? best.distance : null,
           confidencePct,
+          isAmbiguous,
+          isManual: false,
           confirmed: false
         };
       });
@@ -1960,9 +1997,19 @@ export default function App() {
   function confirmAllFaceMatches() {
     let count = 0;
     const updatedRecords = { ...records };
+    // Check for duplicate assignments across candidates before confirming all
+    const seenIds = new Set();
+    const duplicateIds = new Set();
+    for (const f of detected) {
+      if (f.studentId) {
+        if (seenIds.has(f.studentId)) duplicateIds.add(f.studentId);
+        seenIds.add(f.studentId);
+      }
+    }
+
     setDetected((prev) =>
       prev.map((f) => {
-        if (f.studentId) {
+        if (f.studentId && !duplicateIds.has(f.studentId) && !f.confirmed) {
           updatedRecords[f.studentId] = { ...(updatedRecords[f.studentId] || {}), status: "present" };
           count++;
           return { ...f, confirmed: true };
@@ -1971,7 +2018,11 @@ export default function App() {
       })
     );
     setRecords(updatedRecords);
-    setNotice(`Confirmed all ${count} recognized student(s) as Present ✓. Click "Save Attendance" to persist.`);
+    if (duplicateIds.size > 0) {
+      setError(`Some face suggestions have duplicate student assignments. Please verify them individually.`);
+    } else {
+      setNotice(`Confirmed all ${count} recognized student(s) as Present ✓. Click "Save Attendance" to persist.`);
+    }
   }
 
   function changeFaceStudent(faceNo, newStudentId) {
@@ -1984,6 +2035,8 @@ export default function App() {
           studentId: newStudentId,
           matchName: matched ? matched.name : "",
           matchAdmissionNo: matched ? (matched.admissionNo || matched.admissionNumber || "") : "",
+          photoUrl: matched?.photoUrl || null,
+          isManual: Boolean(newStudentId),
           confirmed: false
         };
       })
@@ -2008,13 +2061,26 @@ export default function App() {
     }
   }
 
-  // Generic File Download Helper with Content-Disposition & UTF-8 parsing
-  async function triggerFileDownload(endpoint, params = {}, fallbackName = "download") {
+  // Generic File Download Helper with Content-Disposition & UTF-8 parsing and PIN Security Protection
+  async function triggerFileDownload(endpoint, params = {}, fallbackName = "download", providedPin = null) {
     if (loading) return;
+
+    // Gate all downloads with security PIN (12@12)
+    if (!providedPin) {
+      setDownloadPinModal({ endpoint, params, fallbackName });
+      setDownloadPinInput("");
+      setDownloadPinError("");
+      return;
+    }
+
     setError("");
     setLoading(true);
     try {
-      const res = await api.get(endpoint, { params, responseType: "blob" });
+      const res = await api.get(endpoint, {
+        params: { ...params, exportPin: providedPin },
+        headers: { "x-export-pin": providedPin },
+        responseType: "blob"
+      });
 
       let filename = fallbackName;
       const disposition = res.headers["content-disposition"];
@@ -2045,10 +2111,52 @@ export default function App() {
         type: "success"
       });
       setNotice(`Downloaded ${filename} ✓`);
+      setDownloadPinModal(null);
+      setDownloadPinError("");
     } catch (e) {
-      setError(errText(e));
+      let message = "Download failed. Please check your PIN and try again.";
+      if (e?.response?.data instanceof Blob) {
+        try {
+          const text = await e.response.data.text();
+          const parsed = JSON.parse(text);
+          message = parsed.message || message;
+        } catch (_) {
+          message = e?.message || message;
+        }
+      } else if (e?.response?.data?.message) {
+        message = e.response.data.message;
+      } else if (e?.message) {
+        message = e.message;
+      }
+      setDownloadPinError(message);
+      setError(message);
+      throw new Error(message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDownloadPinSubmit(e) {
+    if (e) e.preventDefault();
+    if (!downloadPinModal) return;
+    const pin = downloadPinInput.trim();
+    if (!pin) {
+      setDownloadPinError("Please enter the security PIN (12@12).");
+      return;
+    }
+    setDownloadPinLoading(true);
+    setDownloadPinError("");
+    try {
+      await triggerFileDownload(
+        downloadPinModal.endpoint,
+        downloadPinModal.params,
+        downloadPinModal.fallbackName,
+        pin
+      );
+    } catch (_) {
+      // Error already handled and set in downloadPinError
+    } finally {
+      setDownloadPinLoading(false);
     }
   }
 
@@ -2711,133 +2819,203 @@ export default function App() {
               </div>
 
               {/* Phase 3 Face Suggestions & Review */}
-              {detected.length > 0 && (
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-                    <div>
-                      <strong style={{ fontSize: 13 }}>{t.faceSuggestions} ({formatNumber(detected.length, lang)})</strong>
-                      <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                        {t.faceSuggestionsSub}
-                      </p>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      {detected.some((f) => f.studentId && !f.confirmed) && (
-                        <button
-                          className="btn primary"
-                          style={{ minHeight: 30, fontSize: 11, padding: "4px 8px" }}
-                          onClick={confirmAllFaceMatches}
-                        >
-                          <Check size={13} /> {t.confirmAllPresent}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setDetected([])}
-                        style={{ background: "none", border: "none", color: "var(--muted)", padding: 4, cursor: "pointer" }}
-                        title={t.clearSuggestions}
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  </div>
+              {detected.length > 0 && (() => {
+                const assignedFaceMap = {};
+                for (const f of detected) {
+                  if (f.studentId) {
+                    assignedFaceMap[f.studentId] = f.faceNo;
+                  }
+                }
 
-                  <div style={{ display: "grid", gap: 8 }}>
-                    {detected.map((f) => (
-                      <div
-                        key={f.faceNo}
-                        style={{
-                          background: f.confirmed ? "var(--success-bg)" : "var(--canvas)",
-                          border: `1px solid ${f.confirmed ? "var(--success)" : "var(--border)"}`,
-                          padding: "10px 12px",
-                          borderRadius: 8,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 8
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <span style={{ fontSize: 12 }}>
-                            {t("faceMatching.faceItem", { number: formatNumber(f.faceNo, lang) })}: <strong>{f.matchName || t.unmatched}</strong> {f.matchAdmissionNo ? `(${f.matchAdmissionNo})` : ""}
-                            {f.confidencePct > 0 && (
-                              <span style={{ fontSize: 10, color: f.confidencePct > 70 ? "var(--success)" : "var(--warning)", marginInlineStart: 6 }}>
-                                {t("faceMatching.matchPercentage", { pct: formatNumber(f.confidencePct, lang) })}
-                              </span>
-                            )}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 10,
-                              fontWeight: 700,
-                              padding: "2px 6px",
-                              borderRadius: 4,
-                              background: f.confirmed ? "var(--success)" : "var(--warning-bg)",
-                              color: f.confirmed ? "#fff" : "var(--warning)"
-                            }}
-                          >
-                            {f.confirmed ? t.confirmed : t.suggested}
-                          </span>
-                        </div>
-
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <select
-                            value={f.studentId}
-                            onChange={(e) => changeFaceStudent(f.faceNo, e.target.value)}
-                            style={{ flex: 1, minHeight: 36, fontSize: 12, padding: "4px 8px" }}
-                          >
-                            <option value="">{t.chooseStudent}</option>
-                            {students.map((s) => (
-                              <option key={s._id || s.id} value={s._id || s.id}>
-                                {localizeStudentName(s.name, lang)} ({s.admissionNo})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button
-                            className="btn primary"
-                            style={{ minHeight: 34, fontSize: 11, padding: "4px 10px", flex: 1 }}
-                            onClick={() => confirmFaceMatch(f.faceNo, "present")}
-                            disabled={!f.studentId}
-                          >
-                            <Check size={14} /> {t.confirmPresent}
-                          </button>
-                          <button
-                            className="btn secondary"
-                            style={{ minHeight: 34, fontSize: 11, padding: "4px 10px" }}
-                            onClick={() => dismissFaceMatch(f.faceNo)}
-                          >
-                            <X size={14} /> {t.dismiss}
-                          </button>
-                        </div>
+                return (
+                  <div className="face-suggestions-panel">
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                      <div>
+                        <strong style={{ fontSize: 13, color: "var(--text)" }}>
+                          {t.faceSuggestions} ({formatNumber(detected.length, lang)})
+                        </strong>
+                        <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+                          {t.faceSuggestionsSub}
+                        </p>
                       </div>
-                    ))}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {detected.some((f) => f.studentId && !f.confirmed) && (
+                          <button
+                            type="button"
+                            className="btn primary"
+                            style={{ minHeight: 32, fontSize: 11.5, padding: "4px 10px" }}
+                            onClick={confirmAllFaceMatches}
+                          >
+                            <Check size={13} /> {t.confirmAllPresent}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setDetected([])}
+                          style={{ background: "none", border: "none", color: "var(--muted)", padding: 4, cursor: "pointer", display: "grid", placeItems: "center" }}
+                          title={t.clearSuggestions}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {detected.map((f) => {
+                        const hasDuplicateConflict = Boolean(
+                          f.studentId &&
+                          detected.some((other) => other.faceNo !== f.faceNo && String(other.studentId) === String(f.studentId))
+                        );
+
+                        return (
+                          <div
+                            key={f.faceNo}
+                            className={`face-suggestion-card ${f.confirmed ? "confirmed" : hasDuplicateConflict ? "has-conflict" : ""}`}
+                            style={{ zIndex: 10 }}
+                          >
+                            <div className="face-suggestion-header">
+                              <div className="face-candidate-title">
+                                <strong>
+                                  {t.faceItem
+                                    ? t.faceItem.replace("{{number}}", formatNumber(f.faceNo, lang))
+                                    : `Face #${formatNumber(f.faceNo, lang)}`}
+                                </strong>
+                                {f.confidencePct > 0 ? (
+                                  <span
+                                    className={`face-confidence-tag ${
+                                      f.confidencePct >= 70 ? "high" : f.confidencePct >= 45 ? "medium" : "low"
+                                    }`}
+                                  >
+                                    {f.confidencePct}% {t.match || "match"}
+                                  </span>
+                                ) : (
+                                  <span className="face-confidence-tag low">
+                                    {t.unmatched || "Unmatched"}
+                                  </span>
+                                )}
+                                {f.isAmbiguous && (
+                                  <span className="face-confidence-tag low" title="Similar distance to multiple students">
+                                    Ambiguous
+                                  </span>
+                                )}
+                              </div>
+
+                              <span
+                                className={`face-status-badge ${
+                                  f.confirmed ? "confirmed" : f.isManual ? "manual" : "suggested"
+                                }`}
+                              >
+                                {f.confirmed
+                                  ? t.confirmed || "Confirmed"
+                                  : f.isManual
+                                  ? t.manuallySelected || "Manual"
+                                  : t.suggested || "Suggested"}
+                              </span>
+                            </div>
+
+                            {hasDuplicateConflict && (
+                              <div
+                                style={{
+                                  color: "var(--danger, #DC2626)",
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 5,
+                                  padding: "4px 8px",
+                                  background: "#FEE2E2",
+                                  borderRadius: 4
+                                }}
+                              >
+                                <AlertCircle size={13} />
+                                <span>{t.duplicateWarning || "Duplicate: This student is assigned to another face candidate."}</span>
+                              </div>
+                            )}
+
+                            {/* Searchable Student Combobox Dropdown */}
+                            <StudentSearchDropdown
+                              students={students}
+                              value={f.studentId}
+                              onChange={(newId) => changeFaceStudent(f.faceNo, newId)}
+                              currentFaceNo={f.faceNo}
+                              assignedMap={assignedFaceMap}
+                              placeholder={t.chooseStudent || "Choose student..."}
+                              lang={lang}
+                              t={t}
+                            />
+
+                            <div className="face-suggestion-actions">
+                              <button
+                                type="button"
+                                className="btn primary"
+                                style={{ minHeight: 36, fontSize: 12, padding: "6px 12px", flex: 1 }}
+                                onClick={() => confirmFaceMatch(f.faceNo, "present")}
+                                disabled={!f.studentId || hasDuplicateConflict || f.confirmed}
+                              >
+                                <Check size={14} /> {f.confirmed ? t.confirmed : t.confirmPresent}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn secondary"
+                                style={{ minHeight: 36, fontSize: 12, padding: "6px 12px" }}
+                                onClick={() => dismissFaceMatch(f.faceNo)}
+                              >
+                                <X size={14} /> {t.dismiss}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
-            <div style={{ paddingBottom: 20 }}>
+            {/* Fast Attendance Register — Redesigned 3-Tier Cards with Safe Bottom Padding */}
+            <div className="attendance-student-list">
               {filteredStudents.map((s) => {
                 const sid = s._id || s.id;
                 const cur = records[sid]?.status;
                 const isConfirmed = confirmedRecords[sid]?.status === cur && cur !== undefined;
-                const displayName = localizeStudentName(s.name, lang);
+                const displayName = getStudentDisplayName(s, lang) || localizeStudentName(s.name, lang);
+                const nameDir = getStudentNameDir(displayName, lang);
+                const studentClass = classes.find((c) => String(c._id || c.id) === String(s.classId || selectedClass));
+                const studentClassLabel = studentClass
+                  ? formatClassLabel(studentClass, lang)
+                  : activeClass
+                  ? formatClassLabel(activeClass, lang)
+                  : (t.class || "Class");
+
                 return (
                   <div className="student-attendance-card" key={sid}>
+                    {/* ROW 1: AVATAR, NAME & ADMISSION NUMBER */}
                     <div
-                      className="student-card-header"
-                      style={{ cursor: "pointer", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}
+                      className="student-card-top-row"
                       onClick={() => setViewingStudent(s)}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        <div className="student-card-avatar">
-                          {s.photoUrl ? <img src={s.photoUrl} alt="" /> : (displayName?.[0] || s.name?.[0])?.toUpperCase()}
-                        </div>
-                        <div className="student-card-meta">
-                          <strong>{displayName}</strong>
-                          <span>{s.admissionNo} · {t.studentProfile}</span>
-                        </div>
+                      <div className="student-card-avatar">
+                        {s.photoUrl ? (
+                          <img src={s.photoUrl} alt="" />
+                        ) : (
+                          (displayName?.[0] || s.name?.[0] || "#")?.toUpperCase()
+                        )}
                       </div>
+                      <div className="student-card-identity">
+                        <strong className="student-card-name" dir={nameDir}>
+                          {displayName}
+                        </strong>
+                        <span className="student-card-id-tag">
+                          #{s.admissionNo || s.admissionNumber || "—"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* ROW 2: CLASS INFO & SECONDARY STATUS BADGE */}
+                    <div className="student-card-middle-row">
+                      <span className="student-card-class-info" title={studentClassLabel}>
+                        {studentClassLabel}
+                      </span>
 
                       <div>
                         {cur ? (
@@ -2845,44 +3023,53 @@ export default function App() {
                             className={`student-card-status-indicator ${isConfirmed ? "confirmed" : "draft"}`}
                             title={isConfirmed ? t.serverConfirmed : t.localDraft}
                           >
-                            {isConfirmed ? <Check size={13} /> : <Clock size={13} />}
+                            {isConfirmed ? <Check size={12} /> : <Clock size={12} />}
                             {(t[cur] || cur)} · {isConfirmed ? t.confirmed : t.localDraft}
                           </span>
                         ) : (
                           <span className="student-card-status-indicator unmarked">
-                            <HelpCircle size={13} /> {t.notMarked}
+                            <HelpCircle size={12} /> {t.notMarked}
                           </span>
                         )}
                       </div>
                     </div>
 
+                    {/* ROW 3: FOUR ATTENDANCE ACTIONS (RESPONSIVE 2X2 ON MOBILE <= 480PX, 4-COL ON WIDER) */}
                     <div className="status-grid-large">
                       <button
+                        type="button"
                         className={`status-touch-btn present ${cur === "present" ? "active" : ""}`}
                         onClick={() => mark(sid, "present")}
+                        aria-pressed={cur === "present"}
                       >
-                        <Check size={18} />
+                        <Check size={17} />
                         <span>{t.present}</span>
                       </button>
                       <button
+                        type="button"
                         className={`status-touch-btn absent ${cur === "absent" ? "active" : ""}`}
                         onClick={() => mark(sid, "absent")}
+                        aria-pressed={cur === "absent"}
                       >
-                        <X size={18} />
+                        <X size={17} />
                         <span>{t.absent}</span>
                       </button>
                       <button
+                        type="button"
                         className={`status-touch-btn late ${cur === "late" ? "active" : ""}`}
                         onClick={() => mark(sid, "late")}
+                        aria-pressed={cur === "late"}
                       >
-                        <Clock size={18} />
+                        <Clock size={17} />
                         <span>{t.late}</span>
                       </button>
                       <button
+                        type="button"
                         className={`status-touch-btn excused ${cur === "excused" ? "active" : ""}`}
                         onClick={() => mark(sid, "excused")}
+                        aria-pressed={cur === "excused"}
                       >
-                        <AlertCircle size={18} />
+                        <AlertCircle size={17} />
                         <span>{t.excused}</span>
                       </button>
                     </div>
@@ -5995,6 +6182,103 @@ export default function App() {
                 <span>{t("session.continueSession", "Continue Session")}</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          SECURITY: PIN-PROTECTED FILE DOWNLOAD MODAL
+          ========================================================= */}
+      {downloadPinModal && (
+        <div className="sheet-overlay" onClick={() => !downloadPinLoading && setDownloadPinModal(null)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "50%",
+                  background: "rgba(23, 75, 54, 0.1)",
+                  color: "var(--primary)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}>
+                  <Lock size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16 }}>{t("security.downloadPinTitle", "Security Verification")}</h3>
+                  <small style={{ color: "var(--muted)", fontSize: 12 }}>{t("security.authorizedPersonnel", "Authorized export access")}</small>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn icon-btn"
+                disabled={downloadPinLoading}
+                onClick={() => setDownloadPinModal(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
+              {t("security.downloadPinPrompt", "Please enter the security PIN (12@12) to authorize downloading this data file.")}
+            </p>
+
+            {downloadPinError && (
+              <div className="alert error" style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", marginBottom: 14, fontSize: 13 }}>
+                <ShieldAlert size={16} style={{ flexShrink: 0 }} />
+                <span>{downloadPinError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleDownloadPinSubmit} style={{ display: "grid", gap: 14 }}>
+              <div>
+                <label style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600 }}>
+                  {t("security.enterPin", "Security PIN")}
+                </label>
+                <input
+                  type="password"
+                  autoFocus
+                  required
+                  value={downloadPinInput}
+                  onChange={(e) => {
+                    setDownloadPinInput(e.target.value);
+                    if (downloadPinError) setDownloadPinError("");
+                  }}
+                  placeholder="12@12"
+                  style={{
+                    width: "100%",
+                    fontSize: 16,
+                    padding: "10px 12px",
+                    borderRadius: "var(--radius-md)",
+                    border: "1px solid var(--border)"
+                  }}
+                  disabled={downloadPinLoading}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ flex: 1 }}
+                  disabled={downloadPinLoading}
+                  onClick={() => setDownloadPinModal(null)}
+                >
+                  {t.cancel}
+                </button>
+                <button
+                  type="submit"
+                  className="btn primary"
+                  style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                  disabled={downloadPinLoading || !downloadPinInput.trim()}
+                >
+                  {downloadPinLoading ? <RefreshCw size={16} className="spin" /> : <Download size={16} />}
+                  <span>{t("security.verifyAndDownload", "Verify & Download")}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

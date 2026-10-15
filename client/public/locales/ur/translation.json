@@ -346,5 +346,20 @@
     "viewProfileOf": "پروفائل دیکھیں - {{name}}",
     "editDetailsOf": "تفصیلات میں ترمیم - {{name}}",
     "actionsFor": "اعمال برائے {{name}}"
+  },
+  "app": {
+    "manuallySelected": "دستی",
+    "duplicateWarning": "ڈپلیکیٹ: یہ طالب علم دوسرے چہرے کو تفویض کیا گیا ہے۔",
+    "searchStudentsPlaceholder": "نام یا آئی ڈی سے تلاش کریں...",
+    "noStudentsMatchQuery": "کوئی طالب علم نہیں ملا",
+    "noStudentsAvailable": "کوئی طالب علم دستیاب نہیں",
+    "assignedToOtherFace": "چہرہ #{{number}} کو تفویض"
+  },
+  "security": {
+    "downloadPinTitle": "سیکیورٹی توثیق",
+    "authorizedPersonnel": "مجاز ڈاؤن لوڈ رسائی",
+    "downloadPinPrompt": "ڈیٹا فائل ڈاؤن لوڈ کرنے کے لیے سیکیورٹی پن (12@12) درج کریں۔",
+    "enterPin": "سیکیورٹی پن",
+    "verifyAndDownload": "توثیق اور ڈاؤن لوڈ کریں"
   }
 }

@@ -11,7 +11,7 @@ import PDFDocument from "pdfkit";
 import nodemailer from "nodemailer";
 import cron from "node-cron";
 import { User, Class, Student, Attendance, SyncMutation, AuditLog, SystemSetting } from "./models.js";
-import { requireAuth, requireAdmin, canAccessClass } from "./auth.js";
+import { requireAuth, requireAdmin, canAccessClass, requireExportPin, exportRateLimiter, securityHeaders } from "./auth.js";
 import { uploadImageDataUrl } from "./cloudinary.js";
 import { connectDB, getDatabaseInfo } from "./db.js";
 import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport, getNextScheduledReportRun } from "./weeklyReportService.js";
@@ -49,6 +49,9 @@ app.use(cors({
 }));
 app.use(express.json({ limit: "10mb" }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
+
+// Security headers on every response (clickjack/XSS/MIME-sniff protection)
+app.use(securityHeaders);
 
 // Request Performance Measurement Middleware
 app.use((req, res, next) => {
@@ -697,7 +700,7 @@ app.post("/api/admin/students/names/bulk-update", requireAdmin, async (req, res)
   });
 });
 
-app.get("/api/admin/students/names/export", requireAdmin, async (_req, res) => {
+app.get("/api/admin/students/names/export", requireAdmin, exportRateLimiter, requireExportPin, async (_req, res) => {
   const students = await Student.find().populate("classId", "name section").sort({ admissionNo: 1 }).lean();
   const headers = ["Admission No", "Canonical Name", "English Name", "Urdu Name", "Telugu Name", "Class", "Mixed Script Flag"];
   const quote = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -814,7 +817,7 @@ app.post("/api/admin/students/names/import", requireAdmin, async (req, res) => {
 });
 
 // --- STUDENT ROSTER EXPORT (CSV / XLSX) ---
-app.get("/api/students/export", async (req, res) => {
+app.get("/api/students/export", exportRateLimiter, requireExportPin, async (req, res) => {
   const classId = req.query.classId;
   const format = req.query.format || "csv";
   const filter = {};
@@ -1670,7 +1673,7 @@ app.get("/api/reports/summary", async (req, res) => {
   res.json(rows);
 });
 
-app.get("/api/reports/export", async (req, res) => {
+app.get("/api/reports/export", exportRateLimiter, requireExportPin, async (req, res) => {
   const classId = req.query.classId;
   const from = req.query.from || req.query.startDate;
   const to = req.query.to || req.query.endDate;
@@ -1757,7 +1760,7 @@ app.get("/api/reports/export", async (req, res) => {
 });
 
 // --- WEEKLY EXCEL REPORT & EMAIL AUTOMATION ---
-app.get("/api/reports/weekly-excel", requireAdmin, async (req, res) => {
+app.get("/api/reports/weekly-excel", requireAdmin, exportRateLimiter, requireExportPin, async (req, res) => {
   const prevWeek = getPreviousReportingWeek();
   const from = req.query.from || req.query.startDate || prevWeek.from;
   const to = req.query.to || req.query.endDate || prevWeek.to;
@@ -2087,7 +2090,7 @@ app.post("/api/admin/retention/archive", requireAdmin, async (req, res) => {
 });
 
 // Full Structured System Backup Download
-app.get("/api/admin/backup/export", requireAdmin, async (req, res) => {
+app.get("/api/admin/backup/export", requireAdmin, exportRateLimiter, requireExportPin, async (req, res) => {
   const todayStr = new Date().toISOString().slice(0, 10);
   const safeFilename = `Madrasa-Amanah-Backup-${todayStr}.json`;
 
@@ -2132,7 +2135,7 @@ app.get("/api/admin/backup/export", requireAdmin, async (req, res) => {
 // --- AUTOMATED MONTHLY EXCEL BACKUP ENDPOINTS ---
 // GET /api/admin/backup/monthly-excel
 // Authenticated with Admin JWT or restricted x-backup-token / BACKUP_SERVICE_TOKEN
-app.get("/api/admin/backup/monthly-excel", requireAdmin, async (req, res) => {
+app.get("/api/admin/backup/monthly-excel", requireAdmin, exportRateLimiter, requireExportPin, async (req, res) => {
   const monthParam = req.query.month;
   const monthMeta = monthParam
     ? parseReportingMonth(monthParam)

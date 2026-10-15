@@ -346,5 +346,20 @@
     "viewProfileOf": "ప్రొఫైల్ చూడండి - {{name}}",
     "editDetailsOf": "వివరాలను సవరించండి - {{name}}",
     "actionsFor": "{{name}} కొరకు చర్యలు"
+  },
+  "app": {
+    "manuallySelected": "మాన్యువల్",
+    "duplicateWarning": "డూప్లికేట్: ఈ విద్యార్థి ఇప్పటికే వేరే ముఖానికి కేటాయించబడ్డారు.",
+    "searchStudentsPlaceholder": "పేరు లేదా ఐడీతో వెతకండి...",
+    "noStudentsMatchQuery": "విద్యార్థులు కనుగొనబడలేదు",
+    "noStudentsAvailable": "విద్యార్థులు అందుబాటులో లేరు",
+    "assignedToOtherFace": "ముఖం #{{number}} కు కేటాయించబడింది"
+  },
+  "security": {
+    "downloadPinTitle": "సెక్యూరిటీ ధృవీకరణ",
+    "authorizedPersonnel": "అధికారిక డౌన్‌లోడ్ యాక్సెస్",
+    "downloadPinPrompt": "డేటా ఫైల్ డౌన్‌లోడ్ చేయడానికి సెక్యూరిటీ పిన్ (12@12) నమోదు చేయండి.",
+    "enterPin": "సెక్యూరిటీ పిన్",
+    "verifyAndDownload": "ధృవీకరించి డౌన్‌లోడ్ చేయండి"
   }
 }

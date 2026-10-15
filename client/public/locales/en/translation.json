@@ -434,5 +434,20 @@
     "freshlySynced": "Synchronized",
     "lastUpdated": "Last updated {{time}}",
     "loadingData": "Loading fresh data from cloud…"
+  },
+  "app": {
+    "manuallySelected": "Manual",
+    "duplicateWarning": "Duplicate: This student is assigned to another face candidate.",
+    "searchStudentsPlaceholder": "Search by name or ID...",
+    "noStudentsMatchQuery": "No students matching query",
+    "noStudentsAvailable": "No eligible students available",
+    "assignedToOtherFace": "Assigned to Face #{{number}}"
+  },
+  "security": {
+    "downloadPinTitle": "Security Verification",
+    "authorizedPersonnel": "Authorized export access",
+    "downloadPinPrompt": "Please enter the security PIN (12@12) to authorize downloading this data file.",
+    "enterPin": "Security PIN",
+    "verifyAndDownload": "Verify & Download"
   }
 }

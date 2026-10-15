@@ -285,19 +285,20 @@ export function localizeStudentName(input, lang = "en") {
     const nameTe = (input.nameTe || "").trim();
     const canonical = (input.name || input.fullName || "").trim();
     const admissionNo = (input.admissionNo || input.admissionNumber || "").trim();
-    if (lang === "ur") return nameUr || canonical || nameEn || nameTe || admissionNo;
-    if (lang === "te") return nameTe || canonical || nameEn || nameUr || admissionNo;
-    return nameEn || canonical || nameUr || nameTe || admissionNo;
+    if (lang === "ur" && nameUr) return nameUr;
+    if (lang === "te" && nameTe) return nameTe;
+    if (lang === "en" && nameEn) return nameEn;
+    return canonical || nameEn || nameUr || nameTe || admissionNo;
   }
-  const key = String(input).trim();
-  if (!key || lang === "en") return key;
-  return translateWords(key, lang);
+  // Preserve personal names as-is without automatically translating into broken mixed scripts
+  return String(input).trim();
 }
 
 /**
  * Localize Guardian Names in Urdu and Telugu
  */
 export function localizeGuardianName(name, lang = "en") {
-  if (!name || lang === "en") return name;
-  return translateWords(String(name).trim(), lang);
+  if (!name) return "";
+  return String(name).trim();
 }
+
