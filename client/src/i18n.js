@@ -1,422 +1,169 @@
-export const translations = {
-  en: {
-    brand: "Madrasa Amanah",
-    tagline: "Smart Attendance System",
-    dashboard: "Dashboard",
-    students: "Students",
-    attendance: "Take Attendance",
-    reports: "Reports",
-    settings: "Settings",
-    syncCenter: "Sync Center",
-    prepareOffline: "Prepare Offline",
-    auditLogs: "Audit & Logs",
-    signout: "Sign out",
-    totalStudents: "Total students",
-    present: "Present",
-    absent: "Absent",
-    late: "Late",
-    excused: "Excused",
-    notMarked: "Not marked",
-    save: "Save Attendance",
-    saveAttendance: "Save Attendance",
-    saveOffline: "Save on this device (Offline)",
-    syncNow: "Sync Now",
-    syncing: "Syncing…",
-    synced: "Synced to server",
-    savedLocally: "Saved on this device — waiting to sync",
-    online: "Online",
-    offline: "Offline",
-    lastSync: "Last sync",
-    pendingSync: "Pending sync",
-    class: "Class",
-    section: "Section",
-    session: "Session",
-    morning: "Morning",
-    afternoon: "Afternoon",
-    evening: "Evening",
-    fullDay: "Full Day",
-    date: "Date",
-    search: "Search students…",
-    addStudent: "Add Student",
-    editStudent: "Edit Student",
-    admissionNo: "Admission number",
-    name: "Student name",
-    guardian: "Guardian name",
-    phone: "Guardian phone",
-    photo: "Reference photo",
-    consent: "Parent / guardian consent recorded for photo assistance",
-    takePhoto: "Take / Upload Class Photo",
-    photoPrivacy: "Privacy notice: classroom photos are processed locally on device and not retained in the database.",
-    faceSuggestions: "Face Suggestions",
-    faceReview: "Face Review & Attachment",
-    detectedFaces: "Detected faces",
-    unmatched: "Unmatched / Uncertain",
-    manualAttach: "Attach student manually",
-    chooseStudent: "Choose student…",
-    confirmMatch: "Confirm match",
-    confirmPresent: "Confirm Present",
-    dismiss: "Dismiss",
-    suggested: "Suggested",
-    confirmed: "Confirmed",
-    markRemainingAbsent: "Mark Remaining Absent",
-    markAllPresent: "Mark All Present",
-    noFacesDetected: "No faces detected. Manual register is fully available.",
-    login: "Sign In",
-    email: "Email address",
-    password: "Password",
-    showPassword: "Show",
-    hidePassword: "Hide",
-    export: "Download report",
-    from: "From",
-    to: "To",
-    language: "Language",
-    noClasses: "No classes assigned. Contact the administrator to assign classes.",
-    loading: "Loading…",
-    error: "Something went wrong.",
-    retry: "Retry",
-    classesCached: "Classes cached",
-    studentsCached: "Students cached",
-    modelsReady: "Face models cached",
-    downloadOfflineData: "Download data for offline use",
-    readyForOffline: "Ready for offline use",
-    needsAuth: "Session expired. Sign in online to sync.",
-    needsReview: "Review required",
-    conflictNotice: "Conflict detected — check records",
-    active: "Active",
-    inactive: "Inactive",
-    notes: "Notes",
-    statusNote: "Add optional note",
-    allStudents: "All Students",
-    activeStudents: "Active",
-    archivedStudents: "Archived",
-    allClasses: "All Classes",
-    viewProfile: "View Profile",
-    editDetails: "Edit Details",
-    changePhoto: "Change Photo",
-    changeClass: "Change Class",
-    transferClass: "Transfer Class",
-    attendanceHistory: "Attendance History",
-    activate: "Activate",
-    deactivate: "Deactivate",
-    archive: "Archive",
-    restore: "Restore",
-    removeStudent: "Delete Student",
-    actions: "Actions",
-    gender: "Gender",
-    dob: "Date of Birth",
-    enrollmentDate: "Enrollment Date",
-    address: "Address",
-    confirm: "Confirm",
-    cancel: "Cancel",
-    archived: "Archived",
-    monitoring: "Attendance Monitoring",
-    monitoringSubtitle: "Live attendance monitoring, real-time records and historical analysis",
-    eligibleStudents: "Eligible Students",
-    attendanceRate: "Attendance Rate",
-    lastUpdated: "Last Updated",
-    updatedBy: "Updated By",
-    viewHistory: "View History",
-    singleDate: "Single Date",
-    dateRange: "Date Range",
-    statusFilter: "Status Filter",
-    allStatuses: "All Statuses",
-    allSessions: "All Sessions",
-    dailyBreakdown: "Daily Breakdown",
-    studentWise: "Student-wise Records",
-    noAttendanceRecorded: "No attendance records found for this selection.",
-    noStudentsFound: "No matching students found.",
-    rateFormulaNotice: "Formula: Present students ÷ Eligible students × 100",
-    serverConfirmed: "Server Confirmed",
-    localDraft: "Local Draft",
-    retrySave: "Retry Save",
-    savingFailed: "Failed to save attendance to server. Draft preserved locally.",
-    attendanceHistoryFor: "Attendance History for",
-    filterByRange: "Filter by date range",
-    totalSessions: "Total Sessions",
-    admissionNumber: "Admission Number",
-    recorded: "Recorded",
-    startDate: "Start Date",
-    endDate: "End Date"
-  },
-  ur: {
-    brand: "مدرسہ امانہ",
-    tagline: "سمارٹ حاضری نظام",
-    dashboard: "ڈیش بورڈ",
-    students: "طلبہ",
-    attendance: "حاضری لگائیں",
-    reports: "رپورٹس",
-    settings: "ترتیبات",
-    syncCenter: "مطابقت پذیری (سنک)",
-    prepareOffline: "آف لائن تیاری",
-    auditLogs: "آڈٹ اور لاگز",
-    signout: "سائن آؤٹ",
-    totalStudents: "کل طلبہ",
-    present: "حاضر",
-    absent: "غیر حاضر",
-    late: "دیر سے",
-    excused: "رخصت / معذور",
-    notMarked: "غیر نشان زدہ",
-    save: "حاضری محفوظ کریں",
-    saveAttendance: "حاضری محفوظ کریں",
-    saveOffline: "ڈیوائس پر محفوظ کریں (آف لائن)",
-    syncNow: "ابھی سنک کریں",
-    syncing: "سنک ہو رہا ہے…",
-    synced: "سرور پر سنک ہو گیا",
-    savedLocally: "ڈیوائس پر محفوظ ہو گیا — سرور کا انتظار",
-    online: "آن لائن",
-    offline: "آف لائن",
-    lastSync: "آخری سنک",
-    pendingSync: "زیر التواء",
-    class: "جماعت",
-    section: "سیکشن",
-    session: "نشست",
-    morning: "صبح",
-    afternoon: "دوپہر",
-    evening: "شام",
-    fullDay: "پورا دن",
-    date: "تاریخ",
-    search: "طالب علم تلاش کریں…",
-    addStudent: "طالب علم شامل کریں",
-    editStudent: "ترمیم کریں",
-    admissionNo: "داخلہ نمبر",
-    name: "طالب علم کا نام",
-    guardian: "سرپرست کا نام",
-    phone: "سرپرست کا فون",
-    photo: "حوالہ تصویر",
-    consent: "تصویر کے استعمال کی سرپرست سے اجازت حاصل ہے",
-    takePhoto: "کلاس کی تصویر لیں یا اپ لوڈ کریں",
-    photoPrivacy: "رازداری کی ضمانت: کلاس کی تصویر صرف ڈیوائس پر پراسیس ہوتی ہے اور ڈیٹا بیس میں محفوظ نہیں ہوتی۔",
-    faceSuggestions: "چہروں کی تجاویز",
-    faceReview: "چہروں کا جائزہ اور ربط",
-    detectedFaces: "ملنے والے چہرے",
-    unmatched: "غیر مماثل چہرے",
-    manualAttach: "دستی طور پر منسلک کریں",
-    chooseStudent: "طالب علم منتخب کریں…",
-    confirmMatch: "تصدیق کریں",
-    confirmPresent: "حاضر تصدیق کریں",
-    dismiss: "مسترد کریں",
-    suggested: "تجویز کردہ",
-    confirmed: "تصدیق شدہ",
-    markRemainingAbsent: "باقی کو غیر حاضر نشان لگائیں",
-    markAllPresent: "سب کو حاضر نشان لگائیں",
-    noFacesDetected: "کوئی چہرہ نہیں ملا۔ دستی حاضری رجسٹر مکمل طور پر دستیاب ہے۔",
-    login: "سائن اِن",
-    email: "ای میل ایڈریس",
-    password: "پاس ورڈ",
-    showPassword: "دکھائیں",
-    hidePassword: "چھپائیں",
-    export: "رپورٹ ڈاؤن لوڈ کریں",
-    from: "شروع تاریخ",
-    to: "آخری تاریخ",
-    language: "زبان",
-    noClasses: "کوئی جماعت تفویض نہیں ہوئی۔ منتظم سے رابطہ کریں۔",
-    loading: "لوڈ ہو رہا ہے…",
-    error: "کچھ غلط ہو گیا۔",
-    retry: "دوبارہ کوشش کریں",
-    classesCached: "جماعتیں محفوظ ہو گئیں",
-    studentsCached: "طلبہ کا ریکارڈ محفوظ ہو گیا",
-    modelsReady: "چہرہ ماڈلز دستیاب ہیں",
-    downloadOfflineData: "آف لائن استعمال کے لیے ڈیٹا ڈاؤن لوڈ کریں",
-    readyForOffline: "آف لائن استعمال کے لیے تیار ہے",
-    needsAuth: "سیشن ختم ہو گیا۔ سنک کرنے کے لیے آن لائن لاگ اِن کریں۔",
-    needsReview: "جائزہ درکار ہے",
-    conflictNotice: "تنازع پایا گیا — تصدیق کریں",
-    active: "فعال",
-    inactive: "غیر فعال",
-    notes: "نوٹ",
-    statusNote: "اختیاری نوٹ شامل کریں",
-    allStudents: "تمام طلبہ",
-    activeStudents: "فعال طلبہ",
-    archivedStudents: "آرکائیو شدہ",
-    allClasses: "تمام کلاسیں",
-    viewProfile: "پروفائل دیکھیں",
-    editDetails: "تفصیلات میں ترمیم کریں",
-    changePhoto: "تصویر تبدیل کریں",
-    changeClass: "کلاس تبدیل کریں",
-    transferClass: "کلاس منتقل کریں",
-    attendanceHistory: "حاضری کی تاریخ",
-    activate: "فعال کریں",
-    deactivate: "غیر فعال کریں",
-    archive: "آرکائیو کریں",
-    restore: "بحال کریں",
-    removeStudent: "طالب علم خارج کریں",
-    actions: "اعمال",
-    gender: "جنس",
-    dob: "تاریخ پیدائش",
-    enrollmentDate: "تاریخ داخلہ",
-    address: "پتہ",
-    confirm: "تصدیق کریں",
-    cancel: "منسوخ کریں",
-    archived: "آرکائیو شدہ",
-    monitoring: "حاضری کی نگرانی",
-    monitoringSubtitle: "براہ راست حاضری کی صورتحال، اصل ریکارڈ اور تاریخی تجزیہ",
-    eligibleStudents: "اہل طلبہ",
-    attendanceRate: "حاضری کا تناسب",
-    lastUpdated: "آخری بار اپ ڈیٹ",
-    updatedBy: "اپ ڈیٹ کنندہ",
-    viewHistory: "تاریخ دیکھیں",
-    singleDate: "ایک دن",
-    dateRange: "تاریخ کی حد",
-    statusFilter: "حیثیت فلٹر",
-    allStatuses: "تمام حالتیں",
-    allSessions: "تمام سیشنز",
-    dailyBreakdown: "روزانہ کی تفصیل",
-    studentWise: "طلبہ کے مطابق ریکارڈ",
-    noAttendanceRecorded: "اس انتخاب کے لیے کوئی حاضری ریکارڈ نہیں ملا۔",
-    noStudentsFound: "کوئی مماثل طالب علم نہیں ملا۔",
-    rateFormulaNotice: "فارمولا: حاضر طلبہ ÷ اہل طلبہ × 100",
-    serverConfirmed: "سرور سے تصدیق شدہ",
-    localDraft: "مقامی ڈرافٹ",
-    retrySave: "دوبارہ کوشش کریں",
-    savingFailed: "سرور پر حاضری محفوظ نہیں ہو سکی۔ ڈرافٹ محفوظ ہے۔",
-    attendanceHistoryFor: "حاضری کی تاریخ برائے",
-    filterByRange: "تاریخ کی حد منتخب کریں",
-    totalSessions: "کل سیشنز",
-    admissionNumber: "داخلہ نمبر",
-    recorded: "محفوظ شدہ",
-    startDate: "شروع تاریخ",
-    endDate: "آخری تاریخ"
-  },
-  te: {
-    brand: "మదర్సా అమానః",
-    tagline: "స్మార్ట్ హాజరు వ్యవస్థ",
-    dashboard: "డాష్‌బోర్డ్",
-    students: "విద్యార్థులు",
-    attendance: "హాజరు తీసుకోండి",
-    reports: "నివేదికలు",
-    settings: "సెట్టింగ్‌లు",
-    syncCenter: "సింక్ కేంద్రం",
-    prepareOffline: "ఆఫ్‌లైన్ తయారీ",
-    auditLogs: "ఆడిట్ లాగ్స్",
-    signout: "సైన్ అవుట్",
-    totalStudents: "మొత్తం విద్యార్థులు",
-    present: "హాజరు",
-    absent: "గైర్హాజరు",
-    late: "ఆలస్యం",
-    excused: "సెలవు",
-    notMarked: "గుర్తించబడలేదు",
-    save: "హాజరును సేవ్ చేయండి",
-    saveAttendance: "హాజరును సేవ్ చేయండి",
-    saveOffline: "డివైస్‌లో సేవ్ చేయండి (ఆఫ్‌లైన్)",
-    syncNow: "ఇప్పుడే సింక్ చేయండి",
-    syncing: "సింక్ అవుతోంది…",
-    synced: "సర్వర్‌కు సింక్ అయింది",
-    savedLocally: "డివైస్‌లో సేవ్ అయింది — సింక్ వేచి ఉంది",
-    online: "ఆన్‌లైన్",
-    offline: "ఆఫ్‌లైన్",
-    lastSync: "చివరి సింక్",
-    pendingSync: "వేచి ఉన్నవి",
-    class: "తరగతి",
-    section: "సెక్షన్",
-    session: "సెషన్",
-    morning: "ఉదయం",
-    afternoon: "మధ్యాహ్నం",
-    evening: "సాయంత్రం",
-    fullDay: "పూర్తి రోజు",
-    date: "తేదీ",
-    search: "విద్యార్థులను వెతకండి…",
-    addStudent: "విద్యార్థిని జోడించండి",
-    editStudent: "సవరించండి",
-    admissionNo: "ప్రవేశ సంఖ్య",
-    name: "విద్యార్థి పేరు",
-    guardian: "సంరక్షకుని పేరు",
-    phone: "సంరక్షకుని ఫోన్",
-    photo: "రిఫరెన్స్ ఫోటో",
-    consent: "ఫోటో ప్రాసెసింగ్ కోసం తల్లిదండ్రుల సమ్మతి పొందబడింది",
-    takePhoto: "తరగతి ఫోటో తీయండి / అప్‌లోడ్ చేయండి",
-    photoPrivacy: "గోప్యతా గమనిక: తరగతి ఫోటోలు డివైస్‌లోనే ప్రాసెస్ చేయబడతాయి, డేటాబేస్‌లో నిల్వ చేయబడవు.",
-    faceSuggestions: "ముఖాల సూచనలు",
-    faceReview: "ముఖాల సమీక్ష",
-    detectedFaces: "గుర్తించిన ముఖాలు",
-    unmatched: "సరిపోలని ముఖాలు",
-    manualAttach: "మాన్యువల్‌గా జత చేయండి",
-    chooseStudent: "విద్యార్థిని ఎంచుకోండి…",
-    confirmMatch: "నిర్ధారించండి",
-    confirmPresent: "హాజరు నిర్ధారించండి",
-    dismiss: "రద్దు చేయండి",
-    suggested: "సూచించబడింది",
-    confirmed: "నిర్ధారించబడింది",
-    markRemainingAbsent: "మిగిలిన వారిని గైర్హాజరుగా గుర్తించండి",
-    markAllPresent: "అందరినీ హాజరుగా గుర్తించండి",
-    noFacesDetected: "ముఖాలు గుర్తించబడలేదు. మాన్యువల్ రిజిస్టర్ అందుబాటులో ఉంది.",
-    login: "లాగిన్",
-    email: "ఈమెయిల్ చిరునామా",
-    password: "పాస్‌వర్డ్",
-    showPassword: "చూపించు",
-    hidePassword: "దాచు",
-    export: "రిపోర్ట్ డౌన్‌లోడ్",
-    from: "నుండి",
-    to: "వరకు",
-    language: "భాష",
-    noClasses: "తరగతులు కేటాయించలేదు. అడ్మిన్‌ను సంప్రదించండి.",
-    loading: "లోడ్ అవుతోంది…",
-    error: "ఏదో తప్పు జరిగింది.",
-    retry: "మళ్లీ ప్రయత్నించండి",
-    classesCached: "తరగతులు కాష్ చేయబడ్డాయి",
-    studentsCached: "విద్యార్థులు కాష్ చేయబడ్డారు",
-    modelsReady: "ఫేస్ మోడల్స్ అందుబాటులో ఉన్నాయి",
-    downloadOfflineData: "ఆఫ్‌లైన్ కోసం డేటా డౌన్‌లోడ్ చేయండి",
-    readyForOffline: "ఆఫ్‌లైన్ వినియోగానికి సిద్ధంగా ఉంది",
-    needsAuth: "సెషన్ ముగిసింది. ఆన్‌లైన్ లాగిన్ చేయండి.",
-    needsReview: "సమీక్ష అవసరం",
-    conflictNotice: "వైరుధ్యం గుర్తించబడింది",
-    active: "క్రియాశీల",
-    inactive: "నిష్క్రియాత్మక",
-    notes: "గమనికలు",
-    statusNote: "ఐచ్ఛిక గమనికను జోడించండి",
-    allStudents: "అన్ని విద్యార్థులు",
-    activeStudents: "క్రియాశీల విద్యార్థులు",
-    archivedStudents: "ఆర్కైవ్ చేయబడినవి",
-    allClasses: "అన్ని తరగతులు",
-    viewProfile: "ప్రొఫైల్ చూడండి",
-    editDetails: "వివరాలను సవరించండి",
-    changePhoto: "ఫోటో మార్చండి",
-    changeClass: "తరగతి మార్చండి",
-    transferClass: "తరగతి బదిలీ",
-    attendanceHistory: "హాజరు చరిత్ర",
-    activate: "క్రియాశీలం చేయండి",
-    deactivate: "నిష్క్రియం చేయండి",
-    archive: "ఆర్కైవ్ చేయండి",
-    restore: "పునరుద్ధరించండి",
-    removeStudent: "తొలగించండి",
-    actions: "చర్యలు",
-    gender: "లింగం",
-    dob: "పుట్టిన తేదీ",
-    enrollmentDate: "చేరిన తేదీ",
-    address: "చిరునామా",
-    confirm: "నిర్ధారించండి",
-    cancel: "రద్దు చేయండి",
-    archived: "ఆర్కైవ్ చేయబడింది",
-    monitoring: "హాజరు పర్యవేక్షణ",
-    monitoringSubtitle: "ప్రత్యక్ష హాజరు స్థితి, వాస్తవ సమయ రికార్డులు మరియు చారిత్రక విశ్లేషణ",
-    eligibleStudents: "అర్హతగల విద్యార్థులు",
-    attendanceRate: "హాజరు శాతం",
-    lastUpdated: "చివరిగా నవీకరించబడింది",
-    updatedBy: "నవీకరించిన వారు",
-    viewHistory: "చరిత్రను చూడండి",
-    singleDate: "ఒకే తేదీ",
-    dateRange: "తేదీ పరిధి",
-    statusFilter: "స్థితి ఫిల్టర్",
-    allStatuses: "అన్ని స్థితులు",
-    allSessions: "అన్ని సెషన్లు",
-    dailyBreakdown: "రోజువారీ విభజన",
-    studentWise: "విద్యార్థుల వారీగా రికార్డులు",
-    noAttendanceRecorded: "ఈ ఎంపికకు సంబంధించి ఎటువంటి హాజరు రికార్డులు కనుగొనబడలేదు.",
-    noStudentsFound: "సరిపోలే విద్యార్థులు ఎవరూ లేరు.",
-    rateFormulaNotice: "సూత్రం: హాజరైన విద్యార్థులు ÷ అర్హతగల విద్యార్థులు × 100",
-    serverConfirmed: "సర్వర్ ధృవీకరించబడింది",
-    localDraft: "స్థానిక డ్రాఫ్ట్",
-    retrySave: "మళ్ళీ భద్రపరచండి",
-    savingFailed: "సర్వర్‌లో హాజరును భద్రపరచడం విఫలమైంది. స్థానికంగా డ్రాఫ్ట్ భద్రపరచబడింది.",
-    attendanceHistoryFor: "హాజరు చరిత్ర:",
-    filterByRange: "తేదీ పరిధి ప్రకారం ఫిల్టర్ చేయండి",
-    totalSessions: "మొత్తం సెషన్లు",
-    admissionNumber: "ప్రవేశ సంఖ్య",
-    recorded: "నమోదైంది",
-    startDate: "ప్రారంభ తేదీ",
-    endDate: "ముగింపు తేదీ"
-  }
+import enLocales from "../public/locales/en/translation.json";
+import urLocales from "../public/locales/ur/translation.json";
+import teLocales from "../public/locales/te/translation.json";
+
+/**
+ * Madrasa Amanah — Centralized Internationalization (i18n) Engine
+ * Supported Languages:
+ *   - English (en) [LTR]
+ *   - Urdu (ur) [RTL]
+ *   - Telugu (te) [LTR]
+ */
+
+export const SUPPORTED_LANGUAGES = [
+  { code: "en", label: "English", dir: "ltr", locale: "en-IN" },
+  { code: "ur", label: "اردو", dir: "rtl", locale: "ur-PK" },
+  { code: "te", label: "తెలుగు", dir: "ltr", locale: "te-IN" }
+];
+
+export const rawTranslations = {
+  en: enLocales,
+  ur: urLocales,
+  te: teLocales
 };
+
+// Flatten helper to support both namespaced (e.g. "students.searchPlaceholder")
+// and leaf keys (e.g. "searchPlaceholder", "save", "present")
+function flattenDictionary(obj, prefix = "") {
+  const result = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const fullKey = prefix ? `${prefix}.${k}` : k;
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      Object.assign(result, flattenDictionary(v, fullKey));
+    } else {
+      result[fullKey] = v;
+      if (result[k] === undefined) {
+        result[k] = v;
+      }
+    }
+  }
+  return result;
+}
+
+export const flatTranslations = {
+  en: flattenDictionary(enLocales),
+  ur: flattenDictionary(urLocales),
+  te: flattenDictionary(teLocales)
+};
+
+// Backward-compatible translations export
+export const translations = flatTranslations;
+
+/**
+ * Get layout direction for a language code
+ */
+export function getDirection(lang = "en") {
+  return lang === "ur" ? "rtl" : "ltr";
+}
+
+/**
+ * Apply language & direction to documentElement with localStorage persistence
+ */
+export function applyLanguageToDocument(lang = "en") {
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = lang;
+    document.documentElement.dir = getDirection(lang);
+    try {
+      localStorage.setItem("madrasa_lang", lang);
+    } catch {}
+  }
+}
+
+/**
+ * Create a translation function `t(key, params)` for the given language
+ * Supports dot-notated keys (e.g. "dashboard.totalStudents"), leaf keys ("totalStudents"),
+ * interpolation (e.g. {{count}} or {count}), and direct property access (t.brand).
+ */
+export function createTranslator(lang = "en") {
+  const currentDict = flatTranslations[lang] || flatTranslations.en;
+  const fallbackDict = flatTranslations.en;
+
+  function t(key, params) {
+    if (!key) return "";
+    let val = currentDict[key] ?? fallbackDict[key] ?? key;
+    if (typeof val !== "string") return String(val);
+    if (params && typeof params === "object") {
+      for (const [pKey, pVal] of Object.entries(params)) {
+        val = val.replace(new RegExp(`{{${pKey}}}|{${pKey}}`, "g"), String(pVal));
+      }
+    }
+    return val;
+  }
+
+  // Allow direct property access (e.g. t.brand, t.students, t.save)
+  return new Proxy(t, {
+    get(target, prop) {
+      if (typeof prop !== "string") return target[prop];
+      if (prop in target) return target[prop];
+      return t(prop);
+    }
+  });
+}
+
+/**
+ * Locale-aware date formatting
+ */
+export function formatDate(dateInput, lang = "en", options = {}) {
+  if (!dateInput) return "";
+  try {
+    const d = typeof dateInput === "string" && dateInput.length === 10
+      ? new Date(`${dateInput}T00:00:00`)
+      : new Date(dateInput);
+    if (isNaN(d.getTime())) return String(dateInput);
+    const locale = lang === "ur" ? "ur-PK" : lang === "te" ? "te-IN" : "en-IN";
+    const defaultOptions = { year: "numeric", month: "short", day: "numeric", ...options };
+    return new Intl.DateTimeFormat(locale, defaultOptions).format(d);
+  } catch {
+    return String(dateInput);
+  }
+}
+
+/**
+ * Locale-aware time formatting
+ */
+export function formatTime(dateInput, lang = "en", options = {}) {
+  if (!dateInput) return "";
+  try {
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return String(dateInput);
+    const locale = lang === "ur" ? "ur-PK" : lang === "te" ? "te-IN" : "en-IN";
+    const defaultOptions = { hour: "2-digit", minute: "2-digit", ...options };
+    return new Intl.DateTimeFormat(locale, defaultOptions).format(d);
+  } catch {
+    return String(dateInput);
+  }
+}
+
+/**
+ * Locale-aware date and time formatting
+ */
+export function formatDateTime(dateInput, lang = "en") {
+  if (!dateInput) return "";
+  return `${formatDate(dateInput, lang)} · ${formatTime(dateInput, lang)}`;
+}
+
+/**
+ * Locale-aware number formatting
+ */
+export function formatNumber(numberInput, lang = "en") {
+  const num = Number(numberInput);
+  if (isNaN(num)) return String(numberInput);
+  try {
+    const locale = lang === "ur" ? "ur-PK" : lang === "te" ? "te-IN" : "en-IN";
+    return new Intl.NumberFormat(locale).format(num);
+  } catch {
+    return String(num);
+  }
+}
+
+/**
+ * Locale-aware percentage formatting
+ */
+export function formatPercent(numberInput, lang = "en") {
+  const num = Number(numberInput);
+  if (isNaN(num)) return `${numberInput}%`;
+  return `${formatNumber(num, lang)}%`;
+}
 
 /**
  * Localize Class Names in Urdu and Telugu
@@ -520,7 +267,7 @@ const nameTokens = {
 function translateWords(text, lang) {
   if (!text || lang === "en") return text;
   const words = text.split(/\s+/);
-  const translated = words.map(w => {
+  const translated = words.map((w) => {
     const clean = w.toLowerCase().replace(/[^a-z0-9]/g, "");
     return nameTokens[clean]?.[lang] || w;
   });

@@ -47,11 +47,19 @@ import {
 import api from "./api";
 import {
   translations,
+  createTranslator,
+  applyLanguageToDocument,
+  getDirection,
   formatClassLabel,
   localizeClassName,
   localizeSection,
   localizeStudentName,
-  localizeGuardianName
+  localizeGuardianName,
+  formatDate,
+  formatTime,
+  formatDateTime,
+  formatNumber,
+  formatPercent
 } from "./i18n";
 import {
   offlineDb,
@@ -231,7 +239,7 @@ export default function App() {
     to: today()
   });
 
-  const t = translations[lang] || translations.en;
+  const t = useMemo(() => createTranslator(lang), [lang]);
   const activeClass = classes.find((c) => String(c._id || c.id) === String(selectedClass));
 
   // Counts - strictly computed against enrolled roster of selected class
@@ -609,11 +617,9 @@ export default function App() {
     return () => window.removeEventListener("auth:unauthorized", handleUnauthorized);
   }, []);
 
-  // Sync & Online Listeners
+  // Language & Direction Sync
   useEffect(() => {
-    document.documentElement.lang = lang;
-    document.documentElement.dir = lang === "ur" ? "rtl" : "ltr";
-    localStorage.setItem("madrasa_lang", lang);
+    applyLanguageToDocument(lang);
   }, [lang]);
 
   useEffect(() => {
@@ -1796,17 +1802,17 @@ export default function App() {
         {tab === "dashboard" && (
           <div>
             <div className="hero-action-card">
-              <h2>{t.attendance}</h2>
+              <h2>{t.attendanceToday}</h2>
               <p>
                 {activeClass
                   ? `${formatClassLabel(activeClass, lang)}`
-                  : (t.noClasses || "Select a class to begin")}
+                  : t.selectClassToBegin}
                 {" · "}
-                {dateKey}
+                {formatDate(dateKey, lang)}
               </p>
               <button className="hero-take-btn" onClick={() => setTab("attendance")}>
                 <Camera size={22} />
-                <span>{t.attendance}</span>
+                <span>{t.takeAttendanceAction || t.attendance}</span>
               </button>
             </div>
 
@@ -1839,8 +1845,8 @@ export default function App() {
                   <span>{t.totalStudents}</span>
                   <Users size={16} />
                 </div>
-                <div className="mobile-stat-value">{students.length}</div>
-                <div className="mobile-stat-note">Enrolled roster</div>
+                <div className="mobile-stat-value">{formatNumber(students.length, lang)}</div>
+                <div className="mobile-stat-note">{t.enrolledRoster}</div>
               </div>
 
               <div className="mobile-stat-card">
@@ -1849,9 +1855,9 @@ export default function App() {
                   <Check size={16} color="var(--success)" />
                 </div>
                 <div className="mobile-stat-value" style={{ color: "var(--success)" }}>
-                  {presentCount}
+                  {formatNumber(presentCount, lang)}
                 </div>
-                <div className="mobile-stat-note">Marked present</div>
+                <div className="mobile-stat-note">{t.markedPresent}</div>
               </div>
 
               <div className="mobile-stat-card">
@@ -1860,9 +1866,9 @@ export default function App() {
                   <Activity size={16} color="var(--danger)" />
                 </div>
                 <div className="mobile-stat-value" style={{ color: "var(--danger)" }}>
-                  {absentCount}
+                  {formatNumber(absentCount, lang)}
                 </div>
-                <div className="mobile-stat-note">Marked absent</div>
+                <div className="mobile-stat-note">{t.markedAbsent}</div>
               </div>
 
               <div className="mobile-stat-card">
@@ -1874,29 +1880,29 @@ export default function App() {
                   className="mobile-stat-value"
                   style={{ color: notMarkedCount > 0 ? "var(--warning)" : "var(--muted)" }}
                 >
-                  {notMarkedCount}
+                  {formatNumber(notMarkedCount, lang)}
                 </div>
-                <div className="mobile-stat-note">Requires marking</div>
+                <div className="mobile-stat-note">{t.requiresMarking}</div>
               </div>
             </div>
 
             <div className="card">
               <div className="section-title">
                 <div>
-                  <h3>Offline & Sync Status</h3>
+                  <h3>{t.offlineSyncStatus}</h3>
                   <p className="muted">
                     {pendingCount > 0
-                      ? `${pendingCount} register(s) waiting to upload`
-                      : "All registers synchronized"}
+                      ? t("dashboard.registersWaitingUpload", { count: formatNumber(pendingCount, lang) })
+                      : t.allRegistersSynced}
                   </p>
                 </div>
                 {pendingCount > 0 ? (
                   <span className="status-pill pending">
-                    <Clock size={13} /> {pendingCount} Pending
+                    <Clock size={13} /> {t("dashboard.pendingCountBadge", { count: formatNumber(pendingCount, lang) })}
                   </span>
                 ) : (
                   <span className="status-pill online">
-                    <CheckCircle2 size={13} /> Synced
+                    <CheckCircle2 size={13} /> {t.syncedBadge}
                   </span>
                 )}
               </div>
@@ -1986,28 +1992,28 @@ export default function App() {
                 }}
               >
                 <span>
-                  {activeClass ? formatClassLabel(activeClass, lang) : (t.classes || "Class")} · {dateKey} · {localizeSection(sessionKey, lang)}
+                  {activeClass ? formatClassLabel(activeClass, lang) : t.class} · {formatDate(dateKey, lang)} · {localizeSection(sessionKey, lang)}
                 </span>
-                <span>{students.length} {t.totalStudents}</span>
+                <span>{formatNumber(students.length, lang)} {t.totalStudents}</span>
               </div>
 
               {/* 5 Distinct Attendance Counters */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, textAlign: "center" }}>
                 <div style={{ background: "var(--success-bg)", padding: "6px 2px", borderRadius: 6 }}>
                   <div style={{ fontSize: 10, color: "var(--success)", fontWeight: 600 }}>{t.present}</div>
-                  <strong style={{ fontSize: 15, color: "var(--success)" }}>{presentCount}</strong>
+                  <strong style={{ fontSize: 15, color: "var(--success)" }}>{formatNumber(presentCount, lang)}</strong>
                 </div>
                 <div style={{ background: "var(--danger-bg)", padding: "6px 2px", borderRadius: 6 }}>
                   <div style={{ fontSize: 10, color: "var(--danger)", fontWeight: 600 }}>{t.absent}</div>
-                  <strong style={{ fontSize: 15, color: "var(--danger)" }}>{absentCount}</strong>
+                  <strong style={{ fontSize: 15, color: "var(--danger)" }}>{formatNumber(absentCount, lang)}</strong>
                 </div>
                 <div style={{ background: "#FFF8E6", padding: "6px 2px", borderRadius: 6 }}>
                   <div style={{ fontSize: 10, color: "#B78103", fontWeight: 600 }}>{t.late}</div>
-                  <strong style={{ fontSize: 15, color: "#B78103" }}>{lateCount}</strong>
+                  <strong style={{ fontSize: 15, color: "#B78103" }}>{formatNumber(lateCount, lang)}</strong>
                 </div>
                 <div style={{ background: "var(--info-bg)", padding: "6px 2px", borderRadius: 6 }}>
                   <div style={{ fontSize: 10, color: "var(--info)", fontWeight: 600 }}>{t.excused}</div>
-                  <strong style={{ fontSize: 15, color: "var(--info)" }}>{excusedCount}</strong>
+                  <strong style={{ fontSize: 15, color: "var(--info)" }}>{formatNumber(excusedCount, lang)}</strong>
                 </div>
                 <div
                   style={{
@@ -2031,7 +2037,7 @@ export default function App() {
                       color: notMarkedCount > 0 ? "var(--warning)" : "var(--muted)"
                     }}
                   >
-                    {notMarkedCount}
+                    {formatNumber(notMarkedCount, lang)}
                   </strong>
                 </div>
               </div>
@@ -2075,7 +2081,7 @@ export default function App() {
                   onClick={() => startCamera("environment", "class-attendance")}
                   style={{ minHeight: 38, padding: "6px 12px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                 >
-                  <Camera size={15} /> Live Camera Scan
+                  <Camera size={15} /> {t.liveCameraScan}
                 </button>
 
                 <label
@@ -2083,7 +2089,7 @@ export default function App() {
                   className="btn secondary"
                   style={{ minHeight: 38, padding: "6px 12px", fontSize: 12, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
                 >
-                  <Image size={15} /> Upload Photo
+                  <Image size={15} /> {t.uploadPhoto}
                 </label>
                 <input
                   id="class-photo-input"
@@ -2099,9 +2105,9 @@ export default function App() {
                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
                     <div>
-                      <strong style={{ fontSize: 13 }}>{t.faceSuggestions} ({detected.length})</strong>
+                      <strong style={{ fontSize: 13 }}>{t.faceSuggestions} ({formatNumber(detected.length, lang)})</strong>
                       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                        AI suggested candidate identities based on reference photos
+                        {t.faceSuggestionsSub}
                       </p>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2111,13 +2117,13 @@ export default function App() {
                           style={{ minHeight: 30, fontSize: 11, padding: "4px 8px" }}
                           onClick={confirmAllFaceMatches}
                         >
-                          <Check size={13} /> Confirm All Present
+                          <Check size={13} /> {t.confirmAllPresent}
                         </button>
                       )}
                       <button
                         onClick={() => setDetected([])}
                         style={{ background: "none", border: "none", color: "var(--muted)", padding: 4, cursor: "pointer" }}
-                        title="Clear suggestions"
+                        title={t.clearSuggestions}
                       >
                         <X size={16} />
                       </button>
@@ -2140,10 +2146,10 @@ export default function App() {
                       >
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                           <span style={{ fontSize: 12 }}>
-                            Face #{f.faceNo}: <strong>{f.matchName || "Unmatched"}</strong> {f.matchAdmissionNo ? `(${f.matchAdmissionNo})` : ""}
+                            {t("faceMatching.faceItem", { number: formatNumber(f.faceNo, lang) })}: <strong>{f.matchName || t.unmatched}</strong> {f.matchAdmissionNo ? `(${f.matchAdmissionNo})` : ""}
                             {f.confidencePct > 0 && (
-                              <span style={{ fontSize: 10, color: f.confidencePct > 70 ? "var(--success)" : "var(--warning)", marginLeft: 6 }}>
-                                ({f.confidencePct}% match)
+                              <span style={{ fontSize: 10, color: f.confidencePct > 70 ? "var(--success)" : "var(--warning)", marginInlineStart: 6 }}>
+                                {t("faceMatching.matchPercentage", { pct: formatNumber(f.confidencePct, lang) })}
                               </span>
                             )}
                           </span>
@@ -2219,7 +2225,7 @@ export default function App() {
                         </div>
                         <div className="student-card-meta">
                           <strong>{displayName}</strong>
-                          <span>{s.admissionNo} · {t.studentProfile || "Profile"}</span>
+                          <span>{s.admissionNo} · {t.studentProfile}</span>
                         </div>
                       </div>
 
@@ -2230,7 +2236,7 @@ export default function App() {
                             title={isConfirmed ? t.serverConfirmed : t.localDraft}
                           >
                             {isConfirmed ? <Check size={13} /> : <Clock size={13} />}
-                            {cur.toUpperCase()} · {isConfirmed ? (t.confirmed || "Confirmed") : (t.localDraft || "Draft")}
+                            {(t[cur] || cur)} · {isConfirmed ? t.confirmed : t.localDraft}
                           </span>
                         ) : (
                           <span className="student-card-status-indicator unmarked">
@@ -2275,17 +2281,17 @@ export default function App() {
               })}
 
               {!filteredStudents.length && (
-                <Empty title="No students found" subtitle="Try another search or select a different class." />
+                <Empty title={t.noStudentsFound} subtitle={t.noStudentsFoundSub} />
               )}
             </div>
 
             <div className="mobile-sticky-save">
               <div className="save-summary-col">
                 <strong>
-                  {presentCount} {t.present} · {absentCount} {t.absent}
+                  {formatNumber(presentCount, lang)} {t.present} · {formatNumber(absentCount, lang)} {t.absent}
                 </strong>
                 <span style={{ color: notMarkedCount > 0 ? "var(--warning)" : "var(--success)" }}>
-                  {notMarkedCount > 0 ? `${notMarkedCount} ${t.notMarked}` : "All Marked ✓"}
+                  {notMarkedCount > 0 ? `${formatNumber(notMarkedCount, lang)} ${t.notMarked}` : t.allMarked}
                 </span>
               </div>
               <button
@@ -2294,7 +2300,7 @@ export default function App() {
                 onClick={saveAttendance}
               >
                 <Check size={18} />
-                <span>{isOnline ? (t.saveAttendance || "Save Attendance") : (t.saveOffline || "Save on this device")}</span>
+                <span>{isOnline ? t.saveAttendance : t.saveOffline}</span>
               </button>
             </div>
           </div>
@@ -2515,38 +2521,38 @@ export default function App() {
               <div className="monitoring-kpi-grid">
                 <div className="monitoring-kpi-card kpi-eligible">
                   <div className="monitoring-kpi-label"><Users size={14} /> {t.eligibleStudents}</div>
-                  <div className="monitoring-kpi-value">{monitoringData.summary.totalEligible ?? 0}</div>
-                  <div className="monitoring-kpi-sub">{t.activeStudents || "Active enrolled"}</div>
+                  <div className="monitoring-kpi-value">{formatNumber(monitoringData.summary.totalEligible ?? 0, lang)}</div>
+                  <div className="monitoring-kpi-sub">{t.activeEnrolled}</div>
                 </div>
                 <div className="monitoring-kpi-card kpi-present">
                   <div className="monitoring-kpi-label"><Check size={14} /> {t.present}</div>
-                  <div className="monitoring-kpi-value" style={{ color: "var(--success)" }}>{monitoringData.summary.present ?? 0}</div>
-                  <div className="monitoring-kpi-sub">On-time attendees</div>
+                  <div className="monitoring-kpi-value" style={{ color: "var(--success)" }}>{formatNumber(monitoringData.summary.present ?? 0, lang)}</div>
+                  <div className="monitoring-kpi-sub">{t.onTimeAttendees}</div>
                 </div>
                 <div className="monitoring-kpi-card kpi-absent">
                   <div className="monitoring-kpi-label"><X size={14} /> {t.absent}</div>
-                  <div className="monitoring-kpi-value" style={{ color: "var(--danger)" }}>{monitoringData.summary.absent ?? 0}</div>
-                  <div className="monitoring-kpi-sub">Unexcused absences</div>
+                  <div className="monitoring-kpi-value" style={{ color: "var(--danger)" }}>{formatNumber(monitoringData.summary.absent ?? 0, lang)}</div>
+                  <div className="monitoring-kpi-sub">{t.unexcusedAbsences}</div>
                 </div>
                 <div className="monitoring-kpi-card kpi-late">
                   <div className="monitoring-kpi-label"><Clock size={14} /> {t.late}</div>
-                  <div className="monitoring-kpi-value" style={{ color: "#D69E2E" }}>{monitoringData.summary.late ?? 0}</div>
-                  <div className="monitoring-kpi-sub">Late arrivals</div>
+                  <div className="monitoring-kpi-value" style={{ color: "#D69E2E" }}>{formatNumber(monitoringData.summary.late ?? 0, lang)}</div>
+                  <div className="monitoring-kpi-sub">{t.lateArrivals}</div>
                 </div>
                 <div className="monitoring-kpi-card kpi-excused">
                   <div className="monitoring-kpi-label"><AlertCircle size={14} /> {t.excused}</div>
-                  <div className="monitoring-kpi-value" style={{ color: "var(--info)" }}>{monitoringData.summary.excused ?? 0}</div>
-                  <div className="monitoring-kpi-sub">Authorized leave</div>
+                  <div className="monitoring-kpi-value" style={{ color: "var(--info)" }}>{formatNumber(monitoringData.summary.excused ?? 0, lang)}</div>
+                  <div className="monitoring-kpi-sub">{t.authorizedLeave}</div>
                 </div>
                 <div className="monitoring-kpi-card kpi-unmarked">
                   <div className="monitoring-kpi-label"><HelpCircle size={14} /> {t.notMarked}</div>
-                  <div className="monitoring-kpi-value" style={{ color: "#718096" }}>{monitoringData.summary.notMarked ?? 0}</div>
-                  <div className="monitoring-kpi-sub">Awaiting mark</div>
+                  <div className="monitoring-kpi-value" style={{ color: "#718096" }}>{formatNumber(monitoringData.summary.notMarked ?? 0, lang)}</div>
+                  <div className="monitoring-kpi-sub">{t.awaitingMark}</div>
                 </div>
                 <div className="monitoring-kpi-card kpi-rate">
                   <div className="monitoring-kpi-label"><Activity size={14} /> {t.attendanceRate}</div>
-                  <div className="monitoring-kpi-value" style={{ color: "var(--primary)" }}>{monitoringData.summary.attendanceRate ?? 0}%</div>
-                  <div className="monitoring-kpi-sub">Present / Eligible</div>
+                  <div className="monitoring-kpi-value" style={{ color: "var(--primary)" }}>{formatPercent(monitoringData.summary.attendanceRate ?? 0, lang)}</div>
+                  <div className="monitoring-kpi-sub">{t.presentDividedEligible}</div>
                 </div>
               </div>
             )}
@@ -2575,15 +2581,15 @@ export default function App() {
                       {monitoringData.dailyTotals.map((d) => (
                         <tr key={d.dateKey}>
                           <td><strong>{d.dateKey}</strong></td>
-                          <td>{d.totalEligible}</td>
-                          <td style={{ color: "var(--success)", fontWeight: 700 }}>{d.present}</td>
-                          <td style={{ color: "var(--danger)", fontWeight: 700 }}>{d.absent}</td>
-                          <td style={{ color: "#D69E2E", fontWeight: 700 }}>{d.late}</td>
-                          <td style={{ color: "var(--info)", fontWeight: 700 }}>{d.excused}</td>
-                          <td style={{ color: "#718096", fontWeight: 700 }}>{d.notMarked}</td>
+                          <td>{formatNumber(d.totalEligible, lang)}</td>
+                          <td style={{ color: "var(--success)", fontWeight: 700 }}>{formatNumber(d.present, lang)}</td>
+                          <td style={{ color: "var(--danger)", fontWeight: 700 }}>{formatNumber(d.absent, lang)}</td>
+                          <td style={{ color: "#D69E2E", fontWeight: 700 }}>{formatNumber(d.late, lang)}</td>
+                          <td style={{ color: "var(--info)", fontWeight: 700 }}>{formatNumber(d.excused, lang)}</td>
+                          <td style={{ color: "#718096", fontWeight: 700 }}>{formatNumber(d.notMarked, lang)}</td>
                           <td>
                             <span style={{ fontWeight: 800, color: d.attendanceRate >= 80 ? "var(--success)" : d.attendanceRate >= 50 ? "#D69E2E" : "var(--danger)" }}>
-                              {d.attendanceRate}%
+                              {formatPercent(d.attendanceRate, lang)}
                             </span>
                           </td>
                         </tr>
@@ -2598,10 +2604,10 @@ export default function App() {
             <div className="monitoring-table-container">
               <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <h3 style={{ margin: 0, fontSize: 15 }}>
-                  {monitoringMode === "range" ? (t.studentWise || "Student Records Across Range") : (t.monitoring || "Live Attendance Records")}
+                  {monitoringMode === "range" ? t.studentWiseRecords : t.liveAttendanceRecords}
                   {" "}
                   <span style={{ color: "var(--muted)", fontSize: 13, fontWeight: 400 }}>
-                    ({monitoringData?.records?.length ?? 0} {t.recorded || "records"})
+                    ({t("monitoring.recordsCount", { count: formatNumber(monitoringData?.records?.length ?? 0, lang) })})
                   </span>
                 </h3>
               </div>
@@ -2623,7 +2629,7 @@ export default function App() {
                       setMonitoringSearch("");
                     }}
                   >
-                    Clear Filters
+                    {t.clearFilters}
                   </button>
                 </div>
               ) : (
@@ -2714,7 +2720,7 @@ export default function App() {
             <div className="section-title">
               <div>
                 <h2>{t.syncCenter}</h2>
-                <p className="muted">Durable offline outbox queue for reliable synchronization.</p>
+                <p className="muted">{t.durableOutboxSub}</p>
               </div>
               <button
                 className="btn primary"
@@ -2730,7 +2736,7 @@ export default function App() {
             {!isOnline && (
               <div className="alert warning">
                 <WifiOff size={18} />
-                <span>Device is offline. Local drafts remain safely in IndexedDB until internet reconnects.</span>
+                <span>{t.deviceOfflineWarning}</span>
               </div>
             )}
 
@@ -2760,15 +2766,15 @@ export default function App() {
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
                       <strong>
                         {item.kind === "student.photo"
-                          ? "Student Reference Photo Update"
-                          : `${item.payload?.dateKey} (${item.payload?.sessionKey || "morning"}) — ${item.payload?.records?.length || 0} students`}
+                          ? t.photoUpdateKind
+                          : `${formatDate(item.payload?.dateKey, lang)} (${localizeSection(item.payload?.sessionKey || "morning", lang)}) — ${formatNumber(item.payload?.records?.length || 0, lang)} ${t.students}`}
                       </strong>
                       <span className={`status-pill ${item.state === "synced" ? "success" : item.state === "needs-auth" ? "danger" : "warning"}`} style={{ fontSize: 10 }}>
-                        {item.state === "synced" ? "Synced ✓" : item.state === "syncing" ? "Syncing..." : item.state === "needs-auth" ? "Needs Login" : "Pending Sync"}
+                        {item.state === "synced" ? t.syncedState : item.state === "syncing" ? t.syncingState : item.state === "needs-auth" ? t.needsLoginState : t.pendingSyncState}
                       </span>
                     </div>
                     <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                      Operation ID: <code>{item.mutationId?.slice(0, 16)}...</code> · {new Date(item.createdAt).toLocaleTimeString()}
+                      {t.operationId}: <code>{item.mutationId?.slice(0, 16)}...</code> · {formatTime(item.createdAt, lang)}
                     </div>
                     {item.lastError && (
                       <span style={{ color: "var(--danger)", fontSize: 11, display: "block", marginTop: 4 }}>
@@ -2792,7 +2798,7 @@ export default function App() {
               ))}
 
               {!outboxItems.length && (
-                <Empty title="Outbox is clean" subtitle="All attendance records and photos have been synchronized." />
+                <Empty title={t.outboxCleanTitle} subtitle={t.outboxCleanSub} />
               )}
             </div>
           </div>
@@ -2803,9 +2809,9 @@ export default function App() {
           <div>
             <div className="section-title" style={{ flexWrap: "wrap", gap: 10 }}>
               <div>
-                <h2>{t.students}</h2>
+                <h2>{t.studentsTitle}</h2>
                 <p className="muted" style={{ margin: 0 }}>
-                  Manage student profiles, class transfers, admission numbers, and attendance records.
+                  {t.manageStudentsSub}
                 </p>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -2813,7 +2819,7 @@ export default function App() {
                   <button
                     className="btn secondary"
                     onClick={() => downloadStudentRoster("csv")}
-                    title="Export filtered roster to CSV"
+                    title={t.exportCsv}
                     style={{ minHeight: 40, padding: "6px 12px", fontSize: 13 }}
                     disabled={loading || directoryLoading}
                   >
@@ -2822,7 +2828,7 @@ export default function App() {
                   <button
                     className="btn secondary"
                     onClick={() => downloadStudentRoster("xlsx")}
-                    title="Export filtered roster to Excel (.xlsx)"
+                    title={t.exportExcel}
                     style={{ minHeight: 40, padding: "6px 12px", fontSize: 13 }}
                     disabled={loading || directoryLoading}
                   >
@@ -2863,9 +2869,9 @@ export default function App() {
                     onClick={() => setStudentStatusFilter("active")}
                   >
                     <UserCheck size={14} />
-                    <span>{t.activeStudents || "Active"}</span>
+                    <span>{t.activeStudents}</span>
                     <span style={{ fontSize: 10, background: "rgba(0,0,0,0.06)", padding: "2px 6px", borderRadius: 10 }}>
-                      {directoryStudents.filter(s => s.active !== false).length}
+                      {formatNumber(directoryStudents.filter(s => s.active !== false).length, lang)}
                     </span>
                   </button>
                   <button
@@ -2874,9 +2880,9 @@ export default function App() {
                     onClick={() => setStudentStatusFilter("archived")}
                   >
                     <Archive size={14} />
-                    <span>{t.archivedStudents || "Archived"}</span>
+                    <span>{t.archivedStudents}</span>
                     <span style={{ fontSize: 10, background: "rgba(0,0,0,0.06)", padding: "2px 6px", borderRadius: 10 }}>
-                      {directoryStudents.filter(s => s.active === false).length}
+                      {formatNumber(directoryStudents.filter(s => s.active === false).length, lang)}
                     </span>
                   </button>
                   <button
@@ -2885,9 +2891,9 @@ export default function App() {
                     onClick={() => setStudentStatusFilter("all")}
                   >
                     <Users size={14} />
-                    <span>{t.allStudents || "All"}</span>
+                    <span>{t.allStudents}</span>
                     <span style={{ fontSize: 10, background: "rgba(0,0,0,0.06)", padding: "2px 6px", borderRadius: 10 }}>
-                      {directoryStudents.length}
+                      {formatNumber(directoryStudents.length, lang)}
                     </span>
                   </button>
                 </div>
@@ -2901,7 +2907,7 @@ export default function App() {
                     onChange={(e) => setStudentClassFilter(e.target.value)}
                   >
                     {user?.role === "admin" && (
-                      <option value="all">{t.allClasses || "All Classes"}</option>
+                      <option value="all">{t.allClasses}</option>
                     )}
                     {classes.map((c) => (
                       <option key={c._id || c.id} value={c._id || c.id}>
@@ -2917,7 +2923,7 @@ export default function App() {
                 <Search size={18} className="search-icon-pos" />
                 <input
                   type="text"
-                  placeholder="Search by student name, admission number, or guardian contact..."
+                  placeholder={t("students.searchPlaceholder")}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   style={{ minHeight: 42 }}
@@ -2936,13 +2942,13 @@ export default function App() {
             {/* RESULTS COUNT & RELOAD */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, fontSize: 12, color: "var(--muted)" }}>
               <span>
-                Showing <strong>{filteredDirectoryStudents.length}</strong> {studentStatusFilter === "active" ? "active" : studentStatusFilter === "archived" ? "archived" : ""} student(s)
+                {t("students.showingCount", { count: formatNumber(filteredDirectoryStudents.length, lang), status: studentStatusFilter === "active" ? t.active : studentStatusFilter === "archived" ? t.archived : "" })}
               </span>
               <button
                 onClick={() => fetchDirectoryStudents(studentStatusFilter, studentClassFilter)}
                 style={{ background: "none", border: "none", color: "var(--primary)", display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12, padding: 0, minHeight: "auto", fontWeight: 600 }}
               >
-                <RefreshCw size={13} className={directoryLoading ? "spin" : ""} /> Refresh
+                <RefreshCw size={13} className={directoryLoading ? "spin" : ""} /> {t.refresh}
               </button>
             </div>
 
@@ -2953,7 +2959,7 @@ export default function App() {
                 const isMenuOpen = activeMenuStudentId === sId;
                 const studentClass = s.classId?.name
                   ? `${s.classId.name}${s.classId.section ? ` (${s.classId.section})` : ""}`
-                  : (classes.find(c => String(c._id || c.id) === String(s.classId))?.name || "Unassigned");
+                  : (classes.find(c => String(c._id || c.id) === String(s.classId))?.name || t.unassigned);
 
                 return (
                   <div key={sId} className="student-card">
@@ -2963,7 +2969,7 @@ export default function App() {
                         className="student-card-avatar"
                         style={{ cursor: "pointer" }}
                         onClick={() => openStudentProfile(s)}
-                        title="View complete profile"
+                        title={t.viewProfile}
                         role="button"
                         tabIndex={0}
                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openStudentProfile(s); }}
@@ -2993,13 +2999,13 @@ export default function App() {
                         </div>
                         {s.consentGiven && (
                           <small style={{ display: "block", color: "var(--success)", fontSize: 10, fontWeight: 700, marginTop: 1 }}>
-                            Photo Consent Recorded ✓
+                            {t.photoConsentRecorded}
                           </small>
                         )}
                       </div>
 
                       <span className={`status-pill ${s.active !== false ? "neutral" : "offline"}`} style={{ flexShrink: 0 }}>
-                        {s.active !== false ? (t.active || "Active") : (t.archived || "Archived")}
+                        {s.active !== false ? t.active : t.archived}
                       </span>
                     </div>
 
@@ -3017,8 +3023,8 @@ export default function App() {
                           type="button"
                           className="btn secondary"
                           onClick={() => openStudentProfile(s)}
-                          title={t.viewProfile || "View Profile"}
-                          aria-label={`${t.viewProfile || "View Profile"} - ${localizeStudentName(s.name, lang)}`}
+                          title={t.viewProfile}
+                          aria-label={t("accessibility.viewProfileOf", { name: localizeStudentName(s.name, lang) })}
                           style={{ minHeight: 34, padding: "5px 9px", fontSize: 12 }}
                         >
                           <Eye size={15} />
@@ -3028,8 +3034,8 @@ export default function App() {
                           type="button"
                           className="btn secondary"
                           onClick={() => openEditStudent(s)}
-                          title={t.editDetails || "Edit Details"}
-                          aria-label={`${t.editDetails || "Edit Details"} - ${localizeStudentName(s.name, lang)}`}
+                          title={t.editDetails}
+                          aria-label={t("accessibility.editDetailsOf", { name: localizeStudentName(s.name, lang) })}
                           style={{ minHeight: 34, padding: "5px 9px", fontSize: 12 }}
                         >
                           <Edit3 size={15} />
@@ -3045,8 +3051,8 @@ export default function App() {
                             }}
                             aria-expanded={isMenuOpen}
                             aria-haspopup="true"
-                            title={t.actions || "Actions"}
-                            aria-label={`${t.actions || "Actions"} - ${localizeStudentName(s.name, lang)}`}
+                            title={t.actions}
+                            aria-label={t("accessibility.actionsFor", { name: localizeStudentName(s.name, lang) })}
                           >
                             <MoreHorizontal size={18} />
                           </button>
@@ -3063,7 +3069,7 @@ export default function App() {
                                 onClick={(e) => e.stopPropagation()}
                                 role="dialog"
                                 aria-modal="true"
-                                aria-label={`Actions for ${localizeStudentName(s.name, lang)}`}
+                                aria-label={t("accessibility.actionsFor", { name: localizeStudentName(s.name, lang) })}
                               >
                                 <div className="student-action-sheet-header">
                                   <h4>
@@ -3074,7 +3080,7 @@ export default function App() {
                                     type="button"
                                     onClick={() => setActiveMenuStudentId(null)}
                                     style={{ background: "transparent", border: "none", padding: 4, cursor: "pointer", color: "var(--muted)", display: "flex", alignItems: "center" }}
-                                    aria-label="Close"
+                                    aria-label={t.close}
                                   >
                                     <X size={18} />
                                   </button>
@@ -3090,7 +3096,7 @@ export default function App() {
                                     }}
                                   >
                                     <Eye size={15} color="var(--primary)" />
-                                    <span>{t.viewProfile || "View Profile"}</span>
+                                    <span>{t.viewProfile}</span>
                                   </button>
 
                                   <button
@@ -3102,7 +3108,7 @@ export default function App() {
                                     }}
                                   >
                                     <Edit3 size={15} color="var(--primary)" />
-                                    <span>{t.editDetails || "Edit Details"}</span>
+                                    <span>{t.editDetails}</span>
                                   </button>
 
                                   <button
@@ -3114,7 +3120,7 @@ export default function App() {
                                     }}
                                   >
                                     <Camera size={15} color="var(--primary)" />
-                                    <span>{t.changePhoto || "Change Photo"}</span>
+                                    <span>{t.changePhoto}</span>
                                   </button>
 
                                   <button
@@ -3126,7 +3132,7 @@ export default function App() {
                                     }}
                                   >
                                     <ArrowRightLeft size={15} color="var(--primary)" />
-                                    <span>{t.changeClass || "Change Class"}</span>
+                                    <span>{t.changeClass}</span>
                                   </button>
 
                                   <button
@@ -3138,7 +3144,7 @@ export default function App() {
                                     }}
                                   >
                                     <History size={15} color="var(--primary)" />
-                                    <span>{t.attendanceHistory || "Attendance History"}</span>
+                                    <span>{t.attendanceHistory}</span>
                                   </button>
 
                                   <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
@@ -3155,7 +3161,7 @@ export default function App() {
                                       }}
                                     >
                                       <UserX size={15} />
-                                      <span>{t.deactivate || "Deactivate"}</span>
+                                      <span>{t.deactivate}</span>
                                     </button>
                                   ) : (
                                     <button
@@ -3167,7 +3173,7 @@ export default function App() {
                                       }}
                                     >
                                       <UserCheck size={15} />
-                                      <span>{t.activate || "Activate"}</span>
+                                      <span>{t.activate}</span>
                                     </button>
                                   )}
 
@@ -3184,7 +3190,7 @@ export default function App() {
                                         }}
                                       >
                                         <Archive size={15} />
-                                        <span>{t.archive || "Archive"}</span>
+                                        <span>{t.archive}</span>
                                       </button>
                                     ) : (
                                       <button
@@ -3196,7 +3202,7 @@ export default function App() {
                                         }}
                                       >
                                         <ArchiveRestore size={15} />
-                                        <span>{t.restore || "Restore"}</span>
+                                        <span>{t.restore}</span>
                                       </button>
                                     )
                                   )}
@@ -3212,7 +3218,7 @@ export default function App() {
                                       }}
                                     >
                                       <Trash2 size={15} />
-                                      <span>{t.removeStudent || "Delete Student"}</span>
+                                      <span>{t.removeStudent}</span>
                                     </button>
                                   )}
                                 </div>
@@ -3228,14 +3234,8 @@ export default function App() {
 
               {!filteredDirectoryStudents.length && (
                 <Empty
-                  title="No students found"
-                  subtitle={
-                    search
-                      ? "No students match your search criteria. Try a different term or clear filters."
-                      : studentStatusFilter === "archived"
-                      ? "No archived students in this class or Madrasa."
-                      : "No active students enrolled in this class yet."
-                  }
+                  title={t.noStudentsFound}
+                  subtitle={t.noStudentsFoundSub}
                 />
               )}
             </div>
@@ -3248,14 +3248,14 @@ export default function App() {
             <div className="section-title">
               <div>
                 <h2>{t.addStudent}</h2>
-                <p className="muted">Enrol a new student with complete details and photo consent.</p>
+                <p className="muted">{t("students.enrolStudentSub", "Enrol a new student with complete details and photo consent.")}</p>
               </div>
               <button
                 className="btn secondary"
                 onClick={() => setTab("students")}
                 style={{ minHeight: 38 }}
               >
-                Cancel
+                {t.cancel}
               </button>
             </div>
 
@@ -3269,7 +3269,7 @@ export default function App() {
                 try {
                   const targetClassId = studentForm.classId || selectedClass || classes[0]?._id;
                   if (!targetClassId) {
-                    throw new Error("Please select a class for enrollment.");
+                    throw new Error(t("validation.selectClassError", "Please select a class for enrollment."));
                   }
                   const r = await api.post("/students", {
                     ...studentForm,
@@ -3293,7 +3293,7 @@ export default function App() {
                     enrollmentDate: today(),
                     consentGiven: true
                   });
-                  setNotice(`Student enrolled successfully: ${r.data.name} (${r.data.admissionNo})`);
+                  setNotice(`${t("students.studentsTitle", "Student")}: ${r.data.name} (${r.data.admissionNo})`);
                   setTab("students");
                   fetchDirectoryStudents(studentStatusFilter, studentClassFilter);
                 } catch (err) {
@@ -3340,7 +3340,7 @@ export default function App() {
                   required
                   value={studentForm.name}
                   onChange={(e) => setStudentForm({ ...studentForm, name: e.target.value })}
-                  placeholder="Student full name"
+                  placeholder={t("students.fullName", "Student full name")}
                 />
               </label>
 
@@ -3351,9 +3351,9 @@ export default function App() {
                     value={studentForm.gender}
                     onChange={(e) => setStudentForm({ ...studentForm, gender: e.target.value })}
                   >
-                    <option value="">Unspecified</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
+                    <option value="">{t("common.unspecified", "Unspecified")}</option>
+                    <option value="Male">{t("common.male", "Male")}</option>
+                    <option value="Female">{t("common.female", "Female")}</option>
                   </select>
                 </label>
 
@@ -3373,7 +3373,7 @@ export default function App() {
                   <input
                     value={studentForm.guardianName}
                     onChange={(e) => setStudentForm({ ...studentForm, guardianName: e.target.value })}
-                    placeholder="Parent or guardian name"
+                    placeholder={t("students.guardianParent", "Parent or guardian name")}
                   />
                 </label>
 
@@ -3383,7 +3383,7 @@ export default function App() {
                     type="tel"
                     value={studentForm.guardianPhone}
                     onChange={(e) => setStudentForm({ ...studentForm, guardianPhone: e.target.value })}
-                    placeholder="Guardian phone number"
+                    placeholder={t("students.guardianPhone", "Guardian phone number")}
                   />
                 </label>
               </div>
@@ -3394,7 +3394,7 @@ export default function App() {
                   <input
                     value={studentForm.address}
                     onChange={(e) => setStudentForm({ ...studentForm, address: e.target.value })}
-                    placeholder="Residential address / locality"
+                    placeholder={t("students.addressArea", "Residential address / locality")}
                   />
                 </label>
 
@@ -3419,7 +3419,7 @@ export default function App() {
               </label>
 
               <button className="btn primary full" disabled={loading} style={{ minHeight: 48, marginTop: 10 }}>
-                {loading ? t.loading : "Enrol Student"}
+                {loading ? t.loading : t("students.enrolStudent", "Enrol Student")}
               </button>
             </form>
           </div>
@@ -3430,33 +3430,33 @@ export default function App() {
           <div>
             <div className="section-title">
               <div>
-                <h2>{tab === "reports" ? t.reports : "Settings & Operations"}</h2>
-                <p className="muted">Reports, offline cache control, teacher accounts, and audit.</p>
+                <h2>{tab === "reports" ? t.reports : (t.settingsOperations || "Settings & Operations")}</h2>
+                <p className="muted">{t("settings.settingsSub", "Reports, offline cache control, teacher accounts, and audit.")}</p>
               </div>
             </div>
 
             <div className="card">
-              <h3 style={{ marginBottom: 10 }}>Download Registers</h3>
+              <h3 style={{ marginBottom: 10 }}>{t("reports.downloadRegisters", "Download Registers")}</h3>
               <div className="download-grid-mobile">
                 <button className="download-card-mobile" onClick={() => downloadReport("xlsx")} disabled={loading}>
                   <FileSpreadsheet size={22} />
                   <div>
-                    <strong>Excel Spreadsheet</strong>
-                    <span>.xlsx format</span>
+                    <strong>{t("reports.excelSpreadsheet", "Excel Spreadsheet")}</strong>
+                    <span>{t("reports.xlsxFormat", ".xlsx format")}</span>
                   </div>
                 </button>
                 <button className="download-card-mobile" onClick={() => downloadReport("csv")} disabled={loading}>
                   <Download size={22} />
                   <div>
-                    <strong>CSV Export</strong>
-                    <span>UTF-8 with BOM</span>
+                    <strong>{t("reports.csvExport", "CSV Export")}</strong>
+                    <span>{t("reports.utf8Bom", "UTF-8 with BOM")}</span>
                   </div>
                 </button>
                 <button className="download-card-mobile" onClick={() => downloadReport("pdf")} disabled={loading}>
                   <FileSpreadsheet size={22} />
                   <div>
-                    <strong>Printable PDF</strong>
-                    <span>Landscape layout</span>
+                    <strong>{t("reports.printablePdf", "Printable PDF")}</strong>
+                    <span>{t("reports.landscapeLayout", "Landscape layout")}</span>
                   </div>
                 </button>
               </div>
@@ -3485,23 +3485,23 @@ export default function App() {
                 disabled={loading}
                 style={{ marginTop: 12 }}
               >
-                Generate Summary Table
+                {t("reports.generateSummaryTable", "Generate Summary Table")}
               </button>
             </div>
 
             {/* Weekly Multi-Sheet Excel & Email Automation */}
             <div className="card">
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
-                <h3 style={{ margin: 0 }}>Weekly Report Automation</h3>
-                <span className="status-pill online">Automated</span>
+                <h3 style={{ margin: 0 }}>{t("reports.weeklyReportAutomation", "Weekly Report Automation")}</h3>
+                <span className="status-pill online">{t("reports.automatedBadge", "Automated")}</span>
               </div>
               <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-                Executive 3-sheet Excel report covering attendance summary, detailed audit log, and class breakdown.
+                {t("reports.weeklyReportSub", "Executive 3-sheet Excel report covering attendance summary, detailed audit log, and class breakdown.")}
               </p>
 
               <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8, marginBottom: 12, fontSize: 13, wordBreak: "break-word" }}>
-                <div><strong>Scheduled Recipient:</strong> <span style={{ wordBreak: "break-all" }}>2300030621cseh1@gmail.com</span></div>
-                <div style={{ color: "var(--muted)", marginTop: 2 }}>Weekly Schedule: Mondays at 06:00 AM (Previous Mon–Sun)</div>
+                <div><strong>{t("reports.scheduledRecipient", "Scheduled Recipient")}:</strong> <span style={{ wordBreak: "break-all" }}>2300030621cseh1@gmail.com</span></div>
+                <div style={{ color: "var(--muted)", marginTop: 2 }}>{t("reports.weeklyScheduleTime", "Weekly Schedule: Mondays at 06:00 AM (Previous Mon–Sun)")}</div>
               </div>
 
               <div className="responsive-grid-2">
@@ -3511,7 +3511,7 @@ export default function App() {
                   disabled={loading}
                   style={{ minHeight: 44, fontSize: 13 }}
                 >
-                  <FileSpreadsheet size={16} /> Download Weekly .xlsx
+                  <FileSpreadsheet size={16} /> {t("reports.downloadWeeklyXlsx", "Download Weekly .xlsx")}
                 </button>
                 <button
                   className="btn primary"
@@ -3519,16 +3519,16 @@ export default function App() {
                   disabled={loading}
                   style={{ minHeight: 44, fontSize: 13 }}
                 >
-                  <Bell size={16} /> Send Email Report
+                  <Bell size={16} /> {t("reports.sendEmailReport", "Send Email Report")}
                 </button>
               </div>
             </div>
 
             {/* Student Roster Export */}
             <div className="card">
-              <h3 style={{ marginBottom: 6 }}>Student Roster Export</h3>
+              <h3 style={{ marginBottom: 6 }}>{t("reports.studentRosterExport", "Student Roster Export")}</h3>
               <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
-                Export clean student roster with admission numbers, guardian contacts, and photo consent flags.
+                {t("reports.studentRosterExportSub", "Export clean student roster with admission numbers, guardian contacts, and photo consent flags.")}
               </p>
               <div className="responsive-grid-2">
                 <button
@@ -3537,7 +3537,7 @@ export default function App() {
                   disabled={loading}
                   style={{ minHeight: 42, fontSize: 13 }}
                 >
-                  <Download size={15} /> Students (CSV)
+                  <Download size={15} /> {t("reports.studentsCsv", "Students (CSV)")}
                 </button>
                 <button
                   className="btn secondary"
@@ -3545,22 +3545,22 @@ export default function App() {
                   disabled={loading}
                   style={{ minHeight: 42, fontSize: 13 }}
                 >
-                  <FileSpreadsheet size={15} /> Students (Excel)
+                  <FileSpreadsheet size={15} /> {t("reports.studentsExcel", "Students (Excel)")}
                 </button>
               </div>
             </div>
 
             {report.length > 0 && (
               <div className="card">
-                <h3 style={{ marginBottom: 10 }}>Summary View</h3>
+                <h3 style={{ marginBottom: 10 }}>{t("reports.summaryView", "Summary View")}</h3>
                 <div className="table-wrap">
                   <table>
                     <thead>
                       <tr>
-                        <th>Student</th>
-                        <th>Present</th>
-                        <th>Absent</th>
-                        <th>Rate %</th>
+                        <th>{t("reports.student", "Student")}</th>
+                        <th>{t.present}</th>
+                        <th>{t.absent}</th>
+                        <th>{t("reports.ratePercent", "Rate %")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3569,10 +3569,10 @@ export default function App() {
                           <td>
                             <strong>{r.name}</strong>
                           </td>
-                          <td>{r.present}</td>
-                          <td>{r.absent}</td>
+                          <td>{formatNumber(r.present, lang)}</td>
+                          <td>{formatNumber(r.absent, lang)}</td>
                           <td>
-                            <strong>{r.percentage}%</strong>
+                            <strong>{formatPercent(r.percentage, lang)}</strong>
                           </td>
                         </tr>
                       ))}
@@ -3587,11 +3587,11 @@ export default function App() {
                 {/* Six-Month Data Retention Policy Status */}
                 <div className="card">
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                    <h3>Data Retention (6 Months)</h3>
-                    <span className="status-pill online">180 Days Policy</span>
+                    <h3>{t("settings.dataRetentionPolicy", "Data Retention (6 Months)")}</h3>
+                    <span className="status-pill online">{t("settings.days180Policy", "180 Days Policy")}</span>
                   </div>
                   <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
-                    Attendance records older than 180 days are identified for archival to keep mobile queries performant.
+                    {t("settings.dataRetentionSub", "Attendance records older than 180 days are identified for archival to keep mobile queries performant.")}
                   </p>
                   <button
                     className="btn secondary full"
@@ -3606,15 +3606,15 @@ export default function App() {
                     disabled={loading}
                     style={{ minHeight: 40, fontSize: 13 }}
                   >
-                    <History size={15} /> Check Retention Status
+                    <History size={15} /> {t("settings.checkRetentionStatus", "Check Retention Status")}
                   </button>
                 </div>
 
                 {/* System Backup Export */}
                 <div className="card">
-                  <h3>Full Database Backup</h3>
+                  <h3>{t("settings.fullDatabaseBackup", "Full Database Backup")}</h3>
                   <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
-                    Export structured JSON backup of classes, students, attendance, and audit logs.
+                    {t("settings.fullDatabaseBackupSub", "Export structured JSON backup of classes, students, attendance, and audit logs.")}
                   </p>
                   <button
                     className="btn secondary full"
@@ -3622,12 +3622,12 @@ export default function App() {
                     disabled={loading}
                     style={{ minHeight: 42, fontSize: 13 }}
                   >
-                    <HardDrive size={15} /> Download Full System Backup (.json)
+                    <HardDrive size={15} /> {t("settings.downloadBackupJson", "Download Full System Backup (.json)")}
                   </button>
                 </div>
 
                 <div className="card">
-                  <h3 style={{ marginBottom: 10 }}>Add Class</h3>
+                  <h3 style={{ marginBottom: 10 }}>{t("classes.addClass", "Add Class")}</h3>
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
@@ -3635,7 +3635,7 @@ export default function App() {
                         const r = await api.post("/classes", classForm);
                         setClasses((prev) => [...prev, r.data]);
                         setClassForm({ name: "", section: "Morning", academicYear: "1447-1448 / 2026" });
-                        setNotice("Class created.");
+                        setNotice(t("classes.classCreated", "Class created successfully."));
                       } catch (err) {
                         setError(errText(err));
                       }
@@ -3643,16 +3643,16 @@ export default function App() {
                     style={{ display: "grid", gap: 10 }}
                   >
                     <label>
-                      Class Name
+                      {t("classes.className", "Class Name")}
                       <input
                         required
                         value={classForm.name}
                         onChange={(e) => setClassForm({ ...classForm, name: e.target.value })}
-                        placeholder="e.g. Hifz, Nazira"
+                        placeholder={t("classes.classNamePlaceholder", "e.g. Hifz, Nazira")}
                       />
                     </label>
                     <button className="btn primary" style={{ minHeight: 44 }}>
-                      Create Class
+                      {t("classes.createClass", "Create Class")}
                     </button>
                   </form>
                 </div>
@@ -3697,35 +3697,35 @@ export default function App() {
               </div>
               <h2>{confirmationModal.title}</h2>
               <p className="muted" style={{ fontSize: 13 }}>
-                {confirmationModal.className} ({confirmationModal.sessionKey}) · {confirmationModal.dateKey}
+                {confirmationModal.className} ({localizeSection(confirmationModal.sessionKey, lang)}) · {confirmationModal.dateKey}
               </p>
             </div>
 
             <div className="card" style={{ background: "var(--canvas)", padding: "14px", marginBottom: 14 }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, textAlign: "center" }}>
                 <div>
-                  <small style={{ color: "var(--success)", fontWeight: 700 }}>Present</small>
-                  <strong style={{ display: "block", fontSize: 20 }}>{confirmationModal.counts?.present || 0}</strong>
+                  <small style={{ color: "var(--success)", fontWeight: 700 }}>{t.present}</small>
+                  <strong style={{ display: "block", fontSize: 20 }}>{formatNumber(confirmationModal.counts?.present || 0, lang)}</strong>
                 </div>
                 <div>
-                  <small style={{ color: "var(--danger)", fontWeight: 700 }}>Absent</small>
-                  <strong style={{ display: "block", fontSize: 20 }}>{confirmationModal.counts?.absent || 0}</strong>
+                  <small style={{ color: "var(--danger)", fontWeight: 700 }}>{t.absent}</small>
+                  <strong style={{ display: "block", fontSize: 20 }}>{formatNumber(confirmationModal.counts?.absent || 0, lang)}</strong>
                 </div>
                 <div>
-                  <small style={{ color: "var(--warning)", fontWeight: 700 }}>Late</small>
-                  <strong style={{ display: "block", fontSize: 20 }}>{confirmationModal.counts?.late || 0}</strong>
+                  <small style={{ color: "var(--warning)", fontWeight: 700 }}>{t.late}</small>
+                  <strong style={{ display: "block", fontSize: 20 }}>{formatNumber(confirmationModal.counts?.late || 0, lang)}</strong>
                 </div>
                 <div>
-                  <small style={{ color: "var(--info)", fontWeight: 700 }}>Excused</small>
-                  <strong style={{ display: "block", fontSize: 20 }}>{confirmationModal.counts?.excused || 0}</strong>
+                  <small style={{ color: "var(--info)", fontWeight: 700 }}>{t.excused}</small>
+                  <strong style={{ display: "block", fontSize: 20 }}>{formatNumber(confirmationModal.counts?.excused || 0, lang)}</strong>
                 </div>
               </div>
             </div>
 
             <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 20, textAlign: "center" }}>
-              Persistence Engine: <strong>{confirmationModal.database}</strong>
+              {t("attendance.persistenceEngine", "Persistence Engine")}: <strong>{confirmationModal.database}</strong>
               <br />
-              Timestamp: {new Date(confirmationModal.timestamp).toLocaleString()}
+              {t("attendance.timestamp", "Timestamp")}: {formatDateTime(confirmationModal.timestamp, lang)}
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
@@ -3734,7 +3734,7 @@ export default function App() {
                 style={{ flex: 1 }}
                 onClick={() => setConfirmationModal(null)}
               >
-                Dismiss
+                {t("common.dismiss", "Dismiss")}
               </button>
               <button
                 className="btn primary"
@@ -3744,7 +3744,7 @@ export default function App() {
                   setTab("attendance");
                 }}
               >
-                View Register
+                {t("attendance.viewRegister", "View Register")}
               </button>
             </div>
           </div>
@@ -3760,10 +3760,10 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Bell size={20} color="var(--primary)" />
-                <h3 style={{ marginBottom: 0 }}>Notification History</h3>
+                <h3 style={{ marginBottom: 0 }}>{t("notifications.notificationHistory", "Notification History")}</h3>
                 {notifications.length > 0 && (
                   <span style={{ background: "var(--primary)", color: "#fff", fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 10 }}>
-                    {notifications.length}
+                    {formatNumber(notifications.length, lang)}
                   </span>
                 )}
               </div>
@@ -3773,7 +3773,7 @@ export default function App() {
                     onClick={clearAllNotifications}
                     style={{ background: "none", border: "none", color: "var(--danger)", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: "4px 8px" }}
                   >
-                    Clear all
+                    {t("notifications.clearAll", "Clear all")}
                   </button>
                 )}
                 <button
@@ -3806,12 +3806,12 @@ export default function App() {
                     <div>
                       <strong style={{ fontSize: 13, display: "block" }}>{n.title}</strong>
                       <small style={{ color: "var(--muted)", fontSize: 11 }}>
-                        {new Date(n.timestamp).toLocaleTimeString()} · {new Date(n.timestamp).toLocaleDateString()}
+                        {formatDateTime(n.timestamp, lang)}
                       </small>
                     </div>
                     <button
                       onClick={() => removeNotification(n.id)}
-                      title="Remove notification"
+                      title={t("accessibility.removeNotification", "Remove notification")}
                       style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", padding: 4, borderRadius: 4 }}
                     >
                       <X size={16} />
@@ -3822,7 +3822,7 @@ export default function App() {
               ))}
 
               {!notifications.length && (
-                <Empty title="No notifications yet" subtitle="Saved registers and sync events will appear here." />
+                <Empty title={t("notifications.noNotifications", "No notifications yet")} subtitle={t("notifications.noNotificationsSub", "Saved registers and sync events will appear here.")} />
               )}
             </div>
           </div>
@@ -3839,7 +3839,7 @@ export default function App() {
               <div>
                 <p className="eyebrow">{t.studentProfile || "STUDENT PROFILE"}</p>
                 <h2 style={{ marginBottom: 0 }}>{localizeStudentName(viewingStudent.name, lang)}</h2>
-                <small className="muted">Admission No: {viewingStudent.admissionNo}</small>
+                <small className="muted">{t.admissionNo}: {viewingStudent.admissionNo}</small>
               </div>
               <button
                 onClick={closeStudentModal}
@@ -3858,7 +3858,7 @@ export default function App() {
 
             {/* EXACT MOCKUP CARD FROM USER IMAGE */}
             <div className="photo-manager-card">
-              <div className="photo-manager-title">Student photo</div>
+              <div className="photo-manager-title">{t("faceMatching.studentPhoto", "Student photo")}</div>
 
               <div className="photo-manager-avatar-wrap">
                 <div className="photo-manager-avatar">
@@ -3868,7 +3868,7 @@ export default function App() {
                     <User size={38} />
                   )}
                 </div>
-                <div className="photo-manager-avatar-label">Current reference photo</div>
+                <div className="photo-manager-avatar-label">{t("faceMatching.currentRefPhoto", "Current reference photo")}</div>
               </div>
 
               {!profilePreviewPhoto && !cameraActive && (
@@ -3878,7 +3878,7 @@ export default function App() {
                     onClick={() => startCamera(cameraFacing)}
                   >
                     <Camera size={20} />
-                    <span>Take a photo</span>
+                    <span>{t("faceMatching.takePhoto", "Take a photo")}</span>
                   </button>
 
                   <label
@@ -3886,7 +3886,7 @@ export default function App() {
                     className="photo-pill-btn choose"
                   >
                     <Image size={20} />
-                    <span>Choose existing photo</span>
+                    <span>{t("faceMatching.chooseExistingPhoto", "Choose existing photo")}</span>
                   </label>
                   <input
                     id="profile-gallery-file-input"
@@ -3922,7 +3922,7 @@ export default function App() {
               {profilePreviewPhoto && (
                 <div className="photo-preview-wrap">
                   <div style={{ fontSize: 13, color: "#D8D2C2", marginBottom: 8 }}>
-                    New image preview:
+                    {t("faceMatching.newImagePreview", "New image preview:")}
                   </div>
                   <img src={profilePreviewPhoto} alt="Preview" className="photo-preview-img" />
 
@@ -3936,12 +3936,12 @@ export default function App() {
                     background: faceDetectStatus === "detected" ? "rgba(46, 125, 50, 0.25)" : "rgba(230, 81, 0, 0.25)",
                     color: faceDetectStatus === "detected" ? "#4ADE80" : "#FDBA74"
                   }}>
-                    {faceDetectStatus === "loading" && "Analyzing photo for face detection..."}
-                    {faceDetectStatus === "detected" && "Face detected & descriptor ready ✓"}
-                    {faceDetectStatus === "no-face" && "No face detected (manual attendance ready)"}
-                    {faceDetectStatus === "unavailable" && "Face models offline (manual attendance ready)"}
-                    {faceDetectStatus === "error" && "Face analysis skipped (manual attendance ready)"}
-                    {!faceDetectStatus && (profilePreviewDescriptor ? "Face descriptor ready ✓" : "Manual attendance ready")}
+                    {faceDetectStatus === "loading" && t("faceMatching.analyzingPhoto", "Analyzing photo for face detection...")}
+                    {faceDetectStatus === "detected" && t("faceMatching.faceDetectedReady", "Face detected & descriptor ready ✓")}
+                    {faceDetectStatus === "no-face" && t("faceMatching.noFaceDetectedManual", "No face detected (manual attendance ready)")}
+                    {faceDetectStatus === "unavailable" && t("faceMatching.faceModelsOffline", "Face models offline (manual attendance ready)")}
+                    {faceDetectStatus === "error" && t("faceMatching.faceAnalysisSkipped", "Face analysis skipped (manual attendance ready)")}
+                    {!faceDetectStatus && (profilePreviewDescriptor ? t("faceMatching.faceDetectedReady", "Face descriptor ready ✓") : t("faceMatching.manualAttendanceReady", "Manual attendance ready"))}
                   </div>
 
                   <div className="photo-preview-actions">
@@ -3956,7 +3956,7 @@ export default function App() {
                         setPhotoSaveError("");
                       }}
                     >
-                      <RefreshCw size={16} /> Retake
+                      <RefreshCw size={16} /> {t("faceMatching.retake", "Retake")}
                     </button>
                     <button
                       className="photo-pill-btn take"
@@ -3964,7 +3964,7 @@ export default function App() {
                       disabled={photoSaving}
                       onClick={saveStudentPhoto}
                     >
-                      <Check size={18} /> {photoSaving ? "Saving..." : "Save photo"}
+                      <Check size={18} /> {photoSaving ? t("common.saving", "Saving...") : t("faceMatching.savePhoto", "Save photo")}
                     </button>
                   </div>
                 </div>
@@ -3972,13 +3972,13 @@ export default function App() {
             </div>
 
             <div className="card" style={{ padding: "14px", marginTop: 12 }}>
-              <strong style={{ display: "block", fontSize: 13, marginBottom: 8 }}>Profile Details</strong>
+              <strong style={{ display: "block", fontSize: 13, marginBottom: 8 }}>{t("students.studentDetails", "Profile Details")}</strong>
               <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
-                <div>Guardian: <strong>{localizeGuardianName(viewingStudent.guardianName, lang) || "Not recorded"}</strong></div>
-                <div>Contact: <strong>{viewingStudent.guardianPhone || "Not recorded"}</strong></div>
-                <div>Photo Consent: <strong>{viewingStudent.consentGiven ? "Granted ✓" : "Opted out"}</strong></div>
+                <div>{t.guardian}: <strong>{localizeGuardianName(viewingStudent.guardianName, lang) || t("common.notRecorded", "Not recorded")}</strong></div>
+                <div>{t.phone}: <strong>{viewingStudent.guardianPhone || t("common.notRecorded", "Not recorded")}</strong></div>
+                <div>{t("students.consent", "Photo Consent")}: <strong>{viewingStudent.consentGiven ? t("common.granted", "Granted ✓") : t("common.optedOut", "Opted out")}</strong></div>
                 <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>
-                  * Updating reference photo preserves all historical attendance records safely.
+                  {t("faceMatching.photoPreserveNotice", "* Updating reference photo preserves all historical attendance records safely.")}
                 </div>
               </div>
             </div>
@@ -3997,7 +3997,7 @@ export default function App() {
                 <p className="eyebrow">{t.studentProfile || "STUDENT PROFILE"}</p>
                 <h2 style={{ marginBottom: 2 }}>{localizeStudentName(viewingStudentProfile.name, lang)}</h2>
                 <small className="muted">
-                  Admission No: <strong>{viewingStudentProfile.admissionNo || viewingStudentProfile.admissionNumber}</strong> · Class: {viewingStudentProfile.classId?.name || "Unassigned"}
+                  {t.admissionNo}: <strong>{viewingStudentProfile.admissionNo || viewingStudentProfile.admissionNumber}</strong> · {t.class}: {viewingStudentProfile.classId?.name || t("common.unassigned", "Unassigned")}
                 </small>
               </div>
               <button
@@ -4045,7 +4045,7 @@ export default function App() {
                   </span>
                 </div>
                 <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                  {viewingStudentProfile.classId?.name} {viewingStudentProfile.classId?.section ? `(${viewingStudentProfile.classId.section})` : ""}
+                  {viewingStudentProfile.classId?.name} {viewingStudentProfile.classId?.section ? `(${localizeSection(viewingStudentProfile.classId.section, lang)})` : ""}
                   {viewingStudentProfile.classId?.academicYear ? ` · ${viewingStudentProfile.classId.academicYear}` : ""}
                 </div>
                 <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -4074,52 +4074,52 @@ export default function App() {
             {/* Profile Detailed Fields */}
             <div className="card" style={{ padding: "16px", marginBottom: 14 }}>
               <h3 style={{ fontSize: 14, marginBottom: 12, borderBottom: "1px solid var(--border)", paddingBottom: 6 }}>
-                Student Details
+                {t("students.studentDetails", "Student Details")}
               </h3>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 14px", fontSize: 13 }}>
                 <div>
-                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Full Name</span>
-                  <strong>{viewingStudentProfile.name || viewingStudentProfile.fullName}</strong>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t("students.fullName", "Full Name")}</span>
+                  <strong>{localizeStudentName(viewingStudentProfile.name || viewingStudentProfile.fullName, lang)}</strong>
                 </div>
                 <div>
-                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Admission No</span>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t.admissionNo}</span>
                   <strong>{viewingStudentProfile.admissionNo || viewingStudentProfile.admissionNumber}</strong>
                 </div>
                 <div>
-                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Gender</span>
-                  <span>{viewingStudentProfile.gender || "Unspecified"}</span>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t.gender || "Gender"}</span>
+                  <span>{viewingStudentProfile.gender ? t[`gender${viewingStudentProfile.gender}`] || viewingStudentProfile.gender : t("common.unspecified", "Unspecified")}</span>
                 </div>
                 <div>
-                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Date of Birth</span>
-                  <span>{viewingStudentProfile.dob || "Not recorded"}</span>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t.dob || "Date of Birth"}</span>
+                  <span>{viewingStudentProfile.dob || t("common.notRecorded", "Not recorded")}</span>
                 </div>
                 <div>
-                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Enrollment Date</span>
-                  <span>{viewingStudentProfile.enrollmentDate || "Not recorded"}</span>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t.enrollmentDate || "Enrollment Date"}</span>
+                  <span>{viewingStudentProfile.enrollmentDate || t("common.notRecorded", "Not recorded")}</span>
                 </div>
                 <div>
-                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Photo Consent</span>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t("students.consent", "Photo Consent")}</span>
                   <span style={{ color: viewingStudentProfile.consentGiven ? "var(--success)" : "var(--muted)", fontWeight: 600 }}>
-                    {viewingStudentProfile.consentGiven ? "Granted ✓" : "Opted out"}
+                    {viewingStudentProfile.consentGiven ? t("common.granted", "Granted ✓") : t("common.optedOut", "Opted out")}
                   </span>
                 </div>
                 <div style={{ gridColumn: "1 / -1" }}>
-                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Guardian / Parent</span>
-                  <strong>{localizeGuardianName(viewingStudentProfile.guardianName, lang) || "Not recorded"}</strong>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t("students.guardianParent", "Guardian / Parent")}</span>
+                  <strong>{localizeGuardianName(viewingStudentProfile.guardianName, lang) || t("common.notRecorded", "Not recorded")}</strong>
                 </div>
                 <div>
-                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Guardian Phone</span>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t("students.guardianPhone", "Guardian Phone")}</span>
                   {viewingStudentProfile.guardianPhone ? (
                     <a href={`tel:${viewingStudentProfile.guardianPhone}`} style={{ color: "var(--primary)", fontWeight: 600 }}>
                       {viewingStudentProfile.guardianPhone}
                     </a>
                   ) : (
-                    <span style={{ color: "var(--muted)" }}>Not recorded</span>
+                    <span style={{ color: "var(--muted)" }}>{t("common.notRecorded", "Not recorded")}</span>
                   )}
                 </div>
                 <div>
-                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>Address / Area</span>
-                  <span>{viewingStudentProfile.address || "Not recorded"}</span>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t("students.addressArea", "Address / Area")}</span>
+                  <span>{viewingStudentProfile.address || t("common.notRecorded", "Not recorded")}</span>
                 </div>
               </div>
             </div>
@@ -4154,7 +4154,7 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div>
                 <p className="eyebrow">{t.editStudent || "EDIT STUDENT"}</p>
-                <h2 style={{ marginBottom: 0 }}>{editingStudent.name || "Student"}</h2>
+                <h2 style={{ marginBottom: 0 }}>{localizeStudentName(editingStudent.name, lang) || "Student"}</h2>
               </div>
               <button
                 disabled={editingStudent.saving}
@@ -4196,12 +4196,12 @@ export default function App() {
                     disabled={user?.role !== "admin"}
                     value={editingStudent.admissionNo}
                     onChange={(e) => setEditingStudent({ ...editingStudent, admissionNo: e.target.value })}
-                    title={user?.role !== "admin" ? "Only Administrators can modify admission numbers" : "Admission number"}
+                    title={user?.role !== "admin" ? t("students.onlyAdminAdmissionNo", "Only Administrators can modify admission numbers") : t.admissionNo}
                   />
                   {user?.role !== "admin" ? (
-                    <small style={{ color: "var(--muted)", fontSize: 10 }}>Admin only</small>
+                    <small style={{ color: "var(--muted)", fontSize: 10 }}>{t("students.adminOnly", "Admin only")}</small>
                   ) : (
-                    <small style={{ color: "var(--muted)", fontSize: 10 }}>Validated for uniqueness</small>
+                    <small style={{ color: "var(--muted)", fontSize: 10 }}>{t("students.validatedUniqueness", "Validated for uniqueness")}</small>
                   )}
                 </label>
               </div>
@@ -4212,7 +4212,7 @@ export default function App() {
                   required
                   value={editingStudent.name}
                   onChange={(e) => setEditingStudent({ ...editingStudent, name: e.target.value })}
-                  placeholder="Student full name"
+                  placeholder={t("students.fullName", "Student full name")}
                 />
               </label>
 
@@ -4223,9 +4223,9 @@ export default function App() {
                     value={editingStudent.gender}
                     onChange={(e) => setEditingStudent({ ...editingStudent, gender: e.target.value })}
                   >
-                    <option value="">Unspecified</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
+                    <option value="">{t("common.unspecified", "Unspecified")}</option>
+                    <option value="Male">{t("common.male", "Male")}</option>
+                    <option value="Female">{t("common.female", "Female")}</option>
                   </select>
                 </label>
 
@@ -4245,7 +4245,7 @@ export default function App() {
                   <input
                     value={editingStudent.guardianName}
                     onChange={(e) => setEditingStudent({ ...editingStudent, guardianName: e.target.value })}
-                    placeholder="Parent or guardian name"
+                    placeholder={t("students.guardianParent", "Parent or guardian name")}
                   />
                 </label>
 
@@ -4255,7 +4255,7 @@ export default function App() {
                     type="tel"
                     value={editingStudent.guardianPhone}
                     onChange={(e) => setEditingStudent({ ...editingStudent, guardianPhone: e.target.value })}
-                    placeholder="Guardian phone number"
+                    placeholder={t("students.guardianPhone", "Guardian phone number")}
                   />
                 </label>
               </div>
@@ -4266,7 +4266,7 @@ export default function App() {
                   <input
                     value={editingStudent.address}
                     onChange={(e) => setEditingStudent({ ...editingStudent, address: e.target.value })}
-                    placeholder="Residential address / locality"
+                    placeholder={t("students.addressArea", "Residential address / locality")}
                   />
                 </label>
 
@@ -4288,7 +4288,7 @@ export default function App() {
                     onChange={(e) => setEditingStudent({ ...editingStudent, active: e.target.checked })}
                     style={{ width: 20, minHeight: 20 }}
                   />
-                  <span>Active Student Account (uncheck to deactivate)</span>
+                  <span>{t("students.activeAccountCheck", "Active Student Account (uncheck to deactivate)")}</span>
                 </label>
 
                 <label style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
@@ -4309,7 +4309,7 @@ export default function App() {
                   disabled={editingStudent.saving}
                   onClick={() => setEditingStudent(null)}
                 >
-                  Cancel
+                  {t.cancel}
                 </button>
                 <button
                   type="submit"
@@ -4319,10 +4319,10 @@ export default function App() {
                 >
                   {editingStudent.saving ? (
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      <RefreshCw size={14} className="spin" /> Saving...
+                      <RefreshCw size={14} className="spin" /> {t.saving}
                     </span>
                   ) : (
-                    "Save Changes"
+                    t.saveChanges
                   )}
                 </button>
               </div>
@@ -4339,8 +4339,8 @@ export default function App() {
           <div className="sheet-content" onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div>
-                <p className="eyebrow">CLASS REASSIGNMENT</p>
-                <h2 style={{ marginBottom: 0 }}>Transfer Student</h2>
+                <p className="eyebrow">{t("students.classReassignment", "CLASS REASSIGNMENT")}</p>
+                <h2 style={{ marginBottom: 0 }}>{t("students.transferStudentTitle", "Transfer Student")}</h2>
               </div>
               <button
                 disabled={loading}
@@ -4353,21 +4353,21 @@ export default function App() {
 
             <div className="card" style={{ padding: "14px", marginBottom: 14, background: "var(--canvas)" }}>
               <div style={{ fontSize: 13 }}>
-                Student: <strong>{transferringStudent.name}</strong> ({transferringStudent.admissionNo || transferringStudent.admissionNumber})
+                {t("reports.student", "Student")}: <strong>{localizeStudentName(transferringStudent.name, lang)}</strong> ({transferringStudent.admissionNo || transferringStudent.admissionNumber})
               </div>
               <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
-                Current Class: <strong>{transferringStudent.classId?.name || "Unassigned"} {transferringStudent.classId?.section ? `(${transferringStudent.classId.section})` : ""}</strong>
+                {t("students.currentClass", "Current Class")}: <strong>{transferringStudent.classId?.name || t("common.unassigned", "Unassigned")} {transferringStudent.classId?.section ? `(${localizeSection(transferringStudent.classId.section, lang)})` : ""}</strong>
               </div>
             </div>
 
             <label style={{ marginBottom: 14 }}>
-              Select New Target Class *
+              {t("students.selectNewTargetClass", "Select New Target Class *")}
               <select
                 value={transferTargetClassId}
                 onChange={(e) => setTransferTargetClassId(e.target.value)}
                 style={{ minHeight: 46 }}
               >
-                <option value="">-- Choose destination class --</option>
+                <option value="">{t("students.chooseDestinationClass", "-- Choose destination class --")}</option>
                 {classes.map((c) => (
                   <option key={c._id || c.id} value={c._id || c.id}>
                     {formatClassLabel(c, lang)}
@@ -4379,7 +4379,7 @@ export default function App() {
             <div style={{ background: "var(--info-bg)", border: "1px solid #BAE6FD", color: "#0369A1", padding: "10px 14px", borderRadius: 12, marginBottom: 16, fontSize: 12, display: "flex", alignItems: "flex-start", gap: 8 }}>
               <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
               <div>
-                <strong>Historical Register Continuity:</strong> Past attendance records will remain safely attached to the class and date on which they were taken.
+                <strong>{t("students.historicalContinuity", "Historical Register Continuity")}:</strong> {t("students.historicalContinuityNotice", "Past attendance records will remain safely attached to the class and date on which they were taken.")}
               </div>
             </div>
 
@@ -4390,7 +4390,7 @@ export default function App() {
                 disabled={loading}
                 onClick={() => setTransferringStudent(null)}
               >
-                Cancel
+                {t.cancel}
               </button>
               <button
                 type="button"
@@ -4398,7 +4398,7 @@ export default function App() {
                 disabled={loading || !transferTargetClassId || String(transferTargetClassId) === String(transferringStudent.classId?._id || transferringStudent.classId)}
                 onClick={handleConfirmTransfer}
               >
-                {loading ? "Transferring..." : "Confirm Class Transfer"}
+                {loading ? t("students.transferring", "Transferring…") : t("students.confirmTransfer", "Confirm Class Transfer")}
               </button>
             </div>
           </div>
@@ -4414,9 +4414,9 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div>
                 <p className="eyebrow">{t.attendanceHistory || "ATTENDANCE RECORD"}</p>
-                <h2 style={{ marginBottom: 2 }}>{attendanceHistoryStudent.name}</h2>
+                <h2 style={{ marginBottom: 2 }}>{localizeStudentName(attendanceHistoryStudent.name, lang)}</h2>
                 <small className="muted">
-                  Admission No: <strong>{attendanceHistoryStudent.admissionNo || attendanceHistoryStudent.admissionNumber}</strong> · Class: {attendanceHistoryStudent.classId?.name || "Enrolled"}
+                  {t.admissionNo}: <strong>{attendanceHistoryStudent.admissionNo || attendanceHistoryStudent.admissionNumber}</strong> · {t.class}: {attendanceHistoryStudent.classId?.name || "Enrolled"}
                 </small>
               </div>
               <button
@@ -4430,7 +4430,7 @@ export default function App() {
             {studentAttendanceLoading && (
               <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)" }}>
                 <RefreshCw size={24} className="spin" style={{ margin: "0 auto 10px" }} />
-                <p>Loading authoritative attendance ledger...</p>
+                <p>{t("common.loading", "Loading authoritative attendance ledger...")}</p>
               </div>
             )}
 
@@ -4448,33 +4448,33 @@ export default function App() {
                         studentAttendanceData.stats?.rate >= 80 ? "var(--success)" :
                         studentAttendanceData.stats?.rate >= 60 ? "var(--warning)" : "var(--danger)"
                     }}>
-                      {studentAttendanceData.stats?.rate ?? 0}%
+                      {formatPercent(studentAttendanceData.stats?.rate ?? 0, lang)}
                     </strong>
-                    <span>Attendance Rate</span>
+                    <span>{t("monitoring.attendanceRate", "Attendance Rate")}</span>
                   </div>
                   <div className="att-stat-box">
-                    <strong style={{ color: "var(--success)" }}>{studentAttendanceData.stats?.present || 0}</strong>
-                    <span>Present</span>
+                    <strong style={{ color: "var(--success)" }}>{formatNumber(studentAttendanceData.stats?.present || 0, lang)}</strong>
+                    <span>{t.present}</span>
                   </div>
                   <div className="att-stat-box">
-                    <strong style={{ color: "var(--danger)" }}>{studentAttendanceData.stats?.absent || 0}</strong>
-                    <span>Absent</span>
+                    <strong style={{ color: "var(--danger)" }}>{formatNumber(studentAttendanceData.stats?.absent || 0, lang)}</strong>
+                    <span>{t.absent}</span>
                   </div>
                   <div className="att-stat-box">
                     <strong style={{ color: "var(--warning)" }}>
-                      {(studentAttendanceData.stats?.late || 0) + (studentAttendanceData.stats?.excused || 0)}
+                      {formatNumber((studentAttendanceData.stats?.late || 0) + (studentAttendanceData.stats?.excused || 0), lang)}
                     </strong>
-                    <span>Late / Excused</span>
+                    <span>{t.late} / {t.excused}</span>
                   </div>
                 </div>
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, fontSize: 12, color: "var(--muted)" }}>
-                  <span>Total Recorded Sessions: <strong>{studentAttendanceData.stats?.totalSessions || 0}</strong></span>
+                  <span>{t("monitoring.totalSessions", "Total Sessions")}: <strong>{formatNumber(studentAttendanceData.stats?.totalSessions || 0, lang)}</strong></span>
                   <button
                     onClick={() => openAttendanceHistory(attendanceHistoryStudent)}
                     style={{ background: "none", border: "none", color: "var(--primary)", display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12, padding: 0, minHeight: "auto", fontWeight: 600 }}
                   >
-                    <RefreshCw size={12} /> Reload History
+                    <RefreshCw size={12} /> {t("monitoring.reloadHistory", "Reload History")}
                   </button>
                 </div>
 
@@ -4503,7 +4503,7 @@ export default function App() {
                     style={{ minHeight: 32, fontSize: 12, padding: "4px 12px" }}
                     onClick={() => openAttendanceHistory(attendanceHistoryStudent, studentHistoryRange)}
                   >
-                    <Filter size={13} /> {t.filterByRange || "Filter Range"}
+                    <Filter size={13} /> {t("monitoring.filterRange", "Filter Range")}
                   </button>
                   {(studentHistoryRange.from || studentHistoryRange.to) && (
                     <button
@@ -4514,7 +4514,7 @@ export default function App() {
                         openAttendanceHistory(attendanceHistoryStudent, { from: "", to: "" });
                       }}
                     >
-                      Clear
+                      {t("common.clear", "Clear")}
                     </button>
                   )}
                 </div>
@@ -4549,10 +4549,10 @@ export default function App() {
                             </td>
                             <td style={{ fontSize: 12 }}>{r.classId?.name || "Class"}</td>
                             <td style={{ fontSize: 11, color: "var(--muted)" }}>
-                              {r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "-"}
+                              {r.updatedAt ? formatDate(r.updatedAt, lang) : "-"}
                             </td>
                             <td style={{ fontSize: 11, color: "var(--muted)" }}>
-                              {r.updatedBy?.name || r.markedBy?.name || "Teacher"}
+                              {r.updatedBy?.name || r.markedBy?.name || t("teachers.teacher", "Teacher")}
                             </td>
                           </tr>
                         ))}
@@ -4561,7 +4561,7 @@ export default function App() {
                   ) : (
                     <div style={{ padding: 30, textAlign: "center", color: "var(--muted)" }}>
                       <History size={32} style={{ margin: "0 auto 8px", opacity: 0.5 }} />
-                      <p style={{ margin: 0, fontSize: 13 }}>No attendance records found for this student.</p>
+                      <p style={{ margin: 0, fontSize: 13 }}>{t("monitoring.noAttendanceRecorded", "No attendance records found for this student.")}</p>
                     </div>
                   )}
                 </div>
@@ -4570,7 +4570,7 @@ export default function App() {
 
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
               <button className="btn secondary" onClick={() => setAttendanceHistoryStudent(null)}>
-                Close
+                {t("common.close", "Close")}
               </button>
             </div>
           </div>
@@ -4602,13 +4602,13 @@ export default function App() {
               </div>
               <div>
                 <h3 style={{ margin: 0, fontSize: 16 }}>
-                  {studentConfirmAction.type === "delete" ? "Permanently Delete Student?" :
-                   studentConfirmAction.type === "archive" ? "Archive Student?" :
-                   studentConfirmAction.type === "restore" ? "Restore Student to Active?" :
-                   studentConfirmAction.type === "deactivate" ? "Deactivate Student?" : "Activate Student?"}
+                  {studentConfirmAction.type === "delete" ? t("students.deleteStudentPrompt", "Permanently Delete Student?") :
+                   studentConfirmAction.type === "archive" ? t("students.archiveStudentPrompt", "Archive Student?") :
+                   studentConfirmAction.type === "restore" ? t("students.restoreStudentPrompt", "Restore Student to Active?") :
+                   studentConfirmAction.type === "deactivate" ? t("students.deactivateStudentPrompt", "Deactivate Student?") : t("students.activateStudentPrompt", "Activate Student?")}
                 </h3>
                 <small className="muted">
-                  {studentConfirmAction.student?.name} ({studentConfirmAction.student?.admissionNo || studentConfirmAction.student?.admissionNumber})
+                  {localizeStudentName(studentConfirmAction.student?.name, lang)} ({studentConfirmAction.student?.admissionNo || studentConfirmAction.student?.admissionNumber})
                 </small>
               </div>
             </div>
@@ -4622,27 +4622,27 @@ export default function App() {
             <p style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.5, margin: "0 0 12px" }}>
               {studentConfirmAction.type === "delete" && (
                 <>
-                  <strong style={{ color: "var(--danger)" }}>DANGER:</strong> This action cannot be undone. Permanently removing this student record will also delete all historical attendance records linked to this admission number.
+                  <strong style={{ color: "var(--danger)" }}>DANGER:</strong> {t("students.deleteDangerWarning", "This action cannot be undone. Permanently removing this student record will also delete all historical attendance records linked to this admission number.")}
                 </>
               )}
               {studentConfirmAction.type === "archive" && (
-                "Archiving safely moves this student to the Madrasa archives. All previous attendance history and registers remain intact and can be restored at any time."
+                t("students.archiveExplanation", "Archiving safely moves this student to the Madrasa archives. All previous attendance history and registers remain intact and can be restored at any time.")
               )}
               {studentConfirmAction.type === "restore" && (
-                "Restoring this student will make them active and available for class attendance registers again."
+                t("students.restoreExplanation", "Restoring this student will make them active and available for class attendance registers again.")
               )}
               {studentConfirmAction.type === "deactivate" && (
-                "Deactivating this student will keep their records safe but exclude them from regular daily attendance registers."
+                t("students.deactivateExplanation", "Deactivating this student will keep their records safe but exclude them from regular daily attendance registers.")
               )}
               {studentConfirmAction.type === "activate" && (
-                "Re-activating this student enables them for daily attendance registers in their assigned class."
+                t("students.activateExplanation", "Re-activating this student enables them for daily attendance registers in their assigned class.")
               )}
             </p>
 
             {studentConfirmAction.type === "delete" && (
               <label style={{ margin: "10px 0" }}>
                 <span style={{ fontSize: 12 }}>
-                  Type admission number <strong>{studentConfirmAction.student?.admissionNo || studentConfirmAction.student?.admissionNumber}</strong> to confirm:
+                  {t("students.typeAdmissionToConfirm", { admNo: studentConfirmAction.student?.admissionNo || studentConfirmAction.student?.admissionNumber })}
                 </span>
                 <input
                   type="text"
@@ -4662,7 +4662,7 @@ export default function App() {
                 onClick={() => setStudentConfirmAction(null)}
                 style={{ minHeight: 38 }}
               >
-                Cancel
+                {t.cancel}
               </button>
               <button
                 type="button"
@@ -4681,11 +4681,11 @@ export default function App() {
                   color: "#fff"
                 }}
               >
-                {studentConfirmAction.loading ? "Processing..." :
-                 studentConfirmAction.type === "delete" ? "Delete Permanently" :
-                 studentConfirmAction.type === "archive" ? "Archive Student" :
-                 studentConfirmAction.type === "restore" ? "Restore Student" :
-                 studentConfirmAction.type === "deactivate" ? "Deactivate" : "Activate"}
+                {studentConfirmAction.loading ? t("common.processing", "Processing...") :
+                 studentConfirmAction.type === "delete" ? t.deletePermanently :
+                 studentConfirmAction.type === "archive" ? t.archive :
+                 studentConfirmAction.type === "restore" ? t.restore :
+                 studentConfirmAction.type === "deactivate" ? t.deactivate : t.activate}
               </button>
             </div>
           </div>
@@ -4698,7 +4698,7 @@ export default function App() {
           <div className="camera-modal-content">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "#fff", marginBottom: 10 }}>
               <span style={{ fontWeight: 600 }}>
-                {cameraMode === "class-attendance" ? "Class Attendance Scanner (Live)" : "Camera Viewfinder"}
+                {cameraMode === "class-attendance" ? t("faceMatching.classScannerLive", "Class Attendance Scanner (Live)") : t("faceMatching.cameraViewfinder", "Camera Viewfinder")}
               </span>
               <button
                 onClick={stopCamera}
@@ -4716,7 +4716,7 @@ export default function App() {
               <button
                 onClick={() => startCamera(cameraFacing === "user" ? "environment" : "user", cameraMode)}
                 style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: 44, height: 44, display: "grid", placeItems: "center", cursor: "pointer" }}
-                title="Switch Camera"
+                title={t("faceMatching.switchCamera", "Switch Camera")}
               >
                 <FlipHorizontal size={20} />
               </button>
@@ -4779,7 +4779,7 @@ export default function App() {
           onClick={() => setTab("more")}
         >
           <MoreHorizontal size={20} />
-          <span>More</span>
+          <span>{t.more}</span>
         </button>
       </nav>
     </div>

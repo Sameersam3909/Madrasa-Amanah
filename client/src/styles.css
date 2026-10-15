@@ -33,8 +33,14 @@
   text-rendering: optimizeLegibility;
 }
 
-[dir="rtl"] {
-  font-family: "Noto Naskh Arabic", Inter, system-ui, sans-serif;
+[dir="rtl"], [lang="ur"] {
+  font-family: "Noto Naskh Arabic", "Urdu Typesetting", "Jameel Noori Nastaleeq", "Noto Nastaliq Urdu", system-ui, sans-serif;
+  line-height: 1.6;
+}
+
+[lang="te"] {
+  font-family: "Noto Sans Telugu", "Gautami", system-ui, sans-serif;
+  line-height: 1.5;
 }
 
 html {
@@ -2078,5 +2084,118 @@ th {
   background: #EDF2F7;
   color: #718096;
   border: 1px solid #E2E8F0;
+}
+
+/* =========================================================
+   COMPREHENSIVE RTL LAYOUT SUPPORT (Urdu)
+   ========================================================= */
+[dir="rtl"] {
+  text-align: right;
+}
+
+[dir="rtl"] .text-left {
+  text-align: right;
+}
+
+[dir="rtl"] .text-right {
+  text-align: left;
+}
+
+[dir="rtl"] .desktop-sidebar button {
+  justify-content: flex-start;
+  text-align: right;
+}
+
+[dir="rtl"] .desktop-sidebar button svg {
+  margin-left: 8px;
+  margin-right: 0;
+}
+
+[dir="rtl"] .mobile-header-actions {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .status-pill {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .save-summary-col {
+  text-align: right;
+}
+
+[dir="rtl"] .monitoring-kpi-label {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .monitoring-status-pills {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .student-status-tabs {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .quick-batch-bar {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .search-input-wrap .search-icon-pos {
+  left: auto;
+  right: 14px;
+}
+
+[dir="rtl"] .search-input-wrap input {
+  padding-left: 14px;
+  padding-right: 42px;
+}
+
+[dir="rtl"] .search-input-wrap button {
+  right: auto !important;
+  left: 10px !important;
+}
+
+[dir="rtl"] .sheet-content {
+  text-align: right;
+}
+
+[dir="rtl"] .confirm-dialog-content {
+  text-align: right;
+}
+
+[dir="rtl"] .confirm-dialog-header {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .confirm-dialog-actions {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] th,
+[dir="rtl"] td {
+  text-align: right;
+}
+
+[dir="rtl"] td:last-child,
+[dir="rtl"] th:last-child {
+  text-align: left;
+}
+
+[dir="rtl"] .student-card-actions-group {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] input[type="checkbox"] {
+  margin-left: 8px;
+  margin-right: 0;
+}
+
+/* Ensure numeric codes, phones, emails preserve natural LTR reading */
+bdo[dir="ltr"],
+.code-ltr,
+input[type="tel"],
+input[type="email"],
+.preserve-ltr {
+  direction: ltr !important;
+  unicode-bidi: embed;
 }
 
