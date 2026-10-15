@@ -3486,7 +3486,7 @@ export default function App() {
                     <table className="monitoring-table">
                       <thead>
                         <tr>
-                          <th>{t("students.studentName", t.studentName || t("name") || "Student Name")}</th>
+                          <th>{t("students.name") || t("common.studentName") || "Student Name"}</th>
                           <th>{t.admissionNo}</th>
                           <th>{t.class}</th>
                           <th>{t.date}</th>
@@ -4237,7 +4237,7 @@ export default function App() {
               </div>
 
               <label>
-                {t("students.studentName", t.studentName || t("name") || "Student Name")} *
+                {t("students.name") || t("common.studentName") || "Student Name"} *
                 <input
                   required
                   value={studentForm.name}
@@ -5735,7 +5735,7 @@ export default function App() {
               </div>
 
               <label>
-                {t("students.studentName", t.studentName || t("name") || "Student Name")} *
+                {t("students.name") || t("common.studentName") || "Student Name"} *
                 <input
                   required
                   value={editingStudent.name}

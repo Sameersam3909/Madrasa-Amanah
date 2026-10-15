@@ -213,7 +213,12 @@
     "restoreExplanation": "Restoring this student will make them active and available for class attendance registers again.",
     "deactivateExplanation": "Deactivating this student will keep their records safe but exclude them from regular daily attendance registers.",
     "activateExplanation": "Re-activating this student enables them for daily attendance registers in their assigned class.",
-    "typeAdmissionToConfirm": "Type admission number {{admNo}} to confirm:"
+    "typeAdmissionToConfirm": "Type admission number {{admNo}} to confirm:",
+    "activeStudents": "Active Students",
+    "archivedStudents": "Archived",
+    "allStudents": "All Students",
+    "exportCsv": "CSV",
+    "exportExcel": "Excel"
   },
   "classes": {
     "classesTitle": "Classes",
@@ -277,7 +282,8 @@
     "noFaceDetectedManual": "No face detected (manual attendance ready)",
     "faceModelsOffline": "Face models offline (manual attendance ready)",
     "faceAnalysisSkipped": "Face analysis skipped (manual attendance ready)",
-    "manualAttendanceReady": "Manual attendance ready"
+    "manualAttendanceReady": "Manual attendance ready",
+    "match": "Match"
   },
   "sync": {
     "syncCenter": "Sync Center",

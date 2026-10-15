@@ -213,7 +213,12 @@
     "restoreExplanation": "بحال کرنے سے طالب علم دوبارہ فعال ہو جائے گا اور کلاس کے حاضری رجسٹر میں نظر آئے گا۔",
     "deactivateExplanation": "غیر فعال کرنے سے طالب علم کا ریکارڈ محفوظ رہے گا مگر وہ روزانہ حاضری رجسٹر سے خارج ہو جائے گا۔",
     "activateExplanation": "دوبارہ فعال کرنے سے طالب علم اپنی جماعت کے روزانہ حاضری رجسٹر میں شامل ہو جائے گا۔",
-    "typeAdmissionToConfirm": "تصدیق کے لیے داخلہ نمبر {{admNo}} درج کریں:"
+    "typeAdmissionToConfirm": "تصدیق کے لیے داخلہ نمبر {{admNo}} درج کریں:",
+    "activeStudents": "فعال طلباء",
+    "archivedStudents": "محفوظ شدہ",
+    "allStudents": "تمام طلباء",
+    "exportCsv": "CSV",
+    "exportExcel": "Excel"
   },
   "classes": {
     "classesTitle": "جماعتیں",
@@ -263,7 +268,8 @@
     "noFaceDetectedManual": "کوئی چہرہ نہیں ملا (دستی حاضری دستیاب ہے)",
     "faceModelsOffline": "ماڈلز آف لائن ہیں (دستی حاضری دستیاب ہے)",
     "faceAnalysisSkipped": "تجزیہ چھوڑ دیا گیا (دستی حاضری دستیاب ہے)",
-    "manualAttendanceReady": "دستی حاضری تیار ہے"
+    "manualAttendanceReady": "دستی حاضری تیار ہے",
+    "match": "مطابقت"
   },
   "sync": {
     "syncCenter": "مطابقت پذیری (سنک)",

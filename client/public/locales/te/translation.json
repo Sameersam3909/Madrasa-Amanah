@@ -213,7 +213,12 @@
     "restoreExplanation": "పునరుద్ధరించడం ద్వారా విద్యార్థి మళ్లీ క్రియాశీలం అవుతారు మరియు తరగతి హాజరులో కనిపిస్తారు.",
     "deactivateExplanation": "నిష్క్రియం చేయడం వల్ల రికార్డులు సురక్షితంగా ఉంటాయి కానీ రోజువారీ హాజరు నుండి మినహాయించబడతారు.",
     "activateExplanation": "తిరిగి క్రియాశీలం చేయడం ద్వారా విద్యార్థి రోజువారీ హాజరు కోసం సిద్ధమవుతారు.",
-    "typeAdmissionToConfirm": "నిర్ధారించడానికి ప్రవేశ సంఖ్య {{admNo}} టైప్ చేయండి:"
+    "typeAdmissionToConfirm": "నిర్ధారించడానికి ప్రవేశ సంఖ్య {{admNo}} టైప్ చేయండి:",
+    "activeStudents": "యాక్టివ్ విద్యార్థులు",
+    "archivedStudents": "ఆర్కైవ్",
+    "allStudents": "అందరు విద్యార్థులు",
+    "exportCsv": "CSV",
+    "exportExcel": "Excel"
   },
   "classes": {
     "classesTitle": "తరగతులు",
@@ -263,7 +268,8 @@
     "noFaceDetectedManual": "ముఖం గుర్తించబడలేదు (మాన్యువల్ హాజరు సిద్ధంగా ఉంది)",
     "faceModelsOffline": "ఫేస్ మోడల్స్ ఆఫ్‌లైన్‌లో ఉన్నాయి (మాన్యువల్ హాజరు సిద్ధం)",
     "faceAnalysisSkipped": "విశ్లేషణ దాటవేయబడింది (మాన్యువల్ హాజరు సిద్ధం)",
-    "manualAttendanceReady": "మాన్యువల్ హాజరు సిద్ధంగా ఉంది"
+    "manualAttendanceReady": "మాన్యువల్ హాజరు సిద్ధంగా ఉంది",
+    "match": "మ్యాచ్"
   },
   "sync": {
     "syncCenter": "సింక్ కేంద్రం",
