@@ -6,7 +6,7 @@ function getBaseUrl() {
     const clean = envUrl.replace(/\/+$/, "");
     return clean.endsWith("/api") ? clean : `${clean}/api`;
   }
-  return import.meta.env.PROD ? "/api" : "http://localhost:4000/api";
+  return import.meta.env.PROD ? "https://madrasa-attendance-api.onrender.com/api" : "http://localhost:4000/api";
 }
 
 const api = axios.create({
