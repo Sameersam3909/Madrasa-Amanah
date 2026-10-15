@@ -258,15 +258,30 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
   // If SMTP is configured, attempt real email delivery
   if (smtpUser && smtpPass) {
     try {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass
-        }
-      });
+      const transportConfig = (smtpHost.includes("gmail") || smtpHost === "smtp.gmail.com")
+        ? {
+            service: "gmail",
+            auth: {
+              user: smtpUser,
+              pass: smtpPass
+            },
+            connectionTimeout: 15000,
+            greetingTimeout: 15000,
+            socketTimeout: 20000
+          }
+        : {
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpPort === 465,
+            auth: {
+              user: smtpUser,
+              pass: smtpPass
+            },
+            connectionTimeout: 15000,
+            greetingTimeout: 15000,
+            socketTimeout: 20000
+          };
+      const transporter = nodemailer.createTransport(transportConfig);
 
       const mailOptions = {
         from: `"Madrasa Amanah Reports" <${smtpUser}>`,

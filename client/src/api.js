@@ -11,7 +11,7 @@ function getBaseUrl() {
 
 const api = axios.create({
   baseURL: getBaseUrl(),
-  timeout: 15000 // Sensible 15s timeout prevents hanging on sluggish network
+  timeout: 60000 // 60s timeout accommodates cold starts, report generation, and SMTP delivery
 });
 
 api.interceptors.request.use((config) => {

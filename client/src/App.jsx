@@ -1216,6 +1216,52 @@ export default function App() {
     }
   }
 
+    async function handleDeleteClass(cls) {
+    const clsId = cls._id || cls.id;
+    if (!window.confirm(`Are you sure you want to remove class "${cls.name} (${cls.section || 'All'})"? Active students will need to be reassigned to another class.`)) {
+      return;
+    }
+    setError("");
+    setNotice("");
+    setLoading(true);
+    try {
+      await api.delete(`/classes/${clsId}`);
+      setClasses((prev) => prev.filter((c) => (c._id || c.id) !== clsId));
+      try { await offlineDb.classes.delete(String(clsId)); } catch {}
+      setNotice(`Class "${cls.name}" was removed successfully.`);
+      if (selectedClass === clsId) {
+        const remaining = classes.filter((c) => (c._id || c.id) !== clsId);
+        if (remaining.length) setSelectedClass(remaining[0]._id || remaining[0].id);
+      }
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function downloadWeeklyExcelNow() {
+    setLoading(true);
+    setError("");
+    try {
+      const now = new Date();
+      const currentDay = now.getDay();
+      const diffToSunday = currentDay === 0 ? 7 : currentDay;
+      const prevSunday = new Date(now);
+      prevSunday.setDate(now.getDate() - diffToSunday);
+      const prevMonday = new Date(prevSunday);
+      prevMonday.setDate(prevSunday.getDate() - 6);
+      const from = prevMonday.toISOString().slice(0, 10);
+      const to = prevSunday.toISOString().slice(0, 10);
+      await triggerFileDownload("/reports/weekly-excel", {}, `Madrasa-Amanah-Weekly-Attendance-${from}-to-${to}.xlsx`);
+      setNotice("Weekly Excel report downloaded successfully ✓");
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleDeactivateTeacher(teacher) {
     if (!window.confirm(`Are you sure you want to deactivate teacher ${teacher.name}? Safe account rules apply: historical attendance records, class logs, and audit trails will be strictly preserved.`)) {
       return;
@@ -4561,9 +4607,52 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Add Class */}
+                {/* Class Management — List, Remove, and Add Classes */}
                 <div className="card">
-                  <h3 style={{ marginBottom: 10 }}>{t("classes.addClass", "Add Class")}</h3>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                    <div>
+                      <h3 style={{ margin: 0 }}>{t("classes.classManagement", "Class Management")}</h3>
+                      <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                        {t("classes.classManagementSub", "View registered classes, add new classrooms, or remove inactive classes.")}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+                    {classes.map((cls) => (
+                      <div
+                        key={cls._id || cls.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "10px 14px",
+                          background: "var(--canvas)",
+                          borderRadius: "var(--radius-md)",
+                          border: "1px solid var(--border)",
+                          flexWrap: "wrap",
+                          gap: 8
+                        }}
+                      >
+                        <div>
+                          <strong>{cls.name}</strong>
+                          <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>
+                            ({localizeSection(cls.section || "morning", lang)}) · {cls.academicYear || "2026"}
+                          </span>
+                        </div>
+                        <button
+                          className="btn secondary"
+                          onClick={() => handleDeleteClass(cls)}
+                          disabled={loading}
+                          style={{ color: "var(--danger)", borderColor: "var(--danger)", minHeight: 32, fontSize: 12, padding: "4px 10px" }}
+                        >
+                          <Trash2 size={13} /> {t("classes.removeClass", "Remove Class")}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Add Class Form */}
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
@@ -4576,22 +4665,93 @@ export default function App() {
                         setError(errText(err));
                       }
                     }}
-                    style={{ display: "grid", gap: 10 }}
+                    style={{ display: "grid", gap: 10, padding: 12, background: "var(--card-bg)", borderRadius: "var(--radius-md)", border: "1px dashed var(--border)" }}
                   >
-                    <label>
-                      {t("classes.className", "Class Name")}
+                    <strong style={{ fontSize: 13 }}>{t("classes.addNewClass", "+ Add New Class")}</strong>
+                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 8 }}>
                       <input
                         required
                         value={classForm.name}
                         onChange={(e) => setClassForm({ ...classForm, name: e.target.value })}
-                        placeholder={t("classes.classNamePlaceholder", "e.g. Hifz, Nazira")}
+                        placeholder={t("classes.classNamePlaceholder", "e.g. Hifz, Nazira, Tajweed")}
                       />
-                    </label>
-                    <button className="btn primary" style={{ minHeight: 44 }}>
-                      {t("classes.createClass", "Create Class")}
+                      <select
+                        value={classForm.section}
+                        onChange={(e) => setClassForm({ ...classForm, section: e.target.value })}
+                      >
+                        <option value="Morning">{t.morning}</option>
+                        <option value="Evening">{t.evening}</option>
+                        <option value="Full Day">{t.fullDay}</option>
+                      </select>
+                    </div>
+                    <button className="btn primary" style={{ minHeight: 38 }}>
+                      <Plus size={15} /> {t("classes.createClass", "Create Class")}
                     </button>
                   </form>
                 </div>
+
+                {/* Teacher Staff Management — List, Remove, and Add Teachers */}
+                <div className="card">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                    <div>
+                      <h3 style={{ margin: 0 }}>{t("teachers.teacherAccounts", "Teacher Management")}</h3>
+                      <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                        {t("teachers.teacherAccountsSub", "Manage teacher staff, class assignments, or remove teacher accounts.")}
+                      </p>
+                    </div>
+                    <button
+                      className="btn primary"
+                      onClick={() => {
+                        setTeacherForm({ name: "", email: "", password: "", assignedClasses: [] });
+                        setShowAddTeacherModal(true);
+                      }}
+                      style={{ minHeight: 34, fontSize: 12, padding: "4px 12px" }}
+                    >
+                      <Plus size={14} /> {t("teachers.addTeacher", "Add Teacher")}
+                    </button>
+                  </div>
+
+                  {teachers.filter(u => u.role === "teacher").length === 0 ? (
+                    <p className="muted" style={{ fontSize: 13 }}>{t("teachers.noTeachers", "No teachers registered yet.")}</p>
+                  ) : (
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {teachers.filter(u => u.role === "teacher").map((teacher) => (
+                        <div
+                          key={teacher._id || teacher.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "10px 14px",
+                            background: "var(--canvas)",
+                            borderRadius: "var(--radius-md)",
+                            border: "1px solid var(--border)",
+                            flexWrap: "wrap",
+                            gap: 8
+                          }}
+                        >
+                          <div>
+                            <strong>{teacher.name}</strong>
+                            <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>{teacher.email}</span>
+                            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                              {teacher.assignedClasses?.length > 0
+                                ? teacher.assignedClasses.map(c => c.name || "Class").join(", ")
+                                : "No classes assigned"}
+                            </div>
+                          </div>
+                          <button
+                            className="btn secondary"
+                            onClick={() => handleDeactivateTeacher(teacher)}
+                            style={{ color: "var(--danger)", borderColor: "var(--danger)", minHeight: 32, fontSize: 12, padding: "4px 10px" }}
+                          >
+                            <UserX size={13} /> {t("teachers.removeTeacher", "Remove Teacher")}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
               </>
             )}
 

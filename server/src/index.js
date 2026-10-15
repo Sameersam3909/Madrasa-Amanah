@@ -1834,12 +1834,24 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
 
   const startTime = Date.now();
   try {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: { user: smtpUser, pass: smtpPass }
-    });
+    const transportConfig = (smtpHost.includes("gmail") || smtpHost === "smtp.gmail.com")
+      ? {
+          service: "gmail",
+          auth: { user: smtpUser, pass: smtpPass },
+          connectionTimeout: 15000,
+          greetingTimeout: 15000,
+          socketTimeout: 20000
+        }
+      : {
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: { user: smtpUser, pass: smtpPass },
+          connectionTimeout: 15000,
+          greetingTimeout: 15000,
+          socketTimeout: 20000
+        };
+    const transporter = nodemailer.createTransport(transportConfig);
 
     const info = await transporter.sendMail({
       from: `"Madrasa Amanah" <${smtpUser}>`,
