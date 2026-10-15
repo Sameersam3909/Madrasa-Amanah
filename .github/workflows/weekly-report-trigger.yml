@@ -1,0 +1,162 @@
+# ──────────────────────────────────────────────────────────────
+# Weekly Attendance Report Trigger — مَدْرَسَة Madrasa Amanah
+# ──────────────────────────────────────────────────────────────
+# Fires every Monday at 06:00 AM Asia/Kolkata (= 00:30 UTC).
+# Calls the backend /api/reports/send-weekly-email endpoint with
+# an admin JWT so the Render server dispatches the weekly Excel
+# email report to the configured recipient.
+#
+# Prerequisites (set as GitHub Actions Secrets):
+#   MADRASA_ADMIN_EMAIL    — admin login email
+#   MADRASA_ADMIN_PASSWORD — admin login password
+#   RENDER_API_URL         — e.g. https://madrasa-attendance-api.onrender.com
+#
+# Idempotency: The backend checks an audit-log weekKey before
+# sending, so even if this workflow runs multiple times in a week
+# only one email is dispatched per reporting period.
+# ──────────────────────────────────────────────────────────────
+
+name: Weekly Attendance Report
+
+on:
+  workflow_dispatch:           # Manual trigger from Actions tab
+  schedule:
+    - cron: "30 0 * * 1"      # 00:30 UTC = 06:00 AM Asia/Kolkata every Monday
+
+concurrency:
+  group: weekly-report
+  cancel-in-progress: false    # Never cancel a report in flight
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate required secrets
+        env:
+          ADMIN_EMAIL:    ${{ secrets.MADRASA_ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.MADRASA_ADMIN_PASSWORD }}
+          API_URL:        ${{ secrets.RENDER_API_URL || vars.RENDER_API_URL }}
+        run: |
+          if [ -z "${ADMIN_EMAIL:-}" ] || [ -z "${ADMIN_PASSWORD:-}" ]; then
+            echo "::error::MADRASA_ADMIN_EMAIL and MADRASA_ADMIN_PASSWORD secrets are required."
+            echo "Add them in GitHub → Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          if [ -z "${API_URL:-}" ]; then
+            echo "::error::RENDER_API_URL secret or variable is required."
+            exit 1
+          fi
+          echo "Configuration validated ✓"
+          echo "API_URL=${API_URL}" >> $GITHUB_ENV
+
+      - name: Wake Render service (cold-start recovery)
+        env:
+          API_URL: ${{ secrets.RENDER_API_URL || vars.RENDER_API_URL }}
+        run: |
+          echo "Pinging health endpoint to wake service..."
+          for i in 1 2 3 4 5; do
+            HTTP=$(curl -s -o /tmp/health.json -w "%{http_code}" --max-time 90 "${API_URL}/health" || echo "000")
+            echo "Attempt ${i}: HTTP ${HTTP}"
+            if [ "$HTTP" = "200" ]; then
+              echo "✅ Service is healthy"
+              break
+            fi
+            sleep 20
+          done
+
+      - name: Obtain admin JWT
+        env:
+          ADMIN_EMAIL:    ${{ secrets.MADRASA_ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.MADRASA_ADMIN_PASSWORD }}
+          API_URL:        ${{ secrets.RENDER_API_URL || vars.RENDER_API_URL }}
+        run: |
+          echo "Authenticating as administrator..."
+          AUTH_RESPONSE=$(curl -s --max-time 30 \
+            -X POST "${API_URL}/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASSWORD}\"}")
+
+          TOKEN=$(echo "$AUTH_RESPONSE" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              print(data.get('token',''))
+          except: print('')
+          " 2>/dev/null || echo "")
+
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Authentication failed. Check MADRASA_ADMIN_EMAIL and MADRASA_ADMIN_PASSWORD."
+            echo "Response: ${AUTH_RESPONSE}"
+            exit 1
+          fi
+
+          echo "Authentication successful ✓"
+          echo "MADRASA_JWT=${TOKEN}" >> $GITHUB_ENV
+
+      - name: Trigger weekly report email
+        env:
+          API_URL: ${{ secrets.RENDER_API_URL || vars.RENDER_API_URL }}
+        run: |
+          echo "Dispatching weekly attendance report..."
+          RESPONSE=$(curl -s --max-time 60 \
+            -X POST "${API_URL}/api/reports/send-weekly-email" \
+            -H "Authorization: Bearer ${MADRASA_JWT}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+
+          echo "Server response: ${RESPONSE}"
+
+          DELIVERED=$(echo "$RESPONSE" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              print(str(data.get('delivered',False)).lower())
+          except: print('false')
+          " 2>/dev/null || echo "false")
+
+          SUCCESS=$(echo "$RESPONSE" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              print(str(data.get('success',False)).lower())
+          except: print('false')
+          " 2>/dev/null || echo "false")
+
+          MESSAGE=$(echo "$RESPONSE" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              print(data.get('message', data.get('error', '')))
+          except: print('')
+          " 2>/dev/null || echo "")
+
+          if [ "$DELIVERED" = "true" ]; then
+            RECIPIENT=$(echo "$RESPONSE" | python3 -c "
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              print(data.get('recipient',''))
+          except: print('')
+          " 2>/dev/null || echo "")
+            echo "✅ Weekly report delivered to: ${RECIPIENT}"
+            echo "REPORT_STATUS=delivered" >> $GITHUB_ENV
+          elif [ "$SUCCESS" = "true" ]; then
+            echo "✅ Report generated but not emailed (SMTP may not be configured): ${MESSAGE}"
+            echo "REPORT_STATUS=generated" >> $GITHUB_ENV
+          else
+            echo "::warning::Report dispatch issue: ${MESSAGE}"
+            echo "REPORT_STATUS=failed" >> $GITHUB_ENV
+          fi
+
+      - name: Report summary
+        run: |
+          echo ""
+          echo "══════════════════════════════════════════"
+          echo " Madrasa Amanah — Weekly Report Result"
+          echo "══════════════════════════════════════════"
+          echo " Status: ${REPORT_STATUS:-unknown}"
+          echo " Triggered at: $(date -u '+%Y-%m-%d %H:%M UTC')"
+          echo " IST time: $(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M IST')"
+          echo "══════════════════════════════════════════"

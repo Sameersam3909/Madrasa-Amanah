@@ -118,7 +118,20 @@ export default function App() {
   // Core Data
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
-  const [selectedClass, setSelectedClass] = useState("");
+  const [selectedClass, setSelectedClassState] = useState(() => {
+    try {
+      return localStorage.getItem("madrasa_selected_class") || "";
+    } catch {
+      return "";
+    }
+  });
+
+  const setSelectedClass = (val) => {
+    setSelectedClassState(val);
+    try {
+      if (val) localStorage.setItem("madrasa_selected_class", String(val));
+    } catch {}
+  };
   const [dateKey, setDateKey] = useState(today());
   const [sessionKey, setSessionKey] = useState("morning");
   const [records, setRecords] = useState({});
@@ -845,7 +858,13 @@ export default function App() {
       const cached = await offlineDb.classes.toArray();
       if (cached && cached.length) {
         setClasses(cached);
-        if (!selectedClass) setSelectedClass(cached[0]._id || cached[0].id);
+        const saved = localStorage.getItem("madrasa_selected_class");
+        const found = cached.find((c) => String(c._id || c.id) === String(saved));
+        if (found) {
+          setSelectedClass(found._id || found.id);
+        } else if (!selectedClass) {
+          setSelectedClass(cached[0]._id || cached[0].id);
+        }
       }
     } catch (e) {
       console.warn("Cached classes read error:", e.message);
@@ -857,9 +876,20 @@ export default function App() {
       const res = await api.get("/classes");
       setClasses(res.data);
       await cacheClasses(res.data);
-      if (!selectedClass && res.data.length) {
+      const saved = localStorage.getItem("madrasa_selected_class");
+      const found = res.data.find((c) => String(c._id || c.id) === String(saved));
+      if (found) {
+        setSelectedClass(found._id || found.id);
+      } else if (!selectedClass && res.data.length) {
         setSelectedClass(res.data[0]._id || res.data[0].id);
       }
+
+      // Pre-warm all students in background so all classes load in <10ms
+      api.get("/students").then((sRes) => {
+        if (sRes.data && sRes.data.length) {
+          cacheStudents(sRes.data);
+        }
+      }).catch(() => {});
     } catch (err) {
       if (err.response?.status === 401 || err.response?.status === 403) return;
       console.warn("Network classes revalidation note:", err.message);
@@ -869,9 +899,10 @@ export default function App() {
   }
 
   // Load Students and Attendance for Selected Class (Parallel Network Requests)
+  // FIX: Triggered on dashboard, attendance, and monitoring so stats are NEVER 0 on refresh!
   useEffect(() => {
     if (!token || !user || !selectedClass) return;
-    if (tab === "attendance") {
+    if (tab === "attendance" || tab === "dashboard" || tab === "monitoring") {
       loadStudentsAndAttendanceOfflineFirst(selectedClass, dateKey, sessionKey);
     }
   }, [token, user, selectedClass, dateKey, sessionKey, tab]);
@@ -880,9 +911,9 @@ export default function App() {
     if (!classId) return;
     setAttendanceLoading(true);
 
-    // Phase 1: Instant cache hydration
+    // Phase 1: Instant cache hydration (<10ms)
     try {
-      const [cachedStudents, cachedDrafts] = await Promise.all([
+      let [cachedStudents, cachedDrafts] = await Promise.all([
         offlineDb.students.where("classId").equals(String(classId)).toArray(),
         offlineDb.attendanceDrafts
           .where("classId")
@@ -890,6 +921,14 @@ export default function App() {
           .filter((d) => d.dateKey === date && (d.sessionKey === session || !d.sessionKey))
           .toArray()
       ]);
+
+      if (!cachedStudents || cachedStudents.length === 0) {
+        const allCached = await offlineDb.students.toArray();
+        cachedStudents = allCached.filter((s) => {
+          const sClassId = String(s.classId?._id || s.classId?.id || s.classId || "");
+          return sClassId === String(classId);
+        });
+      }
 
       if (cachedStudents.length) {
         const unique = Array.from(new Map(cachedStudents.map((s) => [String(s._id || s.id), s])).values());
@@ -3947,7 +3986,7 @@ export default function App() {
             <div className="section-title">
               <div>
                 <h2>{tab === "reports" ? t.reports : (t.settingsOperations || "Settings & Operations")}</h2>
-                <p className="muted">{t("settings.settingsSub", "Reports, offline cache control, teacher accounts, and audit.")}</p>
+                <p className="muted">{t("settings.settingsSub", "Reports, offline cache control, database storage, and email automation.")}</p>
               </div>
             </div>
 
@@ -4210,106 +4249,6 @@ export default function App() {
             {/* Admin-Only Management Section */}
             {user.role === "admin" && (
               <>
-                {/* Teacher Accounts Management */}
-                <div className="card">
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-                    <div>
-                      <h3 style={{ margin: 0 }}>{t("teachers.teacherAccounts", "Teacher Accounts")}</h3>
-                      <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-                        {t("teachers.teacherAccountsSub", "Manage teacher staff, class assignments, and secure access.")}
-                      </p>
-                    </div>
-                    <button
-                      className="btn primary"
-                      onClick={() => {
-                        setTeacherForm({ name: "", email: "", password: "", assignedClasses: [] });
-                        setShowAddTeacherModal(true);
-                      }}
-                      style={{ minHeight: 36, padding: "6px 12px", fontSize: 12 }}
-                    >
-                      <Plus size={15} /> {t("teachers.addTeacher", "Add Teacher")}
-                    </button>
-                  </div>
-
-                  {teachers.length === 0 ? (
-                    <p className="muted" style={{ fontSize: 13 }}>{t("teachers.noTeachers", "No teachers found.")}</p>
-                  ) : (
-                    <div style={{ display: "grid", gap: 10 }}>
-                      {teachers.map((teacher) => (
-                        <div
-                          key={teacher._id || teacher.id}
-                          className="teacher-card"
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            flexWrap: "wrap",
-                            gap: 10,
-                            padding: 12,
-                            background: "var(--canvas)",
-                            borderRadius: "var(--radius-md)",
-                            border: "1px solid var(--border)"
-                          }}
-                        >
-                          <div style={{ minWidth: 200, flex: 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <strong>{teacher.name}</strong>
-                              <span className={`status-pill ${teacher.active !== false ? "online" : "offline"}`}>
-                                {teacher.active !== false ? t("common.active", "Active") : t("common.deactivated", "Deactivated")}
-                              </span>
-                            </div>
-                            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{teacher.email}</div>
-                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
-                              {teacher.assignedClasses?.length > 0 ? (
-                                teacher.assignedClasses.map((cls) => (
-                                  <span
-                                    key={cls._id || cls.id || cls}
-                                    style={{
-                                      fontSize: 11,
-                                      background: "var(--card-bg)",
-                                      border: "1px solid var(--border)",
-                                      padding: "2px 6px",
-                                      borderRadius: 4
-                                    }}
-                                  >
-                                    {cls.name ? formatClassLabel(cls, lang) : "Class"}
-                                  </span>
-                                ))
-                              ) : (
-                                <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                                  {t("teachers.noClassesAssigned", "No assigned classes")}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            <button
-                              className="btn secondary"
-                              onClick={() => {
-                                setResetPasswordTeacher(teacher);
-                                setNewTeacherPassword("");
-                              }}
-                              style={{ minHeight: 32, fontSize: 12, padding: "4px 10px" }}
-                            >
-                              <Shield size={13} /> {t("teachers.resetPassword", "Reset Password")}
-                            </button>
-                            {teacher.active !== false && (
-                              <button
-                                className="btn secondary"
-                                onClick={() => handleDeactivateTeacher(teacher)}
-                                style={{ minHeight: 32, fontSize: 12, padding: "4px 10px", color: "var(--danger)", borderColor: "var(--danger)" }}
-                              >
-                                <UserX size={13} /> {t("teachers.deactivate", "Deactivate")}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
                 {/* Render Backend Health & Service Status Monitoring */}
                 <div className="card">
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>

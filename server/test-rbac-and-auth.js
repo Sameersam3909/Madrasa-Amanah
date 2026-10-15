@@ -233,7 +233,7 @@ async function runTests() {
       method: "PATCH",
       headers: adminHeaders,
       body: JSON.stringify({
-        reportRecipientEmail: "admin-configured@madrasa.org",
+        reportRecipientEmail: "2300030621cseh1@gmail.com",
         reportTimezone: "Asia/Kolkata",
         reportSchedule: "Mondays at 06:00 AM",
         reportAutomationEnabled: true,
@@ -243,7 +243,7 @@ async function runTests() {
     const updatedSettings = await updateSettingsRes.json();
     assert(
       updateSettingsRes.status === 200 &&
-      updatedSettings.settings.reportRecipientEmail === "admin-configured@madrasa.org" &&
+      updatedSettings.settings.reportRecipientEmail === "2300030621cseh1@gmail.com" &&
       updatedSettings.settings.attendanceCorrectionWindowDays === 14,
       "Admin successfully configures weekly report settings and correction window"
     );

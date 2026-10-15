@@ -30,6 +30,8 @@ services:
         sync: false
       - key: CLIENT_ORIGIN
         sync: false
+      - key: ADMIN_NAME
+        value: Madrasa Administrator
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
@@ -40,17 +42,24 @@ services:
         sync: false
       - key: CLOUDINARY_API_SECRET
         sync: false
+      # Weekly report recipient — default is 2300030621cseh1@gmail.com
+      # Administrators can override this in Settings → Weekly Report Recipient Email
       - key: REPORT_RECIPIENT_EMAIL
         value: 2300030621cseh1@gmail.com
       - key: REPORT_TIMEZONE
         value: Asia/Kolkata
+      # SMTP configuration for weekly email reports
+      # Use your Gmail address for SMTP_USER
+      # Use a Gmail App Password (not your account password) for SMTP_PASS
+      # See: https://myaccount.google.com/apppasswords
       - key: SMTP_HOST
         value: smtp.gmail.com
       - key: SMTP_PORT
-        value: 587
+        value: "587"
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS
         sync: false
       - key: BACKUP_SERVICE_TOKEN
         sync: false
+

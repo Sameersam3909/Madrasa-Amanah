@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import dns from "dns/promises";
 import { SystemSetting, AuditLog, Class, Student, Attendance, SyncMutation } from "./models.js";
 
 let secondaryConnection = null;
@@ -17,10 +18,138 @@ export function extractHostFromUri(uri) {
   if (!uri) return "Not configured";
   try {
     const match = uri.match(/@([^/?#]+)/);
-    return match ? match[1] : "configured";
+    return match ? match[1].split(",")[0].split(":")[0] : "configured";
   } catch {
     return "configured";
   }
+}
+
+export async function testDatabaseConnection(uri, label = "Database") {
+  if (!uri || !uri.trim()) {
+    return {
+      label,
+      configured: false,
+      status: "Not configured",
+      host: "Not configured",
+      latencyMs: null,
+      errorCategory: null,
+      message: `${label} environment variable is not configured.`,
+      suggestedAction: "Configure the relevant database environment variable (e.g. MONGODB_URI or MONGODB_URI_SECONDARY) in server environment settings."
+    };
+  }
+
+  const hostMatch = uri.match(/@([^/?#]+)/);
+  const host = hostMatch ? hostMatch[1].split(",")[0].split(":")[0] : "configured";
+  const isSrv = uri.startsWith("mongodb+srv://");
+
+  let dnsResolved = false;
+  try {
+    if (isSrv) {
+      const records = await dns.resolveSrv(`_mongodb._tcp.${host}`);
+      dnsResolved = Array.isArray(records) && records.length > 0;
+    } else if (host.includes(".")) {
+      await dns.lookup(host);
+      dnsResolved = true;
+    } else {
+      dnsResolved = true;
+    }
+  } catch {
+    dnsResolved = false;
+  }
+
+  const startTime = Date.now();
+  let conn = null;
+  try {
+    conn = await mongoose.createConnection(uri, {
+      serverSelectionTimeoutMS: 6000,
+      connectTimeoutMS: 6000
+    }).asPromise();
+
+    await conn.db.command({ ping: 1 });
+    const latencyMs = Date.now() - startTime;
+    const collections = await conn.db.listCollections().toArray();
+    const colNames = collections.map(c => c.name);
+
+    await conn.close();
+
+    return {
+      label,
+      configured: true,
+      status: "Connected",
+      host,
+      dnsResolved,
+      databaseName: conn.name || "madrasa_attendance",
+      latencyMs,
+      collectionsCount: colNames.length,
+      collections: colNames,
+      errorCategory: null,
+      suggestedAction: "Database is online, responsive, and properly authenticated.",
+      checkedAt: new Date().toISOString()
+    };
+  } catch (err) {
+    if (conn) {
+      try { await conn.close(); } catch {}
+    }
+    const latencyMs = Date.now() - startTime;
+    let errorCategory = "CONNECTION_FAILED";
+    let suggestedAction = "Check MongoDB Atlas cluster status, firewall rules, and IP access list (0.0.0.0/0).";
+
+    const msg = (err.message || "").toLowerCase();
+    if (msg.includes("auth") || msg.includes("bad auth") || msg.includes("authentication")) {
+      errorCategory = "AUTHENTICATION_FAILED";
+      suggestedAction = "Verify the database username and password in the connection URI.";
+    } else if (msg.includes("timeout") || msg.includes("serverselection")) {
+      errorCategory = "SERVER_SELECTION_TIMEOUT";
+      suggestedAction = "Ensure IP access list in MongoDB Atlas includes 0.0.0.0/0 (allow access from anywhere) for Render.";
+    } else if (msg.includes("enotfound") || !dnsResolved) {
+      errorCategory = "DNS_RESOLUTION_ERROR";
+      suggestedAction = "Check that cluster hostname in the connection URI is typed correctly.";
+    }
+
+    return {
+      label,
+      configured: true,
+      status: "Failed",
+      host,
+      dnsResolved,
+      latencyMs,
+      errorCategory,
+      message: err.message ? err.message.replace(/:([^@]+)@/, ":****@") : "Connection failed",
+      suggestedAction,
+      checkedAt: new Date().toISOString()
+    };
+  }
+}
+
+export async function testDualDatabases() {
+  const primaryUri = process.env.MONGODB_URI_PRIMARY || process.env.MONGODB_URI;
+  const secondaryUri = process.env.MONGODB_URI_SECONDARY;
+
+  const [primaryTest, secondaryTest, storageHealth] = await Promise.all([
+    testDatabaseConnection(primaryUri, "Primary Database"),
+    testDatabaseConnection(secondaryUri, "Secondary Database"),
+    getStorageHealthReport()
+  ]);
+
+  return {
+    timestamp: new Date().toISOString(),
+    primary: {
+      ...primaryTest,
+      metrics: storageHealth.primary?.metrics,
+      warningThresholdPercent: storageHealth.primary?.warningThresholdPercent,
+      criticalThresholdPercent: storageHealth.primary?.criticalThresholdPercent,
+      storageStatus: storageHealth.primary?.storageStatus
+    },
+    secondary: {
+      ...secondaryTest
+    },
+    rotation: {
+      enabled: storageHealth.rotationEnabled || false,
+      activeDestination: storageHealth.activeWriteDestination || "primary",
+      notice: "Database rotation is administrative-controlled. Automatic switching is disabled to prevent split-brain state."
+    },
+    lastBackup: storageHealth.lastBackup
+  };
 }
 
 export async function getSecondaryConnection() {

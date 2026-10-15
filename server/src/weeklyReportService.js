@@ -311,7 +311,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
           actorId,
           action: "report.weekly_email_sent",
           entityType: "Report",
-          details: { recipient: targetRecipient, from, to, messageId: info.messageId, trigger }
+          details: { recipient: targetRecipient, from, to, weekKey: `${from}_${to}`, messageId: info.messageId, trigger }
         });
       }
 

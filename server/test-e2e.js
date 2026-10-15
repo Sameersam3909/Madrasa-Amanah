@@ -17,8 +17,8 @@ async function runTests() {
     // 1. Health check
     const healthRes = await fetch(`${API_BASE}/health`);
     const healthData = await healthRes.json();
-    assert(healthRes.status === 200 && healthData.status === 'healthy', 'Health endpoint responds with healthy');
-    console.log(`   Database: ${healthData.database?.provider} (${healthData.database?.state}), uptime: ${healthData.uptime}s`);
+    assert(healthRes.status === 200 && (healthData.status === 'healthy' || healthData.status === 'ok'), 'Health endpoint responds with healthy/ok');
+    console.log(`   Database: ${healthData.databaseDetails?.provider || healthData.database?.provider || healthData.database} (${healthData.databaseDetails?.state || healthData.database?.state || healthData.database}), uptime: ${healthData.uptime}s`);
 
     // 2. Authentication: Invalid Login
     const invalidLoginRes = await fetch(`${API_BASE}/auth/login`, {

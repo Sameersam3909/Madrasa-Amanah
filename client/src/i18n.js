@@ -190,8 +190,8 @@ export function localizeSection(section, lang = "en") {
     morning: { ur: "صبح", te: "ఉదయం" },
     afternoon: { ur: "دوپہر", te: "మధ్యాహ్నం" },
     evening: { ur: "شام", te: "సాయంత్రం" },
-    "full-day": { ur: "پورا دن", te: "పూర్తి రోజు" },
-    "full day": { ur: "پورا دن", te: "పూర్తి రోజు" }
+    "full-day": { ur: "پورا دن", te: "రోజంతా" },
+    "full day": { ur: "پورا دن", te: "రోజంతా" }
   };
   return map[sec]?.[lang] || section;
 }
@@ -277,20 +277,21 @@ function translateWords(text, lang) {
 /**
  * Localize Student Names in Urdu and Telugu
  */
-export function localizeStudentName(name, lang = "en") {
-  if (!name || lang === "en") return name;
-  const key = String(name).trim();
-  const directMap = {
-    "Muhammad Zaid": { ur: "محمد زید", te: "ముహమ్మద్ జైద్" },
-    "Abdullah Umar": { ur: "عبد اللہ عمر", te: "అబ్దుల్లా ఉమర్" },
-    "Fatima Zahra": { ur: "فاطمہ زہرا", te: "ఫాతిమా జహ్రా" },
-    "Bilal Habashi": { ur: "بلال حبشی", te: "బిలాల్ హబషీ" },
-    "Mariam Siddiq": { ur: "مریم صدیق", te: "మరియం సిద్దీఖ్" },
-    "Muhammad Bilal": { ur: "محمد بلال", te: "ముహమ్మద్ బిలాల్" },
-    "Muhammad Bilal Test": { ur: "محمد بلال (امتحان)", te: "ముహమ్మద్ బిలాల్ (టెస్ట్)" },
-    "Muhammad Bilal Test Updated": { ur: "محمد بلال (امتحان)", te: "ముహమ్మద్ బిలాల్ (టెస్ట్)" }
-  };
-  return directMap[key]?.[lang] || translateWords(key, lang);
+export function localizeStudentName(input, lang = "en") {
+  if (!input) return "";
+  if (typeof input === "object" && input !== null) {
+    const nameEn = (input.nameEn || "").trim();
+    const nameUr = (input.nameUr || "").trim();
+    const nameTe = (input.nameTe || "").trim();
+    const canonical = (input.name || input.fullName || "").trim();
+    const admissionNo = (input.admissionNo || input.admissionNumber || "").trim();
+    if (lang === "ur") return nameUr || canonical || nameEn || nameTe || admissionNo;
+    if (lang === "te") return nameTe || canonical || nameEn || nameUr || admissionNo;
+    return nameEn || canonical || nameUr || nameTe || admissionNo;
+  }
+  const key = String(input).trim();
+  if (!key || lang === "en") return key;
+  return translateWords(key, lang);
 }
 
 /**
@@ -298,14 +299,5 @@ export function localizeStudentName(name, lang = "en") {
  */
 export function localizeGuardianName(name, lang = "en") {
   if (!name || lang === "en") return name;
-  const key = String(name).trim();
-  const directMap = {
-    "Farooq Khan": { ur: "فاروق خان", te: "ఫారూక్ ఖాన్" },
-    "Umar Farooq": { ur: "عمر فاروق", te: "ఉమర్ ఫారూక్" },
-    "Hassan Ali": { ur: "حسن علی", te: "హసన్ అలీ" },
-    "Ibrahim": { ur: "ابراہیم", te: "ఇబ్రహీం" },
-    "Ibrahim Test": { ur: "ابراہیم", te: "ఇబ్రహీం" },
-    "Abu Bakr": { ur: "ابو بکر", te: "అబూ బకర్" }
-  };
-  return directMap[key]?.[lang] || translateWords(key, lang);
+  return translateWords(String(name).trim(), lang);
 }

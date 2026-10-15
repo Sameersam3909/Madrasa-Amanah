@@ -218,21 +218,7 @@
     "teacher": "استاد",
     "admin": "ایڈمن",
     "markedBy": "حاضری لگانے والا",
-    "updatedBy": "اپ ڈیٹ کنندہ",
-    "teacherAccounts": "اساتذہ کے اکاؤنٹس",
-    "teacherAccountsSub": "اساتذہ کا عملہ، کلاس کی تفویض اور محفوظ رسائی کا انتظام کریں۔",
-    "addTeacher": "استاد شامل کریں",
-    "noTeachers": "کوئی استاد نہیں ملا۔",
-    "assignedClasses": "تفویض کردہ کلاسیں",
-    "noClassesAssigned": "کوئی کلاس تفویض نہیں",
-    "resetPassword": "پاس ورڈ ری سیٹ کریں",
-    "deactivate": "غیر فعال کریں",
-    "addTeacherModalTitle": "استاد کا اکاؤنٹ شامل کریں",
-    "assignClasses": "کلاسیں تفویض کریں",
-    "createTeacherBtn": "استاد بنائیں",
-    "resetPasswordTitle": "استاد کا پاس ورڈ ری سیٹ کریں",
-    "newPassword": "نیا پاس ورڈ",
-    "setNewPassword": "نیا پاس ورڈ درج کریں"
+    "updatedBy": "اپ ڈیٹ کنندہ"
   },
   "faceMatching": {
     "takePhoto": "تصویر کھینچیں",
@@ -315,13 +301,7 @@
     "studentsExcel": "طلبہ (Excel)",
     "summaryView": "خلاصہ دیکھیں",
     "student": "طالب علم",
-    "ratePercent": "تناسب %",
-    "selectClassPrompt": "رجسٹر برآمد کرنے کے لیے اوپر سے کلاس منتخب کریں۔",
-    "selectDatesPrompt": "براہ کرم شروع اور اختتام دونوں تاریخیں متعین کریں۔",
-    "invalidDateRange": "شروع کی تاریخ اختتامی تاریخ سے پہلے یا برابر ہونی چاہیے۔",
-    "manualOnly": "صرف دستی محرک",
-    "lastDelivery": "آخری ترسیل",
-    "nextScheduledRun": "اگلی شیڈول ترسیل"
+    "ratePercent": "تناسب %"
   },
   "settings": {
     "settingsTitle": "ترتیبات اور انتظامی امور",
@@ -332,40 +312,7 @@
     "checkRetentionStatus": "برقرار رکھنے کی حیثیت چیک کریں",
     "fullDatabaseBackup": "ڈیٹا بیس کا مکمل بیک اپ",
     "fullDatabaseBackupSub": "جماعتوں، طلبہ، حاضری اور آڈٹ لاگز کا منظم JSON بیک اپ ڈاؤن لوڈ کریں۔",
-    "downloadBackupJson": "مکمل بیک اپ (.json) ڈاؤن لوڈ کریں",
-    "systemAutomation": "ہفتہ وار خودکاری اور برقراری کی ترتیبات",
-    "systemAutomationSub": "خودکار ہفتہ وار رپورٹ وصول کنندہ، ٹائم زون اور حاضری تصحیح کی حد طے کریں۔",
-    "reportRecipientEmail": "ہفتہ وار رپورٹ کا ای میل پتہ",
-    "scheduleTimezone": "شیڈول کا ٹائم زون",
-    "correctionWindowDays": "حاضری کی تصحیح کی مدت (دن)",
-    "enableWeeklyCron": "خودکار ہفتہ وار ای میل ترسیل فعال کریں",
-    "saveSettings": "ترتیبات محفوظ کریں"
-  },
-  "storage": {
-    "title": "مونگو ڈی بی ثانوی اسٹوریج اور گردش",
-    "subtitle": "دوہری منزل مونگو ڈی بی ایٹلس فیل اوور اور اسٹوریج کوٹہ کی گردش۔",
-    "active": "فعال",
-    "clusterName": "بنیادی کلسٹر اسٹوریج",
-    "usageUnavailable": "اسٹوریج کا استعمال دستیاب نہیں ہے",
-    "used": "استعمال شدہ",
-    "secondaryCluster": "ثانوی کلسٹر",
-    "configured": "ترتیب شدہ (backup.oqduj9s.mongodb.net)",
-    "notConfigured": "ماحول میں ترتیب نہیں دیا گیا",
-    "ready": "تیار",
-    "unconfigured": "غیر ترتیب شدہ",
-    "verifySecondary": "ثانوی انڈیکسز کی تصدیق کریں",
-    "rotateDestination": "ثانوی میں منتقل کریں",
-    "recentRotations": "حالیہ اسٹوریج گردشیں"
-  },
-  "auth": {
-    "profileSecurity": "پروفائل اور سیکیورٹی",
-    "manageCredentials": "اپنے اکاؤنٹ کی معلومات اور ذاتی پاس ورڈ کا انتظام کریں۔",
-    "changePassword": "پاس ورڈ تبدیل کریں",
-    "currentPassword": "موجودہ پاس ورڈ",
-    "newPassword": "نیا پاس ورڈ",
-    "confirmPassword": "نئے پاس ورڈ کی تصدیق کریں",
-    "minCharacters": "کم از کم 6 حروف",
-    "updatePasswordBtn": "پاس ورڈ اپ ڈیٹ کریں"
+    "downloadBackupJson": "مکمل بیک اپ (.json) ڈاؤن لوڈ کریں"
   },
   "authentication": {
     "login": "سائن اِن",
@@ -399,40 +346,5 @@
     "viewProfileOf": "پروفائل دیکھیں - {{name}}",
     "editDetailsOf": "تفصیلات میں ترمیم - {{name}}",
     "actionsFor": "اعمال برائے {{name}}"
-  },
-  "session": {
-    "warningTitle": "سیشن ختم ہونے والا ہے",
-    "warningMessage": "غیر فعالیت کی وجہ سے آپ کا سیشن {{time}} میں خودکار طور پر بند ہو جائے گا۔",
-    "warningAttendanceSaved": "آپ کی حاضری کا ڈرافٹ اس ڈیوائس پر محفوظ کر لیا گیا ہے۔",
-    "continueSession": "سیشن جاری رکھیں",
-    "signOut": "سائن آؤٹ کریں",
-    "inactivityExpired": "2 گھنٹے غیر فعال رہنے کی وجہ سے آپ کا سیشن ختم ہو گیا ہے۔ براہ کرم دوبارہ سائن ان کریں۔",
-    "maxLifetimeExpired": "3 گھنٹے کی زیادہ سے زیادہ سیشن مدت مکمل ہو گئی۔ براہ کرم دوبارہ سائن ان کریں۔",
-    "refreshSuccess": "سیشن کی مدت کامیابی سے بڑھا دی گئی۔"
-  },
-  "healthMonitoring": {
-    "title": "بیک اینڈ ہیلتھ اور سروس کی صورتحال",
-    "subtitle": "Render API اور MongoDB Atlas کے رابطے کی لائیو نگرانی۔",
-    "status": "صورتحال",
-    "healthy": "صحت مند (فعال)",
-    "degraded": "متاثرہ",
-    "unavailable": "دستیاب نہیں",
-    "checking": "جانچ پڑتال جاری ہے…",
-    "databaseStatus": "ڈیٹابیس (MongoDB)",
-    "connected": "منسلک",
-    "disconnected": "غیر منسلک",
-    "responseTime": "جواب کا وقت",
-    "lastCheck": "آخری جانچ",
-    "consecutiveFailures": "مسلسل ناکامیاں",
-    "checkNow": "ابھی چیک کریں",
-    "renderFreeTierNote": "Render مفت سروسز 15 منٹ کی عدم سرگرمی کے بعد بند ہو جاتی ہیں۔ 10 منٹ کا خودکار چیک سروس کو فعال رکھنے میں مدد کرتا ہے۔ مکمل بلاتعطل رسائی کے لیے ہمیشہ آن پلان استعمال کیا جا سکتا ہے۔",
-    "deploymentLogs": "Render لاگز",
-    "workflowRuns": "GitHub Actions مانیٹر"
-  },
-  "dataStatus": {
-    "cachedData": "محفوظ شدہ ڈیٹا (آف لائن)",
-    "freshlySynced": "تازہ ترین مطابقت پذیر",
-    "lastUpdated": "آخری بار اپ ڈیٹ {{time}}",
-    "loadingData": "کلاؤڈ سے تازہ ڈیٹا لوڈ ہو رہا ہے…"
   }
 }
