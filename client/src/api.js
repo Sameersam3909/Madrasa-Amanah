@@ -25,9 +25,10 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      const msg = error.response?.data?.message || "Session expired. Please sign in again.";
       localStorage.removeItem("madrasa_token");
       localStorage.removeItem("madrasa_user");
-      window.dispatchEvent(new CustomEvent("auth:unauthorized"));
+      window.dispatchEvent(new CustomEvent("auth:unauthorized", { detail: { message: msg } }));
     }
     return Promise.reject(error);
   }

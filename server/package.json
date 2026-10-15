@@ -7,7 +7,8 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "seed:admin": "node src/seedAdmin.js",
-    "test": "node test-student-management.js && node test-e2e.js",
+    "test": "node test-rbac-and-auth.js && node test-student-management.js && node test-e2e.js",
+    "test:rbac": "node test-rbac-and-auth.js",
     "test:student-mgmt": "node test-student-management.js",
     "test:monthly-backup": "node test-monthly-backup.js"
   },

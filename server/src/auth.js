@@ -22,7 +22,7 @@ export async function requireAuth(req, res, next) {
     if (!authHeader) return res.status(401).json({ message: "Please sign in." });
     const payload = jwt.verify(authHeader, process.env.JWT_SECRET);
     const user = await User.findById(payload.sub).populate("assignedClasses", "_id name");
-    if (!user || !user.active) return res.status(401).json({ message: "Account unavailable." });
+    if (!user || !user.active) return res.status(401).json({ message: "Account unavailable or deactivated. Please contact an administrator." });
     req.user = user;
     next();
   } catch {

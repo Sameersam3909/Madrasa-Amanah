@@ -2199,3 +2199,61 @@ input[type="email"],
   unicode-bidi: embed;
 }
 
+/* STORAGE MONITORING & ROTATION STYLES */
+.storage-meter {
+  width: 100%;
+  height: 12px;
+  background: var(--canvas);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+}
+
+.storage-meter-fill {
+  height: 100%;
+  transition: width 0.4s ease;
+}
+
+.storage-meter-fill.normal {
+  background: var(--success);
+}
+
+.storage-meter-fill.warning {
+  background: var(--warning);
+}
+
+.storage-meter-fill.critical {
+  background: var(--danger);
+}
+
+.status-pill.warning {
+  background: rgba(180, 83, 9, 0.12);
+  color: #B45309;
+  border: 1px solid rgba(180, 83, 9, 0.25);
+}
+
+.status-pill.critical {
+  background: rgba(220, 38, 38, 0.12);
+  color: #DC2626;
+  border: 1px solid rgba(220, 38, 38, 0.25);
+}
+
+.teacher-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.teacher-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+

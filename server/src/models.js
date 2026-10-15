@@ -68,9 +68,31 @@ const auditSchema = new mongoose.Schema({
   details: { type: mongoose.Schema.Types.Mixed, default: {} }
 }, { timestamps: true });
 
+const systemSettingSchema = new mongoose.Schema({
+  key: { type: String, required: true, unique: true, default: "global" },
+  reportRecipientEmail: { type: String, default: "" },
+  reportTimezone: { type: String, default: "Asia/Kolkata" },
+  reportSchedule: { type: String, default: "Mondays at 06:00 AM" },
+  reportAutomationEnabled: { type: Boolean, default: false },
+  lastReportSuccess: { type: mongoose.Schema.Types.Mixed, default: null },
+  lastReportFailure: { type: mongoose.Schema.Types.Mixed, default: null },
+  nextReportRun: { type: String, default: "" },
+  attendanceCorrectionWindowDays: { type: Number, default: 7 },
+  activeWriteTarget: { type: String, enum: ["primary", "secondary"], default: "primary" },
+  databaseRotationEnabled: { type: Boolean, default: false },
+  rotationHistory: [{
+    timestamp: { type: Date, default: Date.now },
+    from: String,
+    to: String,
+    reason: String,
+    trigger: String
+  }]
+}, { timestamps: true });
+
 export const User = mongoose.model("User", userSchema);
 export const Class = mongoose.model("Class", classSchema);
 export const Student = mongoose.model("Student", studentSchema);
 export const Attendance = mongoose.model("Attendance", attendanceSchema);
 export const SyncMutation = mongoose.model("SyncMutation", syncMutationSchema);
 export const AuditLog = mongoose.model("AuditLog", auditSchema);
+export const SystemSetting = mongoose.model("SystemSetting", systemSettingSchema);

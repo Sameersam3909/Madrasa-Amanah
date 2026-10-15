@@ -30,6 +30,7 @@ import {
   Phone,
   Plus,
   RefreshCw,
+  Save,
   Search,
   Settings,
   Shield,
@@ -238,6 +239,32 @@ export default function App() {
     from: new Date().toLocaleDateString("en-CA").slice(0, 7) + "-01",
     to: today()
   });
+
+  // Teacher Accounts Management
+  const [teachers, setTeachers] = useState([]);
+  const [showAddTeacherModal, setShowAddTeacherModal] = useState(false);
+  const [teacherForm, setTeacherForm] = useState({ name: "", email: "", password: "", assignedClasses: [] });
+  const [resetPasswordTeacher, setResetPasswordTeacher] = useState(null);
+  const [newTeacherPassword, setNewTeacherPassword] = useState("");
+
+  // Storage Rotation & Monitoring
+  const [storageReport, setStorageReport] = useState(null);
+  const [storageLoading, setStorageLoading] = useState(false);
+
+  // System Settings & Email Automation
+  const [emailStatus, setEmailStatus] = useState(null);
+  const [settingsForm, setSettingsForm] = useState({
+    reportRecipientEmail: "",
+    reportTimezone: "Asia/Kolkata",
+    reportSchedule: "Mondays at 06:00 AM",
+    reportAutomationEnabled: false,
+    attendanceCorrectionWindowDays: 7
+  });
+
+  // User Password Change Form
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [passwordNotice, setPasswordNotice] = useState("");
+  const [passwordError, setPasswordError] = useState("");
 
   const t = useMemo(() => createTranslator(lang), [lang]);
   const activeClass = classes.find((c) => String(c._id || c.id) === String(selectedClass));
@@ -610,8 +637,9 @@ export default function App() {
 
   // Listen for 401 Unauthorized globally
   useEffect(() => {
-    const handleUnauthorized = () => {
-      logout();
+    const handleUnauthorized = (e) => {
+      const msg = e?.detail?.message || "Session expired. Please sign in again.";
+      logout(msg);
     };
     window.addEventListener("auth:unauthorized", handleUnauthorized);
     return () => window.removeEventListener("auth:unauthorized", handleUnauthorized);
@@ -657,7 +685,7 @@ export default function App() {
       })
       .catch((e) => {
         if (e.response?.status === 401) {
-          logout();
+          logout(e.response?.data?.message || "Session expired. Please sign in again.");
         }
       });
   }, [token]);
@@ -674,7 +702,11 @@ export default function App() {
       setClasses(res.data);
       await cacheClasses(res.data);
       if (!selectedClass && res.data.length) setSelectedClass(res.data[0]._id || res.data[0].id);
-    } catch {
+    } catch (err) {
+      // Do not treat 401 or 403 responses as offline network failures!
+      if (err.response?.status === 401 || err.response?.status === 403) {
+        return;
+      }
       const cached = await offlineDb.classes.toArray();
       if (cached.length) {
         setClasses(cached);
@@ -697,7 +729,10 @@ export default function App() {
       const unique = Array.from(new Map(res.data.map((s) => [String(s._id || s.id), s])).values());
       setStudents(unique);
       await cacheStudents(unique, classId);
-    } catch {
+    } catch (err) {
+      if (err.response?.status === 401 || err.response?.status === 403) {
+        return;
+      }
       const cached = await offlineDb.students.where("classId").equals(String(classId)).toArray();
       const unique = Array.from(new Map(cached.map((s) => [String(s._id || s.id), s])).values());
       setStudents(unique);
@@ -717,7 +752,10 @@ export default function App() {
       setRecords(next);
       setConfirmedRecords(confirmed);
       setNotes(noteMap);
-    } catch {
+    } catch (err) {
+      if (err.response?.status === 401 || err.response?.status === 403) {
+        return;
+      }
       const drafts = await offlineDb.attendanceDrafts
         .where("classId")
         .equals(String(classId))
@@ -762,7 +800,7 @@ export default function App() {
     }
   }
 
-  function logout() {
+  function logout(msg = "") {
     localStorage.removeItem("madrasa_token");
     localStorage.removeItem("madrasa_user");
     setToken("");
@@ -770,6 +808,216 @@ export default function App() {
     setClasses([]);
     setStudents([]);
     stopCamera();
+    if (msg) {
+      setError(msg);
+    }
+  }
+
+  // System Settings, Teachers & Storage Admin loaders
+  useEffect(() => {
+    if (!token || !user) return;
+    if (tab === "more" || tab === "reports") {
+      fetchEmailStatus();
+      if (user.role === "admin") {
+        fetchTeachers();
+        fetchStorageStatus();
+        fetchSystemSettings();
+      }
+    }
+  }, [token, user, tab]);
+
+  async function fetchTeachers() {
+    try {
+      const res = await api.get("/admin/users");
+      setTeachers(res.data);
+    } catch (err) {
+      console.warn("fetchTeachers error:", err.message);
+    }
+  }
+
+  async function fetchStorageStatus() {
+    try {
+      setStorageLoading(true);
+      const res = await api.get("/admin/storage/status");
+      setStorageReport(res.data);
+    } catch (err) {
+      console.warn("fetchStorageStatus error:", err.message);
+    } finally {
+      setStorageLoading(false);
+    }
+  }
+
+  async function fetchEmailStatus() {
+    try {
+      const res = await api.get("/reports/weekly/status");
+      setEmailStatus(res.data);
+    } catch (err) {
+      console.warn("fetchEmailStatus error:", err.message);
+    }
+  }
+
+  async function fetchSystemSettings() {
+    try {
+      const res = await api.get("/settings");
+      if (res.data) {
+        setSettingsForm({
+          reportRecipientEmail: res.data.reportRecipientEmail || "",
+          reportTimezone: res.data.reportTimezone || "Asia/Kolkata",
+          reportSchedule: res.data.reportSchedule || "Mondays at 06:00 AM",
+          reportAutomationEnabled: Boolean(res.data.reportAutomationEnabled),
+          attendanceCorrectionWindowDays: res.data.attendanceCorrectionWindowDays ?? 7
+        });
+      }
+    } catch (err) {
+      console.warn("fetchSystemSettings error:", err.message);
+    }
+  }
+
+  async function verifySecondaryStorage() {
+    try {
+      setStorageLoading(true);
+      setError("");
+      setNotice("Verifying secondary MongoDB Atlas cluster...");
+      const res = await api.post("/admin/storage/verify-secondary");
+      if (res.data?.ok) {
+        setNotice(`Secondary database verified successfully ✓ Collections: ${Object.keys(res.data.collections || {}).join(", ")}`);
+        addNotification({
+          title: "Storage Verified",
+          message: "Secondary MongoDB Atlas cluster connection and collections verified.",
+          type: "success"
+        });
+      } else {
+        setError(`Secondary database verification failed: ${res.data?.message || "Unknown error"}`);
+      }
+      fetchStorageStatus();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setStorageLoading(false);
+    }
+  }
+
+  async function rotateStorageDestination() {
+    if (!window.confirm("Are you sure you want to trigger storage rotation to the secondary MongoDB Atlas cluster? New attendance records will write to the secondary destination.")) {
+      return;
+    }
+    try {
+      setStorageLoading(true);
+      setError("");
+      setNotice("Initiating storage rotation...");
+      const res = await api.post("/admin/storage/rotate", { reason: "Admin manual rotation trigger" });
+      setNotice(`Storage rotated to ${res.data?.activeStorage || "secondary"} ✓`);
+      addNotification({
+        title: "Storage Rotated",
+        message: `Database active destination is now ${res.data?.activeStorage || "secondary"}.`,
+        type: "success"
+      });
+      fetchStorageStatus();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setStorageLoading(false);
+    }
+  }
+
+  async function handleCreateTeacher(e) {
+    e.preventDefault();
+    setError("");
+    setNotice("");
+    try {
+      await api.post("/admin/users", {
+        name: teacherForm.name,
+        email: teacherForm.email,
+        password: teacherForm.password,
+        role: "teacher",
+        assignedClasses: teacherForm.assignedClasses
+      });
+      setNotice(`Teacher account for ${teacherForm.name} created successfully.`);
+      setShowAddTeacherModal(false);
+      setTeacherForm({ name: "", email: "", password: "", assignedClasses: [] });
+      fetchTeachers();
+    } catch (err) {
+      setError(errText(err));
+    }
+  }
+
+  async function handleDeactivateTeacher(teacher) {
+    if (!window.confirm(`Are you sure you want to deactivate teacher ${teacher.name}? Safe account rules apply: historical attendance records, class logs, and audit trails will be strictly preserved.`)) {
+      return;
+    }
+    setError("");
+    setNotice("");
+    try {
+      await api.delete(`/admin/users/${teacher._id || teacher.id}`);
+      setNotice(`Teacher ${teacher.name} has been deactivated. Historical records preserved.`);
+      fetchTeachers();
+    } catch (err) {
+      setError(errText(err));
+    }
+  }
+
+  async function handleResetTeacherPassword(e) {
+    e.preventDefault();
+    if (!resetPasswordTeacher) return;
+    setError("");
+    setNotice("");
+    try {
+      await api.post(`/admin/users/${resetPasswordTeacher._id || resetPasswordTeacher.id}/reset-password`, {
+        newPassword: newTeacherPassword
+      });
+      setNotice(`Password for ${resetPasswordTeacher.name} was reset successfully.`);
+      setResetPasswordTeacher(null);
+      setNewTeacherPassword("");
+    } catch (err) {
+      setError(errText(err));
+    }
+  }
+
+  async function handleSaveSettings(e) {
+    e.preventDefault();
+    setError("");
+    setNotice("");
+    try {
+      await api.patch("/settings", settingsForm);
+      setNotice("System settings updated successfully ✓");
+      addNotification({
+        title: "Settings Saved",
+        message: "Weekly report automation and attendance correction window settings updated.",
+        type: "success"
+      });
+      fetchEmailStatus();
+    } catch (err) {
+      setError(errText(err));
+    }
+  }
+
+  async function handlePasswordChange(e) {
+    e.preventDefault();
+    setPasswordError("");
+    setPasswordNotice("");
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError("New passwords do not match.");
+      return;
+    }
+    if (passwordForm.newPassword.length < 6) {
+      setPasswordError("Password must be at least 6 characters.");
+      return;
+    }
+    try {
+      await api.post("/auth/change-password", {
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword
+      });
+      setPasswordNotice("Password changed successfully ✓");
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      addNotification({
+        title: "Password Changed",
+        message: "Your account password has been updated securely.",
+        type: "success"
+      });
+    } catch (err) {
+      setPasswordError(errText(err));
+    }
   }
 
   async function signIn(e) {
@@ -1503,7 +1751,9 @@ export default function App() {
     setNotice("Generating and sending weekly report email...");
     setLoading(true);
     try {
-      const res = await api.post("/reports/send-weekly-email", { recipientEmail: "2300030621cseh1@gmail.com" });
+      const res = await api.post("/reports/send-weekly-email", {
+        recipientEmail: settingsForm.reportRecipientEmail || undefined
+      });
       if (res.data?.delivered) {
         setNotice(`Weekly report email sent successfully to ${res.data.recipient} ✓`);
         addNotification({
@@ -1512,13 +1762,14 @@ export default function App() {
           type: "success"
         });
       } else {
-        setNotice(`Weekly report generated (${res.data?.bytes} bytes). ${res.data?.message || ""}`);
+        setNotice(`Weekly report generated (${res.data?.bytes || 0} bytes). ${res.data?.message || ""}`);
         addNotification({
           title: "Weekly Report Generated",
           message: `Workbook created for ${res.data?.recipient || "admin"}. Delivery status: ${res.data?.message || "Pending SMTP configuration."}`,
           type: "info"
         });
       }
+      fetchEmailStatus();
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -1551,7 +1802,12 @@ export default function App() {
             <p className="muted">Offline-first mobile attendance register</p>
           </div>
 
-          {error && <div className="alert error">{error}</div>}
+          {error && (
+            <div className="alert error" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <AlertCircle size={18} style={{ flexShrink: 0 }} />
+              <span>{error}</span>
+            </div>
+          )}
 
           <label style={{ marginBottom: 14 }}>
             {t.email}
@@ -2835,26 +3091,28 @@ export default function App() {
                     <FileSpreadsheet size={15} /> Excel
                   </button>
                 </div>
-                <button
-                  className="btn primary"
-                  onClick={() => {
-                    setStudentForm({
-                      admissionNo: "",
-                      name: "",
-                      gender: "",
-                      dob: "",
-                      guardianName: "",
-                      guardianPhone: "",
-                      address: "",
-                      enrollmentDate: today(),
-                      consentGiven: true
-                    });
-                    setTab("add-student");
-                  }}
-                  style={{ minHeight: 40, padding: "6px 14px", fontSize: 13 }}
-                >
-                  <Plus size={16} /> {t.addStudent}
-                </button>
+                {user?.role === "admin" && (
+                  <button
+                    className="btn primary"
+                    onClick={() => {
+                      setStudentForm({
+                        admissionNo: "",
+                        name: "",
+                        gender: "",
+                        dob: "",
+                        guardianName: "",
+                        guardianPhone: "",
+                        address: "",
+                        enrollmentDate: today(),
+                        consentGiven: true
+                      });
+                      setTab("add-student");
+                    }}
+                    style={{ minHeight: 40, padding: "6px 14px", fontSize: 13 }}
+                  >
+                    <Plus size={16} /> {t.addStudent}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -3099,41 +3357,45 @@ export default function App() {
                                     <span>{t.viewProfile}</span>
                                   </button>
 
-                                  <button
-                                    type="button"
-                                    className="student-action-item"
-                                    onClick={() => {
-                                      setActiveMenuStudentId(null);
-                                      openEditStudent(s);
-                                    }}
-                                  >
-                                    <Edit3 size={15} color="var(--primary)" />
-                                    <span>{t.editDetails}</span>
-                                  </button>
+                                  {user?.role === "admin" && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="student-action-item"
+                                        onClick={() => {
+                                          setActiveMenuStudentId(null);
+                                          openEditStudent(s);
+                                        }}
+                                      >
+                                        <Edit3 size={15} color="var(--primary)" />
+                                        <span>{t.editDetails}</span>
+                                      </button>
 
-                                  <button
-                                    type="button"
-                                    className="student-action-item"
-                                    onClick={() => {
-                                      setActiveMenuStudentId(null);
-                                      setViewingStudent(s);
-                                    }}
-                                  >
-                                    <Camera size={15} color="var(--primary)" />
-                                    <span>{t.changePhoto}</span>
-                                  </button>
+                                      <button
+                                        type="button"
+                                        className="student-action-item"
+                                        onClick={() => {
+                                          setActiveMenuStudentId(null);
+                                          setViewingStudent(s);
+                                        }}
+                                      >
+                                        <Camera size={15} color="var(--primary)" />
+                                        <span>{t.changePhoto}</span>
+                                      </button>
 
-                                  <button
-                                    type="button"
-                                    className="student-action-item"
-                                    onClick={() => {
-                                      setActiveMenuStudentId(null);
-                                      openTransferClass(s);
-                                    }}
-                                  >
-                                    <ArrowRightLeft size={15} color="var(--primary)" />
-                                    <span>{t.changeClass}</span>
-                                  </button>
+                                      <button
+                                        type="button"
+                                        className="student-action-item"
+                                        onClick={() => {
+                                          setActiveMenuStudentId(null);
+                                          openTransferClass(s);
+                                        }}
+                                      >
+                                        <ArrowRightLeft size={15} color="var(--primary)" />
+                                        <span>{t.changeClass}</span>
+                                      </button>
+                                    </>
+                                  )}
 
                                   <button
                                     type="button"
@@ -3147,34 +3409,38 @@ export default function App() {
                                     <span>{t.attendanceHistory}</span>
                                   </button>
 
-                                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+                                  {user?.role === "admin" && (
+                                    <>
+                                      <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
 
-                                  {/* Activate / Deactivate Toggle */}
-                                  {s.active !== false ? (
-                                    <button
-                                      type="button"
-                                      className="student-action-item"
-                                      style={{ color: "var(--warning)" }}
-                                      onClick={() => {
-                                        setActiveMenuStudentId(null);
-                                        requestStudentAction("deactivate", s);
-                                      }}
-                                    >
-                                      <UserX size={15} />
-                                      <span>{t.deactivate}</span>
-                                    </button>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      className="student-action-item success"
-                                      onClick={() => {
-                                        setActiveMenuStudentId(null);
-                                        requestStudentAction("activate", s);
-                                      }}
-                                    >
-                                      <UserCheck size={15} />
-                                      <span>{t.activate}</span>
-                                    </button>
+                                      {/* Activate / Deactivate Toggle */}
+                                      {s.active !== false ? (
+                                        <button
+                                          type="button"
+                                          className="student-action-item"
+                                          style={{ color: "var(--warning)" }}
+                                          onClick={() => {
+                                            setActiveMenuStudentId(null);
+                                            requestStudentAction("deactivate", s);
+                                          }}
+                                        >
+                                          <UserX size={15} />
+                                          <span>{t.deactivate}</span>
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          className="student-action-item success"
+                                          onClick={() => {
+                                            setActiveMenuStudentId(null);
+                                            requestStudentAction("activate", s);
+                                          }}
+                                        >
+                                          <UserCheck size={15} />
+                                          <span>{t.activate}</span>
+                                        </button>
+                                      )}
+                                    </>
                                   )}
 
                                   {/* Archive / Restore (Admin only) */}
@@ -3435,33 +3701,11 @@ export default function App() {
               </div>
             </div>
 
+            {/* Download Registers */}
             <div className="card">
               <h3 style={{ marginBottom: 10 }}>{t("reports.downloadRegisters", "Download Registers")}</h3>
-              <div className="download-grid-mobile">
-                <button className="download-card-mobile" onClick={() => downloadReport("xlsx")} disabled={loading}>
-                  <FileSpreadsheet size={22} />
-                  <div>
-                    <strong>{t("reports.excelSpreadsheet", "Excel Spreadsheet")}</strong>
-                    <span>{t("reports.xlsxFormat", ".xlsx format")}</span>
-                  </div>
-                </button>
-                <button className="download-card-mobile" onClick={() => downloadReport("csv")} disabled={loading}>
-                  <Download size={22} />
-                  <div>
-                    <strong>{t("reports.csvExport", "CSV Export")}</strong>
-                    <span>{t("reports.utf8Bom", "UTF-8 with BOM")}</span>
-                  </div>
-                </button>
-                <button className="download-card-mobile" onClick={() => downloadReport("pdf")} disabled={loading}>
-                  <FileSpreadsheet size={22} />
-                  <div>
-                    <strong>{t("reports.printablePdf", "Printable PDF")}</strong>
-                    <span>{t("reports.landscapeLayout", "Landscape layout")}</span>
-                  </div>
-                </button>
-              </div>
 
-              <div className="responsive-grid-2" style={{ marginTop: 10 }}>
+              <div className="responsive-grid-2" style={{ marginBottom: 10 }}>
                 <label>
                   {t.from}
                   <input
@@ -3479,50 +3723,111 @@ export default function App() {
                   />
                 </label>
               </div>
+
+              {(!selectedClass || !reportRange.from || !reportRange.to || reportRange.from > reportRange.to) && (
+                <div className="alert info" style={{ fontSize: 12, marginBottom: 10 }}>
+                  {!selectedClass
+                    ? t("reports.selectClassPrompt", "Please select a class above to export registers.")
+                    : !reportRange.from || !reportRange.to
+                    ? t("reports.selectDatesPrompt", "Please specify both Start and End dates.")
+                    : t("reports.invalidDateRange", "Start date must be earlier than or equal to End date.")}
+                </div>
+              )}
+
+              <div className="download-grid-mobile">
+                <button
+                  className="download-card-mobile"
+                  onClick={() => downloadReport("xlsx")}
+                  disabled={loading || !selectedClass || !reportRange.from || !reportRange.to || reportRange.from > reportRange.to}
+                >
+                  <FileSpreadsheet size={22} />
+                  <div>
+                    <strong>{t("reports.excelSpreadsheet", "Excel Spreadsheet")}</strong>
+                    <span>{t("reports.xlsxFormat", ".xlsx format")}</span>
+                  </div>
+                </button>
+                <button
+                  className="download-card-mobile"
+                  onClick={() => downloadReport("csv")}
+                  disabled={loading || !selectedClass || !reportRange.from || !reportRange.to || reportRange.from > reportRange.to}
+                >
+                  <Download size={22} />
+                  <div>
+                    <strong>{t("reports.csvExport", "CSV Export")}</strong>
+                    <span>{t("reports.utf8Bom", "UTF-8 with BOM")}</span>
+                  </div>
+                </button>
+                <button
+                  className="download-card-mobile"
+                  onClick={() => downloadReport("pdf")}
+                  disabled={loading || !selectedClass || !reportRange.from || !reportRange.to || reportRange.from > reportRange.to}
+                >
+                  <FileSpreadsheet size={22} />
+                  <div>
+                    <strong>{t("reports.printablePdf", "Printable PDF")}</strong>
+                    <span>{t("reports.landscapeLayout", "Landscape layout")}</span>
+                  </div>
+                </button>
+              </div>
+
               <button
                 className="btn primary full"
                 onClick={fetchReport}
-                disabled={loading}
+                disabled={loading || !selectedClass || !reportRange.from || !reportRange.to || reportRange.from > reportRange.to}
                 style={{ marginTop: 12 }}
               >
                 {t("reports.generateSummaryTable", "Generate Summary Table")}
               </button>
             </div>
 
-            {/* Weekly Multi-Sheet Excel & Email Automation */}
-            <div className="card">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
-                <h3 style={{ margin: 0 }}>{t("reports.weeklyReportAutomation", "Weekly Report Automation")}</h3>
-                <span className="status-pill online">{t("reports.automatedBadge", "Automated")}</span>
-              </div>
-              <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-                {t("reports.weeklyReportSub", "Executive 3-sheet Excel report covering attendance summary, detailed audit log, and class breakdown.")}
-              </p>
+            {/* Weekly Multi-Sheet Excel & Email Automation (Admin only) */}
+            {user?.role === "admin" && (
+              <div className="card">
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+                  <h3 style={{ margin: 0 }}>{t("reports.weeklyReportAutomation", "Weekly Report Automation")}</h3>
+                  <span className={`status-pill ${emailStatus?.automationEnabled || settingsForm.reportAutomationEnabled ? "online" : "offline"}`}>
+                    {emailStatus?.automationEnabled || settingsForm.reportAutomationEnabled ? t("reports.automatedBadge", "Automated") : t("reports.manualOnly", "Manual Trigger Only")}
+                  </span>
+                </div>
+                <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+                  {t("reports.weeklyReportSub", "Executive 3-sheet Excel report covering attendance summary, detailed audit log, and class breakdown.")}
+                </p>
 
-              <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8, marginBottom: 12, fontSize: 13, wordBreak: "break-word" }}>
-                <div><strong>{t("reports.scheduledRecipient", "Scheduled Recipient")}:</strong> <span style={{ wordBreak: "break-all" }}>2300030621cseh1@gmail.com</span></div>
-                <div style={{ color: "var(--muted)", marginTop: 2 }}>{t("reports.weeklyScheduleTime", "Weekly Schedule: Mondays at 06:00 AM (Previous Mon–Sun)")}</div>
-              </div>
+                <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8, marginBottom: 12, fontSize: 13, wordBreak: "break-word" }}>
+                  <div><strong>{t("reports.scheduledRecipient", "Scheduled Recipient")}:</strong> <span style={{ wordBreak: "break-all" }}>{settingsForm.reportRecipientEmail || emailStatus?.recipientEmail || "2300030621cseh1@gmail.com"}</span></div>
+                  <div style={{ color: "var(--muted)", marginTop: 2 }}>{settingsForm.reportSchedule || "Mondays at 06:00 AM"} ({settingsForm.reportTimezone || "Asia/Kolkata"})</div>
+                  {emailStatus?.lastSent && (
+                    <div style={{ fontSize: 12, marginTop: 4 }}>
+                      <strong>{t("reports.lastDelivery", "Last Delivery")}:</strong> {formatDateTime(emailStatus.lastSent, lang)} {emailStatus.lastDelivered ? "✓ (Delivered)" : "⚠ (Attempted)"}
+                    </div>
+                  )}
+                  {emailStatus?.nextRun && (
+                    <div style={{ fontSize: 12, marginTop: 2, color: "var(--muted)" }}>
+                      <strong>{t("reports.nextScheduledRun", "Next Scheduled Run")}:</strong> {emailStatus.nextRun}
+                    </div>
+                  )}
+                </div>
 
-              <div className="responsive-grid-2">
-                <button
-                  className="btn secondary"
-                  onClick={downloadWeeklyReport}
-                  disabled={loading}
-                  style={{ minHeight: 44, fontSize: 13 }}
-                >
-                  <FileSpreadsheet size={16} /> {t("reports.downloadWeeklyXlsx", "Download Weekly .xlsx")}
-                </button>
-                <button
-                  className="btn primary"
-                  onClick={sendWeeklyEmail}
-                  disabled={loading}
-                  style={{ minHeight: 44, fontSize: 13 }}
-                >
-                  <Bell size={16} /> {t("reports.sendEmailReport", "Send Email Report")}
-                </button>
+                <div className="responsive-grid-2">
+                  <button
+                    className="btn secondary"
+                    onClick={downloadWeeklyReport}
+                    disabled={loading}
+                    style={{ minHeight: 44, fontSize: 13 }}
+                  >
+                    <FileSpreadsheet size={16} /> {t("reports.downloadWeeklyXlsx", "Download Weekly .xlsx")}
+                  </button>
+                  <button
+                    className="btn primary"
+                    onClick={sendWeeklyEmail}
+                    disabled={loading}
+                    style={{ minHeight: 44, fontSize: 13 }}
+                  >
+                    <Bell size={16} /> {t("reports.sendEmailReport", "Send Email Report")}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Student Roster Export */}
             <div className="card">
@@ -3582,8 +3887,351 @@ export default function App() {
               </div>
             )}
 
+            {/* Universal User Profile & Password Change */}
+            <div className="card">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
+                <div>
+                  <h3 style={{ margin: 0 }}>{t("auth.profileSecurity", "Profile & Security")}</h3>
+                  <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                    {t("auth.manageCredentials", "Manage your account credentials and personal password.")}
+                  </p>
+                </div>
+                <span className="status-pill online" style={{ textTransform: "capitalize" }}>
+                  {user.role}
+                </span>
+              </div>
+
+              <div style={{ background: "var(--canvas)", padding: "10px 14px", borderRadius: "var(--radius-md)", marginBottom: 12, fontSize: 13 }}>
+                <div><strong>{t.name}:</strong> {user.name}</div>
+                <div style={{ marginTop: 2 }}><strong>{t.email}:</strong> {user.email}</div>
+                {user.role === "teacher" && (
+                  <div style={{ marginTop: 4 }}>
+                    <strong>{t("teachers.assignedClasses", "Assigned Classes")}:</strong>{" "}
+                    {user.assignedClasses?.length > 0
+                      ? user.assignedClasses.map((c) => (c.name ? formatClassLabel(c, lang) : "Class")).join(", ")
+                      : t("teachers.noClassesAssigned", "None")}
+                  </div>
+                )}
+              </div>
+
+              {passwordNotice && <div className="alert success" style={{ marginBottom: 10, fontSize: 13 }}>{passwordNotice}</div>}
+              {passwordError && <div className="alert error" style={{ marginBottom: 10, fontSize: 13 }}>{passwordError}</div>}
+
+              <form onSubmit={handlePasswordChange} style={{ display: "grid", gap: 10 }}>
+                <h4 style={{ margin: 0, fontSize: 14 }}>{t("auth.changePassword", "Change Password")}</h4>
+                <div className="responsive-grid-2">
+                  <label>
+                    {t("auth.currentPassword", "Current Password")} *
+                    <input
+                      type="password"
+                      required
+                      value={passwordForm.currentPassword}
+                      onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    {t("auth.newPassword", "New Password")} *
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={passwordForm.newPassword}
+                      onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                      placeholder={t("auth.minCharacters", "Minimum 6 characters")}
+                    />
+                  </label>
+                </div>
+                <label>
+                  {t("auth.confirmPassword", "Confirm New Password")} *
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={passwordForm.confirmPassword}
+                    onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                  />
+                </label>
+                <button className="btn secondary" style={{ minHeight: 40, alignSelf: "flex-start", marginTop: 4 }}>
+                  <ShieldCheck size={15} /> {t("auth.updatePasswordBtn", "Update Password")}
+                </button>
+              </form>
+            </div>
+
+            {/* Admin-Only Management Section */}
             {user.role === "admin" && (
               <>
+                {/* Teacher Accounts Management */}
+                <div className="card">
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                    <div>
+                      <h3 style={{ margin: 0 }}>{t("teachers.teacherAccounts", "Teacher Accounts")}</h3>
+                      <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                        {t("teachers.teacherAccountsSub", "Manage teacher staff, class assignments, and secure access.")}
+                      </p>
+                    </div>
+                    <button
+                      className="btn primary"
+                      onClick={() => {
+                        setTeacherForm({ name: "", email: "", password: "", assignedClasses: [] });
+                        setShowAddTeacherModal(true);
+                      }}
+                      style={{ minHeight: 36, padding: "6px 12px", fontSize: 12 }}
+                    >
+                      <Plus size={15} /> {t("teachers.addTeacher", "Add Teacher")}
+                    </button>
+                  </div>
+
+                  {teachers.length === 0 ? (
+                    <p className="muted" style={{ fontSize: 13 }}>{t("teachers.noTeachers", "No teachers found.")}</p>
+                  ) : (
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {teachers.map((teacher) => (
+                        <div
+                          key={teacher._id || teacher.id}
+                          className="teacher-card"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            flexWrap: "wrap",
+                            gap: 10,
+                            padding: 12,
+                            background: "var(--canvas)",
+                            borderRadius: "var(--radius-md)",
+                            border: "1px solid var(--border)"
+                          }}
+                        >
+                          <div style={{ minWidth: 200, flex: 1 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <strong>{teacher.name}</strong>
+                              <span className={`status-pill ${teacher.active !== false ? "online" : "offline"}`}>
+                                {teacher.active !== false ? t("common.active", "Active") : t("common.deactivated", "Deactivated")}
+                              </span>
+                            </div>
+                            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{teacher.email}</div>
+                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+                              {teacher.assignedClasses?.length > 0 ? (
+                                teacher.assignedClasses.map((cls) => (
+                                  <span
+                                    key={cls._id || cls.id || cls}
+                                    style={{
+                                      fontSize: 11,
+                                      background: "var(--card-bg)",
+                                      border: "1px solid var(--border)",
+                                      padding: "2px 6px",
+                                      borderRadius: 4
+                                    }}
+                                  >
+                                    {cls.name ? formatClassLabel(cls, lang) : "Class"}
+                                  </span>
+                                ))
+                              ) : (
+                                <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                                  {t("teachers.noClassesAssigned", "No assigned classes")}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <button
+                              className="btn secondary"
+                              onClick={() => {
+                                setResetPasswordTeacher(teacher);
+                                setNewTeacherPassword("");
+                              }}
+                              style={{ minHeight: 32, fontSize: 12, padding: "4px 10px" }}
+                            >
+                              <Shield size={13} /> {t("teachers.resetPassword", "Reset Password")}
+                            </button>
+                            {teacher.active !== false && (
+                              <button
+                                className="btn secondary"
+                                onClick={() => handleDeactivateTeacher(teacher)}
+                                style={{ minHeight: 32, fontSize: 12, padding: "4px 10px", color: "var(--danger)", borderColor: "var(--danger)" }}
+                              >
+                                <UserX size={13} /> {t("teachers.deactivate", "Deactivate")}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Secondary MongoDB Atlas Storage Rotation */}
+                <div className="card">
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                    <div>
+                      <h3 style={{ margin: 0 }}>{t("storage.title", "MongoDB Secondary Storage & Rotation")}</h3>
+                      <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                        {t("storage.subtitle", "Dual-destination MongoDB Atlas failover and storage quota rotation.")}
+                      </p>
+                    </div>
+                    <span className={`status-pill ${storageReport?.activeStorage === "secondary" ? "warning" : "online"}`}>
+                      {t("storage.active", "Active")}: {storageReport?.activeStorage?.toUpperCase() || "PRIMARY"}
+                    </span>
+                  </div>
+
+                  {/* Storage Meter */}
+                  <div style={{ background: "var(--canvas)", padding: "12px 14px", borderRadius: "var(--radius-md)", marginBottom: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, fontSize: 13 }}>
+                      <span><strong>{t("storage.clusterName", "Primary Cluster Storage")}</strong> ({storageReport?.primaryStats?.database || "madrasa_attendance"})</span>
+                      <span>
+                        {storageReport?.primaryStats?.percentageUsed != null
+                          ? `${storageReport.primaryStats.percentageUsed}%`
+                          : t("storage.usageUnavailable", "Storage usage unavailable")}
+                      </span>
+                    </div>
+
+                    <div className="storage-meter">
+                      <div
+                        className={`storage-meter-fill ${
+                          (storageReport?.primaryStats?.percentageUsed || 0) >= 85
+                            ? "critical"
+                            : (storageReport?.primaryStats?.percentageUsed || 0) >= 70
+                            ? "warning"
+                            : "normal"
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(2, storageReport?.primaryStats?.percentageUsed || 0))}%` }}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)", marginTop: 6, flexWrap: "wrap", gap: 4 }}>
+                      <span>
+                        {t("storage.used", "Used")}: {storageReport?.primaryStats?.dataSizeMB != null ? `${storageReport.primaryStats.dataSizeMB} MB` : "N/A"} / {storageReport?.primaryStats?.limitMB || 512} MB
+                      </span>
+                      <span>{storageReport?.primaryStats?.maskedUri || "mongodb+srv://primary.mongodb.net"}</span>
+                    </div>
+                  </div>
+
+                  {/* Secondary Cluster Status */}
+                  <div style={{ background: "var(--canvas)", padding: "10px 14px", borderRadius: "var(--radius-md)", marginBottom: 12, fontSize: 13 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                      <div>
+                        <strong>{t("storage.secondaryCluster", "Secondary Cluster")}:</strong>{" "}
+                        <span style={{ color: storageReport?.secondaryConfigured ? "var(--success)" : "var(--muted)" }}>
+                          {storageReport?.secondaryConfigured ? t("storage.configured", "Configured (backup.oqduj9s.mongodb.net)") : t("storage.notConfigured", "Not Configured in Environment")}
+                        </span>
+                      </div>
+                      <span className={`status-pill ${storageReport?.secondaryConfigured ? "online" : "offline"}`}>
+                        {storageReport?.secondaryConfigured ? t("storage.ready", "Ready") : t("storage.unconfigured", "Unconfigured")}
+                      </span>
+                    </div>
+                    {storageReport?.secondaryConfigured && storageReport?.secondaryStats?.maskedUri && (
+                      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                        {storageReport.secondaryStats.maskedUri}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="responsive-grid-2">
+                    <button
+                      className="btn secondary"
+                      onClick={verifySecondaryStorage}
+                      disabled={storageLoading || !storageReport?.secondaryConfigured}
+                      style={{ minHeight: 42, fontSize: 13 }}
+                    >
+                      <HardDrive size={15} /> {t("storage.verifySecondary", "Verify Secondary Indexes")}
+                    </button>
+                    <button
+                      className="btn primary"
+                      onClick={rotateStorageDestination}
+                      disabled={storageLoading || !storageReport?.secondaryConfigured || storageReport?.activeStorage === "secondary"}
+                      style={{ minHeight: 42, fontSize: 13 }}
+                    >
+                      <ArrowRightLeft size={15} /> {t("storage.rotateDestination", "Rotate to Secondary")}
+                    </button>
+                  </div>
+
+                  {/* Past Rotation History */}
+                  {storageReport?.rotationHistory?.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <strong style={{ fontSize: 12, color: "var(--muted)" }}>{t("storage.recentRotations", "Recent Storage Rotations")}:</strong>
+                      <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+                        {storageReport.rotationHistory.map((item, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              padding: "6px 10px",
+                              fontSize: 12,
+                              background: "var(--canvas)",
+                              borderRadius: 6,
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center"
+                            }}
+                          >
+                            <span>
+                              <strong>{item.from} → {item.to}</strong>: {item.reason}
+                            </span>
+                            <span className="muted" style={{ fontSize: 11 }}>
+                              {item.rotatedAt ? formatDateTime(item.rotatedAt, lang) : ""}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* System Settings & Weekly Email Automation */}
+                <div className="card">
+                  <h3 style={{ marginBottom: 6 }}>{t("settings.systemAutomation", "Weekly Automation & Retention Settings")}</h3>
+                  <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+                    {t("settings.systemAutomationSub", "Configure automated weekly summary delivery recipient, schedule timezone, and attendance correction limit.")}
+                  </p>
+
+                  <form onSubmit={handleSaveSettings} style={{ display: "grid", gap: 12 }}>
+                    <label>
+                      {t("settings.reportRecipientEmail", "Weekly Report Recipient Email")}
+                      <input
+                        type="email"
+                        value={settingsForm.reportRecipientEmail}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, reportRecipientEmail: e.target.value })}
+                        placeholder="e.g. 2300030621cseh1@gmail.com"
+                      />
+                    </label>
+
+                    <div className="responsive-grid-2">
+                      <label>
+                        {t("settings.scheduleTimezone", "Schedule Timezone")}
+                        <input
+                          value={settingsForm.reportTimezone}
+                          onChange={(e) => setSettingsForm({ ...settingsForm, reportTimezone: e.target.value })}
+                          placeholder="Asia/Kolkata"
+                        />
+                      </label>
+
+                      <label>
+                        {t("settings.correctionWindowDays", "Attendance Correction Window (Days)")}
+                        <input
+                          type="number"
+                          min="1"
+                          max="90"
+                          value={settingsForm.attendanceCorrectionWindowDays}
+                          onChange={(e) => setSettingsForm({ ...settingsForm, attendanceCorrectionWindowDays: parseInt(e.target.value, 10) || 7 })}
+                        />
+                      </label>
+                    </div>
+
+                    <label style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 }}>
+                      <input
+                        type="checkbox"
+                        checked={settingsForm.reportAutomationEnabled}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, reportAutomationEnabled: e.target.checked })}
+                        style={{ width: 20, minHeight: 20 }}
+                      />
+                      <span style={{ fontSize: 13 }}>{t("settings.enableWeeklyCron", "Enable automated weekly email delivery via cron")}</span>
+                    </label>
+
+                    <button className="btn primary" disabled={loading} style={{ minHeight: 44, marginTop: 4 }}>
+                      <Save size={16} /> {t("settings.saveSettings", "Save Settings")}
+                    </button>
+                  </form>
+                </div>
+
                 {/* Six-Month Data Retention Policy Status */}
                 <div className="card">
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -3626,6 +4274,7 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* Add Class */}
                 <div className="card">
                   <h3 style={{ marginBottom: 10 }}>{t("classes.addClass", "Add Class")}</h3>
                   <form
@@ -3656,18 +4305,19 @@ export default function App() {
                     </button>
                   </form>
                 </div>
-
-                <div className="card" style={{ textAlign: "center" }}>
-                  <button
-                    onClick={logout}
-                    className="btn secondary full"
-                    style={{ color: "var(--danger)", borderColor: "var(--danger)" }}
-                  >
-                    <LogOut size={16} /> {t.signout}
-                  </button>
-                </div>
               </>
             )}
+
+            {/* Universal Sign Out */}
+            <div className="card" style={{ textAlign: "center" }}>
+              <button
+                onClick={logout}
+                className="btn secondary full"
+                style={{ color: "var(--danger)", borderColor: "var(--danger)" }}
+              >
+                <LogOut size={16} /> {t.signout}
+              </button>
+            </div>
           </div>
         )}
       </main>
@@ -4727,6 +5377,127 @@ export default function App() {
 
               <div style={{ width: 44 }} />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          TEACHER MANAGEMENT: ADD TEACHER MODAL
+          ========================================================= */}
+      {showAddTeacherModal && (
+        <div className="sheet-overlay" onClick={() => setShowAddTeacherModal(false)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 500 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>{t("teachers.addTeacherModalTitle", "Add Teacher Account")}</h3>
+              <button className="btn icon-btn" onClick={() => setShowAddTeacherModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleCreateTeacher} style={{ display: "grid", gap: 12 }}>
+              <label>
+                {t.name} *
+                <input
+                  required
+                  value={teacherForm.name}
+                  onChange={(e) => setTeacherForm({ ...teacherForm, name: e.target.value })}
+                  placeholder="e.g. Ustad Ahmed"
+                />
+              </label>
+              <label>
+                {t.email} *
+                <input
+                  type="email"
+                  required
+                  value={teacherForm.email}
+                  onChange={(e) => setTeacherForm({ ...teacherForm, email: e.target.value })}
+                  placeholder="teacher@madrasa.org"
+                />
+              </label>
+              <label>
+                {t.password} *
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={teacherForm.password}
+                  onChange={(e) => setTeacherForm({ ...teacherForm, password: e.target.value })}
+                  placeholder={t("auth.minCharacters", "Minimum 6 characters")}
+                />
+              </label>
+              <label>
+                {t("teachers.assignClasses", "Assign Classes")}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 6, maxHeight: 150, overflowY: "auto", border: "1px solid var(--border)", padding: 8, borderRadius: 6 }}>
+                  {classes.map((cls) => {
+                    const cid = String(cls._id || cls.id);
+                    const isChecked = teacherForm.assignedClasses.includes(cid);
+                    return (
+                      <label key={cid} style={{ flexDirection: "row", alignItems: "center", gap: 6, fontSize: 13 }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setTeacherForm({ ...teacherForm, assignedClasses: [...teacherForm.assignedClasses, cid] });
+                            } else {
+                              setTeacherForm({ ...teacherForm, assignedClasses: teacherForm.assignedClasses.filter((id) => id !== cid) });
+                            }
+                          }}
+                        />
+                        <span>{formatClassLabel(cls, lang)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </label>
+              <div style={{ display: "flex", gap: 10, marginTop: 10, justifyContent: "flex-end" }}>
+                <button type="button" className="btn secondary" onClick={() => setShowAddTeacherModal(false)}>
+                  {t.cancel}
+                </button>
+                <button type="submit" className="btn primary" disabled={loading}>
+                  {t("teachers.createTeacherBtn", "Create Teacher")}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          TEACHER MANAGEMENT: RESET PASSWORD MODAL
+          ========================================================= */}
+      {resetPasswordTeacher && (
+        <div className="sheet-overlay" onClick={() => setResetPasswordTeacher(null)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>{t("teachers.resetPasswordTitle", "Reset Teacher Password")}</h3>
+              <button className="btn icon-btn" onClick={() => setResetPasswordTeacher(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+              Reset password for <strong>{resetPasswordTeacher.name}</strong> ({resetPasswordTeacher.email}).
+            </p>
+            <form onSubmit={handleResetTeacherPassword} style={{ display: "grid", gap: 12 }}>
+              <label>
+                {t("teachers.newPassword", "New Password")} *
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={newTeacherPassword}
+                  onChange={(e) => setNewTeacherPassword(e.target.value)}
+                  placeholder={t("auth.minCharacters", "Minimum 6 characters")}
+                />
+              </label>
+              <div style={{ display: "flex", gap: 10, marginTop: 10, justifyContent: "flex-end" }}>
+                <button type="button" className="btn secondary" onClick={() => setResetPasswordTeacher(null)}>
+                  {t.cancel}
+                </button>
+                <button type="submit" className="btn primary" disabled={loading}>
+                  {t("teachers.setNewPassword", "Set New Password")}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

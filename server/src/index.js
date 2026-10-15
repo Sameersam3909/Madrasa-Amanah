@@ -8,11 +8,17 @@ import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
-import { User, Class, Student, Attendance, SyncMutation, AuditLog } from "./models.js";
+import { User, Class, Student, Attendance, SyncMutation, AuditLog, SystemSetting } from "./models.js";
 import { requireAuth, requireAdmin, canAccessClass } from "./auth.js";
 import { uploadImageDataUrl } from "./cloudinary.js";
 import { connectDB, getDatabaseInfo } from "./db.js";
-import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport } from "./weeklyReportService.js";
+import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport, getNextScheduledReportRun } from "./weeklyReportService.js";
+import {
+  getStorageHealthReport,
+  verifySecondaryDatabase,
+  rotateWriteDestination,
+  getSecondaryConnection
+} from "./storageRotationService.js";
 import {
   getPreviousReportingMonth,
   parseReportingMonth,
@@ -70,7 +76,7 @@ app.get("/api/health", healthHandler);
 app.post("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, limit: 20 }), async (req, res) => {
   const email = String(req.body.email || "").toLowerCase().trim();
   const password = String(req.body.password || "");
-  const user = await User.findOne({ email }).select("+passwordHash");
+  const user = await User.findOne({ email }).select("+passwordHash").populate("assignedClasses", "_id name section academicYear");
   if (!user || !user.active || !(await bcrypt.compare(password, user.passwordHash))) {
     return res.status(401).json({ message: "Email or password is incorrect." });
   }
@@ -101,6 +107,27 @@ app.get("/api/auth/me", requireAuth, (req, res) => res.json({
   role: req.user.role,
   assignedClasses: req.user.assignedClasses
 }));
+
+app.post("/api/auth/change-password", requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword || newPassword.length < 8) {
+    return res.status(400).json({ message: "Current password and a new password of at least 8 characters are required." });
+  }
+  const user = await User.findById(req.user._id).select("+passwordHash");
+  if (!user || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
+    return res.status(400).json({ message: "Current password does not match." });
+  }
+  user.passwordHash = await bcrypt.hash(newPassword, 12);
+  await user.save();
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "auth.password_change",
+    entityType: "User",
+    entityId: String(user._id),
+    details: { ip: req.ip }
+  });
+  res.json({ message: "Password updated successfully." });
+});
 
 // Protected API routes
 app.use("/api", requireAuth);
@@ -140,6 +167,15 @@ app.patch("/api/classes/:id", requireAdmin, async (req, res) => {
   if (!cls) return res.status(404).json({ message: "Class not found." });
   await AuditLog.create({ actorId: req.user._id, action: "class.update", entityType: "Class", entityId: String(cls._id) });
   res.json(cls);
+});
+
+app.delete("/api/classes/:id", requireAdmin, async (req, res) => {
+  const cls = await Class.findById(req.params.id);
+  if (!cls) return res.status(404).json({ message: "Class not found." });
+  cls.active = false;
+  await cls.save();
+  await AuditLog.create({ actorId: req.user._id, action: "class.deactivate", entityType: "Class", entityId: String(cls._id) });
+  res.json({ message: `Class ${cls.name} deactivated successfully.`, id: String(cls._id) });
 });
 
 // Students API
@@ -202,7 +238,7 @@ app.get("/api/students", async (req, res) => {
   }));
 });
 
-app.post("/api/students", async (req, res) => {
+app.post("/api/students", requireAdmin, async (req, res) => {
   const admissionNo = (req.body.admissionNo || req.body.admissionNumber || "").trim();
   const name = (req.body.name || req.body.fullName || "").trim();
   const classId = req.body.classId;
@@ -339,8 +375,8 @@ async function handleStudentUpdate(req, res) {
   }
 }
 
-app.patch("/api/students/:id", handleStudentUpdate);
-app.put("/api/students/:id", handleStudentUpdate);
+app.patch("/api/students/:id", requireAdmin, handleStudentUpdate);
+app.put("/api/students/:id", requireAdmin, handleStudentUpdate);
 
 // --- STUDENT ROSTER EXPORT (CSV / XLSX) ---
 app.get("/api/students/export", async (req, res) => {
@@ -365,8 +401,7 @@ app.get("/api/students/export", async (req, res) => {
     const cls = await Class.findById(classId);
     if (cls) className = `${cls.name}${cls.section ? `-${cls.section}` : ""}`;
   } else if (req.user.role !== "admin") {
-    const classes = await Class.find({ $or: [{ teacherIds: req.user._id }, { _id: { $in: req.user.assignedClasses.map(c => c._id || c) } }] }).select("_id");
-    filter.classId = { $in: classes.map(c => c._id) };
+    return res.status(403).json({ message: "Only administrators can export organization-wide student rosters. Please select an authorized class." });
   }
 
   const cleanClassName = className.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
@@ -855,6 +890,19 @@ app.post("/api/attendance/bulk", async (req, res) => {
   }
   if (!(await canAccessClass(req.user, classId))) return res.status(403).json({ message: "Class access denied." });
 
+  // Enforce attendance correction window for teachers
+  if (req.user.role !== "admin") {
+    let settings = null;
+    try { settings = await SystemSetting.findOne({ key: "global" }); } catch {}
+    const windowDays = settings?.attendanceCorrectionWindowDays || 7;
+    const cutoffDate = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    if (dateKey < cutoffDate) {
+      return res.status(403).json({
+        message: `Attendance correction window has elapsed for this date (${dateKey}). Historical corrections beyond ${windowDays} days require administrator permission.`
+      });
+    }
+  }
+
   const targetClass = await Class.findById(classId);
   const students = await Student.find({ _id: { $in: records.map(r => r.studentId) }, classId, active: true }).select("_id");
   const allowed = new Set(students.map(s => String(s._id)));
@@ -869,6 +917,26 @@ app.post("/api/attendance/bulk", async (req, res) => {
     if (!seenStudentIds.has(sId)) {
       seenStudentIds.add(sId);
       dedupedRecords.push(r);
+    }
+  }
+
+  // Audit attendance corrections
+  const existingRecords = await Attendance.find({
+    classId,
+    dateKey,
+    sessionKey,
+    studentId: { $in: dedupedRecords.map(r => r.studentId) }
+  });
+  const existingMap = new Map(existingRecords.map(a => [String(a.studentId), a.status]));
+  for (const r of dedupedRecords) {
+    const prevStatus = existingMap.get(String(r.studentId));
+    if (prevStatus && prevStatus !== r.status) {
+      await AuditLog.create({
+        actorId: req.user._id,
+        action: "attendance.correction",
+        entityType: "Attendance",
+        details: { studentId: r.studentId, classId, dateKey, sessionKey, from: prevStatus, to: r.status, note: r.note || "" }
+      });
     }
   }
 
@@ -895,6 +963,21 @@ app.post("/api/attendance/bulk", async (req, res) => {
   }
 
   if (ops.length) await Attendance.bulkWrite(ops, { ordered: false });
+
+  // Safe Secondary Storage Write when rotation target is active
+  let sysSettings = null;
+  try { sysSettings = await SystemSetting.findOne({ key: "global" }); } catch {}
+  if (sysSettings?.activeWriteTarget === "secondary" && ops.length) {
+    const secConn = await getSecondaryConnection();
+    if (secConn && secConn.readyState === 1) {
+      try {
+        await secConn.collection("attendances").bulkWrite(ops, { ordered: false });
+      } catch (secErr) {
+        console.warn("[STORAGE] Secondary attendance write warning:", secErr.message);
+      }
+    }
+  }
+
   await AuditLog.create({
     actorId: req.user._id,
     action: "attendance.bulk-save",
@@ -977,6 +1060,22 @@ app.post("/api/sync/attendance", async (req, res) => {
       continue;
     }
 
+    // Enforce attendance correction window for teachers during offline sync
+    if (req.user.role !== "admin") {
+      let settings = null;
+      try { settings = await SystemSetting.findOne({ key: "global" }); } catch {}
+      const windowDays = settings?.attendanceCorrectionWindowDays || 7;
+      const cutoffDate = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      if (dateKey < cutoffDate) {
+        results.push({
+          mutationId,
+          status: "error",
+          message: `Attendance correction window (${windowDays} days) elapsed for date ${dateKey}`
+        });
+        continue;
+      }
+    }
+
     const targetClass = await Class.findById(classId);
     const validStudents = await Student.find({
       _id: { $in: records.map(r => r.studentId) },
@@ -994,6 +1093,26 @@ app.post("/api/sync/attendance", async (req, res) => {
       if (!seenStudentIds.has(sId)) {
         seenStudentIds.add(sId);
         dedupedRecords.push(r);
+      }
+    }
+
+    // Audit attendance corrections
+    const existingRecords = await Attendance.find({
+      classId,
+      dateKey,
+      sessionKey,
+      studentId: { $in: dedupedRecords.map(r => r.studentId) }
+    });
+    const existingMap = new Map(existingRecords.map(a => [String(a.studentId), a.status]));
+    for (const r of dedupedRecords) {
+      const prevStatus = existingMap.get(String(r.studentId));
+      if (prevStatus && prevStatus !== r.status) {
+        await AuditLog.create({
+          actorId: req.user._id,
+          action: "attendance.correction",
+          entityType: "Attendance",
+          details: { studentId: r.studentId, classId, dateKey, sessionKey, from: prevStatus, to: r.status, note: r.note || "", source: "sync" }
+        });
       }
     }
 
@@ -1020,6 +1139,20 @@ app.post("/api/sync/attendance", async (req, res) => {
     }
 
     if (ops.length) await Attendance.bulkWrite(ops, { ordered: false });
+
+    // Secondary DB write if target is secondary
+    let sysSettings = null;
+    try { sysSettings = await SystemSetting.findOne({ key: "global" }); } catch {}
+    if (sysSettings?.activeWriteTarget === "secondary" && ops.length) {
+      const secConn = await getSecondaryConnection();
+      if (secConn && secConn.readyState === 1) {
+        try {
+          await secConn.collection("attendances").bulkWrite(ops, { ordered: false });
+        } catch (secErr) {
+          console.warn("[STORAGE] Secondary sync attendance write warning:", secErr.message);
+        }
+      }
+    }
 
     const resultPayload = {
       mutationId,
@@ -1179,7 +1312,7 @@ app.get("/api/reports/export", async (req, res) => {
 });
 
 // --- WEEKLY EXCEL REPORT & EMAIL AUTOMATION ---
-app.get("/api/reports/weekly-excel", async (req, res) => {
+app.get("/api/reports/weekly-excel", requireAdmin, async (req, res) => {
   const prevWeek = getPreviousReportingWeek();
   const from = req.query.from || req.query.startDate || prevWeek.from;
   const to = req.query.to || req.query.endDate || prevWeek.to;
@@ -1196,7 +1329,9 @@ app.post("/api/reports/send-weekly-email", requireAdmin, async (req, res) => {
   const prevWeek = getPreviousReportingWeek();
   const from = req.body.from || req.body.startDate || prevWeek.from;
   const to = req.body.to || req.body.endDate || prevWeek.to;
-  const recipientEmail = req.body.recipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com";
+  let settings = null;
+  try { settings = await SystemSetting.findOne({ key: "global" }); } catch {}
+  const recipientEmail = req.body.recipientEmail || settings?.reportRecipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com";
 
   const result = await sendWeeklyEmailReport({
     from,
@@ -1211,21 +1346,113 @@ app.post("/api/reports/send-weekly-email", requireAdmin, async (req, res) => {
 
 app.get("/api/reports/email-status", requireAdmin, async (_req, res) => {
   const prevWeek = getPreviousReportingWeek();
-  const lastSentLog = await AuditLog.findOne({ action: "report.weekly_email_sent" }).sort({ createdAt: -1 });
+  let settings = await SystemSetting.findOne({ key: "global" });
+  const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+  const recipient = settings?.reportRecipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com";
+  const timezone = settings?.reportTimezone || process.env.REPORT_TIMEZONE || "Asia/Kolkata";
+  const schedule = settings?.reportSchedule || "Mondays at 06:00 AM";
+  const automationEnabled = Boolean(settings?.reportAutomationEnabled);
+  const isAutomated = automationEnabled && smtpConfigured;
+
+  const nextRun = isAutomated ? getNextScheduledReportRun(schedule, timezone) : null;
 
   res.json({
-    recipientEmail: process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com",
-    smtpConfigured: Boolean(process.env.SMTP_USER && process.env.SMTP_PASS),
+    recipientEmail: recipient,
+    smtpConfigured,
     smtpHost: process.env.SMTP_HOST || "smtp.gmail.com",
     smtpPort: process.env.SMTP_PORT || 587,
-    timezone: process.env.REPORT_TIMEZONE || "Asia/Kolkata",
+    timezone,
+    schedule,
+    automationEnabled,
+    isAutomated,
     previousReportingWeek: prevWeek,
-    lastSentLog: lastSentLog ? {
-      sentAt: lastSentLog.createdAt,
-      recipient: lastSentLog.details?.recipient,
-      period: `${lastSentLog.details?.from} to ${lastSentLog.details?.to}`,
-      messageId: lastSentLog.details?.messageId
-    } : null
+    lastSuccess: settings?.lastReportSuccess || null,
+    lastFailure: settings?.lastReportFailure || null,
+    nextScheduledRun: nextRun
+  });
+});
+
+// Application Settings & Weekly Report Configuration (Admin Only)
+app.get("/api/settings", requireAdmin, async (_req, res) => {
+  let settings = await SystemSetting.findOne({ key: "global" });
+  if (!settings) {
+    settings = await SystemSetting.create({
+      key: "global",
+      reportRecipientEmail: process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com",
+      reportTimezone: process.env.REPORT_TIMEZONE || "Asia/Kolkata",
+      reportSchedule: "Mondays at 06:00 AM",
+      reportAutomationEnabled: false,
+      attendanceCorrectionWindowDays: 7
+    });
+  }
+
+  const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+  const nextRun = settings.reportAutomationEnabled && smtpConfigured
+    ? getNextScheduledReportRun(settings.reportSchedule, settings.reportTimezone)
+    : null;
+
+  res.json({
+    reportRecipientEmail: settings.reportRecipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com",
+    reportTimezone: settings.reportTimezone || "Asia/Kolkata",
+    reportSchedule: settings.reportSchedule || "Mondays at 06:00 AM",
+    reportAutomationEnabled: settings.reportAutomationEnabled,
+    isAutomated: settings.reportAutomationEnabled && smtpConfigured,
+    smtpConfigured,
+    attendanceCorrectionWindowDays: settings.attendanceCorrectionWindowDays || 7,
+    lastReportSuccess: settings.lastReportSuccess,
+    lastReportFailure: settings.lastReportFailure,
+    nextScheduledRun: nextRun
+  });
+});
+
+app.patch("/api/settings", requireAdmin, async (req, res) => {
+  let settings = await SystemSetting.findOne({ key: "global" });
+  if (!settings) settings = new SystemSetting({ key: "global" });
+
+  if (req.body.reportRecipientEmail !== undefined) {
+    settings.reportRecipientEmail = String(req.body.reportRecipientEmail || "").trim();
+  }
+  if (req.body.reportTimezone !== undefined) {
+    settings.reportTimezone = String(req.body.reportTimezone || "").trim();
+  }
+  if (req.body.reportSchedule !== undefined) {
+    settings.reportSchedule = String(req.body.reportSchedule || "").trim();
+  }
+  if (req.body.reportAutomationEnabled !== undefined) {
+    settings.reportAutomationEnabled = Boolean(req.body.reportAutomationEnabled);
+  }
+  if (req.body.attendanceCorrectionWindowDays !== undefined) {
+    settings.attendanceCorrectionWindowDays = Math.max(1, Number(req.body.attendanceCorrectionWindowDays) || 7);
+  }
+
+  await settings.save();
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "settings.update",
+    entityType: "SystemSetting",
+    entityId: String(settings._id),
+    details: req.body
+  });
+
+  const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+  const nextRun = settings.reportAutomationEnabled && smtpConfigured
+    ? getNextScheduledReportRun(settings.reportSchedule, settings.reportTimezone)
+    : null;
+
+  res.json({
+    message: "Settings updated successfully.",
+    settings: {
+      reportRecipientEmail: settings.reportRecipientEmail,
+      reportTimezone: settings.reportTimezone,
+      reportSchedule: settings.reportSchedule,
+      reportAutomationEnabled: settings.reportAutomationEnabled,
+      isAutomated: settings.reportAutomationEnabled && smtpConfigured,
+      smtpConfigured,
+      attendanceCorrectionWindowDays: settings.attendanceCorrectionWindowDays,
+      lastReportSuccess: settings.lastReportSuccess,
+      lastReportFailure: settings.lastReportFailure,
+      nextScheduledRun: nextRun
+    }
   });
 });
 
@@ -1395,6 +1622,11 @@ app.post("/api/admin/users", requireAdmin, async (req, res) => {
       assignedClasses,
       passwordHash: await bcrypt.hash(password, 12)
     });
+
+    if (assignedClasses.length > 0) {
+      await Class.updateMany({ _id: { $in: assignedClasses } }, { $addToSet: { teacherIds: user._id } });
+    }
+
     await AuditLog.create({ actorId: req.user._id, action: "user.create", entityType: "User", entityId: String(user._id) });
     res.status(201).json({ id: user._id, name: user.name, email: user.email, role: user.role, assignedClasses: user.assignedClasses });
   } catch (e) {
@@ -1411,8 +1643,115 @@ app.patch("/api/admin/users/:id", requireAdmin, async (req, res) => {
     user.passwordHash = await bcrypt.hash(req.body.password, 12);
   }
   await user.save();
+
+  if (req.body.assignedClasses !== undefined) {
+    await Class.updateMany({ teacherIds: user._id }, { $pull: { teacherIds: user._id } });
+    if (user.assignedClasses.length > 0) {
+      await Class.updateMany({ _id: { $in: user.assignedClasses } }, { $addToSet: { teacherIds: user._id } });
+    }
+  }
+
   await AuditLog.create({ actorId: req.user._id, action: "user.update", entityType: "User", entityId: String(user._id) });
   res.json({ id: user._id, name: user.name, email: user.email, role: user.role, active: user.active, assignedClasses: user.assignedClasses });
+});
+
+// Safe Teacher / User Deactivation (Preserves attendance and audit records)
+app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) return res.status(404).json({ message: "User not found." });
+  if (String(user._id) === String(req.user._id)) {
+    return res.status(400).json({ message: "You cannot deactivate your own administrative account." });
+  }
+
+  // Safe Account Rule: Deactivate, revoke class assignment, but NEVER delete historical attendance!
+  user.active = false;
+  await user.save();
+
+  await Class.updateMany({ teacherIds: user._id }, { $pull: { teacherIds: user._id } });
+
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "user.deactivate",
+    entityType: "User",
+    entityId: String(user._id),
+    details: { name: user.name, email: user.email, role: user.role, reason: req.body?.reason || "Deactivated by administrator" }
+  });
+
+  res.json({
+    message: `Account for ${user.name} safely deactivated. Historical attendance records are preserved.`,
+    user: { id: user._id, name: user.name, email: user.email, active: false }
+  });
+});
+
+app.post("/api/admin/users/:id/reset-password", requireAdmin, async (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword || newPassword.length < 8) {
+    return res.status(400).json({ message: "A new password of at least 8 characters is required." });
+  }
+  const user = await User.findById(req.params.id);
+  if (!user) return res.status(404).json({ message: "User not found." });
+  user.passwordHash = await bcrypt.hash(newPassword, 12);
+  await user.save();
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "user.reset_password",
+    entityType: "User",
+    entityId: String(user._id),
+    details: { targetEmail: user.email }
+  });
+  res.json({ message: `Password for ${user.name} reset successfully.` });
+});
+
+// --- SAFE MONGODB STORAGE ROTATION & MONITORING (ADMIN ONLY) ---
+app.get("/api/admin/storage/status", requireAdmin, async (_req, res) => {
+  const report = await getStorageHealthReport();
+  res.json(report);
+});
+
+app.post("/api/admin/storage/verify-secondary", requireAdmin, async (req, res) => {
+  const result = await verifySecondaryDatabase();
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "storage.verify_secondary",
+    entityType: "DatabaseCluster",
+    details: result
+  });
+  res.json(result);
+});
+
+app.post("/api/admin/storage/rotate", requireAdmin, async (req, res) => {
+  const target = req.body.target;
+  const reason = req.body.reason || "Manual rotation triggered by administrator";
+  try {
+    const result = await rotateWriteDestination({
+      target,
+      reason,
+      trigger: "manual-admin",
+      actorId: req.user._id
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+app.patch("/api/admin/storage/settings", requireAdmin, async (req, res) => {
+  let settings = await SystemSetting.findOne({ key: "global" });
+  if (!settings) settings = new SystemSetting({ key: "global" });
+  if (req.body.databaseRotationEnabled !== undefined) {
+    settings.databaseRotationEnabled = Boolean(req.body.databaseRotationEnabled);
+  }
+  await settings.save();
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "storage.settings_update",
+    entityType: "SystemSetting",
+    details: { databaseRotationEnabled: settings.databaseRotationEnabled }
+  });
+  res.json({
+    message: "Storage rotation settings updated.",
+    databaseRotationEnabled: settings.databaseRotationEnabled
+  });
 });
 
 app.get("/api/admin/audit", requireAdmin, async (_req, res) => {

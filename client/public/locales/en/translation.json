@@ -218,7 +218,21 @@
     "teacher": "Teacher",
     "admin": "Admin",
     "markedBy": "Marked By",
-    "updatedBy": "Updated By"
+    "updatedBy": "Updated By",
+    "teacherAccounts": "Teacher Accounts",
+    "teacherAccountsSub": "Manage teacher staff, class assignments, and secure access.",
+    "addTeacher": "Add Teacher",
+    "noTeachers": "No teachers found.",
+    "assignedClasses": "Assigned Classes",
+    "noClassesAssigned": "No assigned classes",
+    "resetPassword": "Reset Password",
+    "deactivate": "Deactivate",
+    "addTeacherModalTitle": "Add Teacher Account",
+    "assignClasses": "Assign Classes",
+    "createTeacherBtn": "Create Teacher",
+    "resetPasswordTitle": "Reset Teacher Password",
+    "newPassword": "New Password",
+    "setNewPassword": "Set New Password"
   },
   "faceMatching": {
     "takePhoto": "Take a photo",
@@ -301,7 +315,13 @@
     "studentsExcel": "Students (Excel)",
     "summaryView": "Summary View",
     "student": "Student",
-    "ratePercent": "Rate %"
+    "ratePercent": "Rate %",
+    "selectClassPrompt": "Please select a class above to export registers.",
+    "selectDatesPrompt": "Please specify both Start and End dates.",
+    "invalidDateRange": "Start date must be earlier than or equal to End date.",
+    "manualOnly": "Manual Trigger Only",
+    "lastDelivery": "Last Delivery",
+    "nextScheduledRun": "Next Scheduled Run"
   },
   "settings": {
     "settingsTitle": "Settings & Operations",
@@ -312,7 +332,40 @@
     "checkRetentionStatus": "Check Retention Status",
     "fullDatabaseBackup": "Full Database Backup",
     "fullDatabaseBackupSub": "Export structured JSON backup of classes, students, attendance, and audit logs.",
-    "downloadBackupJson": "Download Full System Backup (.json)"
+    "downloadBackupJson": "Download Full System Backup (.json)",
+    "systemAutomation": "Weekly Automation & Retention Settings",
+    "systemAutomationSub": "Configure automated weekly summary delivery recipient, schedule timezone, and attendance correction limit.",
+    "reportRecipientEmail": "Weekly Report Recipient Email",
+    "scheduleTimezone": "Schedule Timezone",
+    "correctionWindowDays": "Attendance Correction Window (Days)",
+    "enableWeeklyCron": "Enable automated weekly email delivery via cron",
+    "saveSettings": "Save Settings"
+  },
+  "storage": {
+    "title": "MongoDB Secondary Storage & Rotation",
+    "subtitle": "Dual-destination MongoDB Atlas failover and storage quota rotation.",
+    "active": "Active",
+    "clusterName": "Primary Cluster Storage",
+    "usageUnavailable": "Storage usage unavailable",
+    "used": "Used",
+    "secondaryCluster": "Secondary Cluster",
+    "configured": "Configured (backup.oqduj9s.mongodb.net)",
+    "notConfigured": "Not Configured in Environment",
+    "ready": "Ready",
+    "unconfigured": "Unconfigured",
+    "verifySecondary": "Verify Secondary Indexes",
+    "rotateDestination": "Rotate to Secondary",
+    "recentRotations": "Recent Storage Rotations"
+  },
+  "auth": {
+    "profileSecurity": "Profile & Security",
+    "manageCredentials": "Manage your account credentials and personal password.",
+    "changePassword": "Change Password",
+    "currentPassword": "Current Password",
+    "newPassword": "New Password",
+    "confirmPassword": "Confirm New Password",
+    "minCharacters": "Minimum 6 characters",
+    "updatePasswordBtn": "Update Password"
   },
   "authentication": {
     "login": "Sign In",

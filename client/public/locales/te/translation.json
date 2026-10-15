@@ -218,7 +218,21 @@
     "teacher": "ఉపాధ్యాయుడు",
     "admin": "అడ్మిన్",
     "markedBy": "నమోదు చేసిన వారు",
-    "updatedBy": "నవీకరించిన వారు"
+    "updatedBy": "నవీకరించిన వారు",
+    "teacherAccounts": "ఉపాధ్యాయుల ఖాతాలు",
+    "teacherAccountsSub": "ఉపాధ్యాయ సిబ్బంది, తరగతి కేటాయింపులు మరియు సురక్షిత ప్రాప్యతను నిర్వహించండి.",
+    "addTeacher": "ఉపాధ్యాయుడిని జోడించండి",
+    "noTeachers": "ఉపాధ్యాయులు కనుగొనబడలేదు.",
+    "assignedClasses": "కేటాయించిన తరగతులు",
+    "noClassesAssigned": "తరగతులు కేటాయించలేదు",
+    "resetPassword": "పాస్‌వర్డ్‌ను రీసెట్ చేయండి",
+    "deactivate": "నిష్క్రియం చేయండి",
+    "addTeacherModalTitle": "ఉపాధ్యాయ ఖాతాను జోడించండి",
+    "assignClasses": "తరగతులను కేటాయించండి",
+    "createTeacherBtn": "ఉపాధ్యాయుడిని సృష్టించండి",
+    "resetPasswordTitle": "ఉపాధ్యాయ పాస్‌వర్డ్‌ను రీసెట్ చేయండి",
+    "newPassword": "కొత్త పాస్‌వర్డ్",
+    "setNewPassword": "కొత్త పాస్‌వర్డ్ సెట్ చేయండి"
   },
   "faceMatching": {
     "takePhoto": "ఫోటో తీయండి",
@@ -301,7 +315,13 @@
     "studentsExcel": "విద్యార్థులు (Excel)",
     "summaryView": "సారాంశ వీక్షణ",
     "student": "విద్యార్థి",
-    "ratePercent": "శాతం %"
+    "ratePercent": "శాతం %",
+    "selectClassPrompt": "రిజిస్టర్‌లను ఎగుమతి చేయడానికి పైన తరగతిని ఎంచుకోండి.",
+    "selectDatesPrompt": "దయచేసి ప్రారంభ మరియు ముగింపు తేదీలను పేర్కొనండి.",
+    "invalidDateRange": "ప్రారంభ తేదీ ముగింపు తేదీ కంటే ముందు లేదా సమానంగా ఉండాలి.",
+    "manualOnly": "మాన్యువల్ ట్రిగ్గర్ మాత్రమే",
+    "lastDelivery": "చివరి డెలివరీ",
+    "nextScheduledRun": "తదుపరి షెడ్యూల్డ్ రన్"
   },
   "settings": {
     "settingsTitle": "సెట్టింగ్‌లు & కార్యకలాపాలు",
@@ -312,7 +332,40 @@
     "checkRetentionStatus": "నిలుపుదల స్థితిని తనిఖీ చేయండి",
     "fullDatabaseBackup": "పూర్తి డేటాబేస్ బ్యాకప్",
     "fullDatabaseBackupSub": "తరగతులు, విద్యార్థులు, హాజరు మరియు ఆడిట్ లాగ్‌ల నిర్మాణాత్మక JSON బ్యాకప్‌ను ఎగుమతి చేయండి.",
-    "downloadBackupJson": "పూర్తి బ్యాకప్ (.json) డౌన్‌లోడ్"
+    "downloadBackupJson": "పూర్తి బ్యాకప్ (.json) డౌన్‌లోడ్",
+    "systemAutomation": "వారపు ఆటోమేషన్ & నిలుపుదల సెట్టింగ్‌లు",
+    "systemAutomationSub": "ఆటోమేటెడ్ వారపు సారాంశం స్వీకర్త, షెడ్యూల్ సమయ క్షేత్రం మరియు హాజరు దిద్దుబాటు పరిమితిని కాన్ఫిగర్ చేయండి.",
+    "reportRecipientEmail": "వారపు నివేదిక స్వీకర్త ఇమెయిల్",
+    "scheduleTimezone": "షెడ్యూల్ సమయ క్షేత్రం",
+    "correctionWindowDays": "హాజరు దిద్దుబాటు గడువు (రోజులు)",
+    "enableWeeklyCron": "ఆటోమేటెడ్ వారపు ఇమెయిల్ డెలివరీని ప్రారంభించండి",
+    "saveSettings": "సెట్టింగ్‌లను సేవ్ చేయండి"
+  },
+  "storage": {
+    "title": "మోంగోడిబి సెకండరీ నిల్వ & రొటేషన్",
+    "subtitle": "ద్వంద్వ-గమ్యస్థాన మోంగోడిబి అట్లాస్ ఫెయిల్‌ఓవర్ మరియు నిల్వ కోటా రొటేషన్.",
+    "active": "యాక్టివ్",
+    "clusterName": "ప్రాథమిక క్లస్టర్ నిల్వ",
+    "usageUnavailable": "నిల్వ వినియోగం అందుబాటులో లేదు",
+    "used": "ఉపయోగించినది",
+    "secondaryCluster": "సెకండరీ క్లస్టర్",
+    "configured": "కాన్ఫిగర్ చేయబడింది (backup.oqduj9s.mongodb.net)",
+    "notConfigured": "ఎన్విరాన్‌మెంట్‌లో కాన్ఫిగర్ చేయబడలేదు",
+    "ready": "సిద్ధంగా ఉంది",
+    "unconfigured": "కాన్ఫిగర్ చేయబడలేదు",
+    "verifySecondary": "సెకండరీ సూచికలను ధృవీకరించండి",
+    "rotateDestination": "సెకండరీకి రొటేట్ చేయండి",
+    "recentRotations": "ఇటీవలి నిల్వ రొటేషన్లు"
+  },
+  "auth": {
+    "profileSecurity": "ప్రొఫైల్ & భద్రత",
+    "manageCredentials": "మీ ఖాతా ఆధారాలు మరియు వ్యక్తిగత పాస్‌వర్డ్‌ను నిర్వహించండి.",
+    "changePassword": "పాస్‌వర్డ్ మార్చండి",
+    "currentPassword": "ప్రస్తుత పాస్‌వర్డ్",
+    "newPassword": "కొత్త పాస్‌వర్డ్",
+    "confirmPassword": "కొత్త పాస్‌వర్డ్‌ను నిర్ధారించండి",
+    "minCharacters": "కనీసం 6 అక్షరాలు",
+    "updatePasswordBtn": "పాస్‌వర్డ్‌ను అప్‌డేట్ చేయండి"
   },
   "authentication": {
     "login": "లాగిన్",

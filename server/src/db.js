@@ -7,12 +7,12 @@ let memoryServerInstance = null;
 
 export async function connectDB() {
   const isProduction = process.env.NODE_ENV === "production";
-  const uri = process.env.MONGODB_URI;
+  const uri = process.env.MONGODB_URI_PRIMARY || process.env.MONGODB_URI;
 
   // 1. Production Mode: MongoDB Atlas is required and non-negotiable
   if (isProduction) {
     if (!uri) {
-      const msg = "FATAL: MONGODB_URI environment variable is required in production.";
+      const msg = "FATAL: MONGODB_URI_PRIMARY or MONGODB_URI environment variable is required in production.";
       console.error(msg);
       throw new Error(msg);
     }

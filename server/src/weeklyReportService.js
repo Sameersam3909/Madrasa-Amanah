@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import nodemailer from "nodemailer";
-import { Attendance, Class, Student, User, AuditLog } from "./models.js";
+import { Attendance, Class, Student, User, AuditLog, SystemSetting } from "./models.js";
 
 /**
  * Calculates previous Monday through Sunday in YYYY-MM-DD format
@@ -209,11 +209,33 @@ export async function generateWeeklyExcelWorkbook({ from, to }) {
   return wb;
 }
 
+export function getNextScheduledReportRun(schedule = "Mondays at 06:00 AM", timezone = "Asia/Kolkata") {
+  // Computes the next scheduled Monday at 06:00 AM
+  const now = new Date();
+  const next = new Date(now);
+  const day = now.getDay(); // 0 is Sunday, 1 is Monday
+  let daysUntilMonday = (1 - day + 7) % 7;
+  if (daysUntilMonday === 0) {
+    // If today is Monday, check if 06:00 AM has already passed
+    if (now.getHours() >= 6) {
+      daysUntilMonday = 7;
+    }
+  }
+  next.setDate(now.getDate() + daysUntilMonday);
+  next.setHours(6, 0, 0, 0);
+  return next.toISOString();
+}
+
 /**
  * Sends weekly attendance report via email attachment
  */
 export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger = "manual", actorId = null }) {
-  const targetRecipient = recipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com";
+  let settings = null;
+  try {
+    settings = await SystemSetting.findOne({ key: "global" });
+  } catch {}
+
+  const targetRecipient = recipientEmail || settings?.reportRecipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com";
   const safeFilename = `Madrasa-Amanah-Weekly-Attendance-${from}-to-${to}.xlsx`;
 
   // 1. Generate workbook
@@ -293,6 +315,20 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
         });
       }
 
+      // Record success in system settings
+      try {
+        if (!settings) settings = new SystemSetting({ key: "global" });
+        settings.lastReportSuccess = {
+          sentAt: new Date(),
+          recipient: targetRecipient,
+          period: `${from} to ${to}`,
+          messageId: info.messageId,
+          bytes: buffer.byteLength
+        };
+        settings.lastReportFailure = null;
+        await settings.save();
+      } catch {}
+
       return {
         success: true,
         delivered: true,
@@ -306,6 +342,19 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
       };
     } catch (err) {
       console.error("SMTP Delivery error:", err.message);
+
+      // Record failure in system settings
+      try {
+        if (!settings) settings = new SystemSetting({ key: "global" });
+        settings.lastReportFailure = {
+          failedAt: new Date(),
+          error: err.message,
+          recipient: targetRecipient,
+          period: `${from} to ${to}`
+        };
+        await settings.save();
+      } catch {}
+
       return {
         success: false,
         delivered: false,
@@ -320,12 +369,12 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
     }
   }
 
-  // Fallback when SMTP credentials are not yet set
+  // When SMTP credentials are not yet set, do NOT falsely report success as delivered!
   return {
-    success: true,
+    success: false,
     delivered: false,
     smtpConfigured: false,
-    message: "Report generated successfully. SMTP credentials (SMTP_USER/SMTP_PASS) are not yet configured for direct email delivery.",
+    message: "SMTP service credentials (SMTP_USER/SMTP_PASS) are not configured. Email could not be dispatched.",
     recipient: targetRecipient,
     filename: safeFilename,
     bytes: buffer.byteLength,

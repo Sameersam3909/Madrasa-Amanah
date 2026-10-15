@@ -218,7 +218,21 @@
     "teacher": "استاد",
     "admin": "ایڈمن",
     "markedBy": "حاضری لگانے والا",
-    "updatedBy": "اپ ڈیٹ کنندہ"
+    "updatedBy": "اپ ڈیٹ کنندہ",
+    "teacherAccounts": "اساتذہ کے اکاؤنٹس",
+    "teacherAccountsSub": "اساتذہ کا عملہ، کلاس کی تفویض اور محفوظ رسائی کا انتظام کریں۔",
+    "addTeacher": "استاد شامل کریں",
+    "noTeachers": "کوئی استاد نہیں ملا۔",
+    "assignedClasses": "تفویض کردہ کلاسیں",
+    "noClassesAssigned": "کوئی کلاس تفویض نہیں",
+    "resetPassword": "پاس ورڈ ری سیٹ کریں",
+    "deactivate": "غیر فعال کریں",
+    "addTeacherModalTitle": "استاد کا اکاؤنٹ شامل کریں",
+    "assignClasses": "کلاسیں تفویض کریں",
+    "createTeacherBtn": "استاد بنائیں",
+    "resetPasswordTitle": "استاد کا پاس ورڈ ری سیٹ کریں",
+    "newPassword": "نیا پاس ورڈ",
+    "setNewPassword": "نیا پاس ورڈ درج کریں"
   },
   "faceMatching": {
     "takePhoto": "تصویر کھینچیں",
@@ -301,7 +315,13 @@
     "studentsExcel": "طلبہ (Excel)",
     "summaryView": "خلاصہ دیکھیں",
     "student": "طالب علم",
-    "ratePercent": "تناسب %"
+    "ratePercent": "تناسب %",
+    "selectClassPrompt": "رجسٹر برآمد کرنے کے لیے اوپر سے کلاس منتخب کریں۔",
+    "selectDatesPrompt": "براہ کرم شروع اور اختتام دونوں تاریخیں متعین کریں۔",
+    "invalidDateRange": "شروع کی تاریخ اختتامی تاریخ سے پہلے یا برابر ہونی چاہیے۔",
+    "manualOnly": "صرف دستی محرک",
+    "lastDelivery": "آخری ترسیل",
+    "nextScheduledRun": "اگلی شیڈول ترسیل"
   },
   "settings": {
     "settingsTitle": "ترتیبات اور انتظامی امور",
@@ -312,7 +332,40 @@
     "checkRetentionStatus": "برقرار رکھنے کی حیثیت چیک کریں",
     "fullDatabaseBackup": "ڈیٹا بیس کا مکمل بیک اپ",
     "fullDatabaseBackupSub": "جماعتوں، طلبہ، حاضری اور آڈٹ لاگز کا منظم JSON بیک اپ ڈاؤن لوڈ کریں۔",
-    "downloadBackupJson": "مکمل بیک اپ (.json) ڈاؤن لوڈ کریں"
+    "downloadBackupJson": "مکمل بیک اپ (.json) ڈاؤن لوڈ کریں",
+    "systemAutomation": "ہفتہ وار خودکاری اور برقراری کی ترتیبات",
+    "systemAutomationSub": "خودکار ہفتہ وار رپورٹ وصول کنندہ، ٹائم زون اور حاضری تصحیح کی حد طے کریں۔",
+    "reportRecipientEmail": "ہفتہ وار رپورٹ کا ای میل پتہ",
+    "scheduleTimezone": "شیڈول کا ٹائم زون",
+    "correctionWindowDays": "حاضری کی تصحیح کی مدت (دن)",
+    "enableWeeklyCron": "خودکار ہفتہ وار ای میل ترسیل فعال کریں",
+    "saveSettings": "ترتیبات محفوظ کریں"
+  },
+  "storage": {
+    "title": "مونگو ڈی بی ثانوی اسٹوریج اور گردش",
+    "subtitle": "دوہری منزل مونگو ڈی بی ایٹلس فیل اوور اور اسٹوریج کوٹہ کی گردش۔",
+    "active": "فعال",
+    "clusterName": "بنیادی کلسٹر اسٹوریج",
+    "usageUnavailable": "اسٹوریج کا استعمال دستیاب نہیں ہے",
+    "used": "استعمال شدہ",
+    "secondaryCluster": "ثانوی کلسٹر",
+    "configured": "ترتیب شدہ (backup.oqduj9s.mongodb.net)",
+    "notConfigured": "ماحول میں ترتیب نہیں دیا گیا",
+    "ready": "تیار",
+    "unconfigured": "غیر ترتیب شدہ",
+    "verifySecondary": "ثانوی انڈیکسز کی تصدیق کریں",
+    "rotateDestination": "ثانوی میں منتقل کریں",
+    "recentRotations": "حالیہ اسٹوریج گردشیں"
+  },
+  "auth": {
+    "profileSecurity": "پروفائل اور سیکیورٹی",
+    "manageCredentials": "اپنے اکاؤنٹ کی معلومات اور ذاتی پاس ورڈ کا انتظام کریں۔",
+    "changePassword": "پاس ورڈ تبدیل کریں",
+    "currentPassword": "موجودہ پاس ورڈ",
+    "newPassword": "نیا پاس ورڈ",
+    "confirmPassword": "نئے پاس ورڈ کی تصدیق کریں",
+    "minCharacters": "کم از کم 6 حروف",
+    "updatePasswordBtn": "پاس ورڈ اپ ڈیٹ کریں"
   },
   "authentication": {
     "login": "سائن اِن",

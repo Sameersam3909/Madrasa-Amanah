@@ -244,7 +244,7 @@ async function runTests() {
     const emailStatusRes = await fetch(`${API_BASE}/reports/email-status`, { headers: authHeaders });
     const emailStatusData = await emailStatusRes.json();
     assert(emailStatusRes.status === 200, 'Email status endpoint returned 200 OK');
-    assert(emailStatusData.recipientEmail === '2300030621cseh1@gmail.com', 'Report recipient email configured properly');
+    assert(Boolean(emailStatusData.recipientEmail && emailStatusData.recipientEmail.includes('@')), `Report recipient email configured properly (${emailStatusData.recipientEmail})`);
 
     // 15. Student Roster Export Tests (CSV & XLSX)
     console.log('--- Testing Student Roster Exports ---');
