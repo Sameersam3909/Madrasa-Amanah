@@ -34,24 +34,17 @@ jobs:
     steps:
       - name: Validate configuration
         env:
-          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL }}
+          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || secrets.RENDER_HEALTH_URL || 'https://madrasa-attendance-api.onrender.com/api/health' }}
         run: |
           if [ -z "${HEALTH_URL:-}" ]; then
-            echo "::error::Repository variable RENDER_HEALTH_URL is not set."
-            echo ""
-            echo "To fix this:"
-            echo "  1. Go to https://github.com/${{ github.repository }}/settings/variables/actions"
-            echo "  2. Click 'New repository variable'"
-            echo "  3. Name:  RENDER_HEALTH_URL"
-            echo "  4. Value: https://YOUR-RENDER-SERVICE.onrender.com/api/health"
-            echo ""
+            echo "::error::Health URL is not set."
             exit 1
           fi
-          echo "Health URL configured ✓"
+          echo "Health URL configured: ${HEALTH_URL} ✓"
 
       - name: Ping health endpoint (with retries)
         env:
-          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL }}
+          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || secrets.RENDER_HEALTH_URL || 'https://madrasa-attendance-api.onrender.com/api/health' }}
         run: |
           set -euo pipefail
 
