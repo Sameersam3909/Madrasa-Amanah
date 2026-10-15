@@ -117,7 +117,16 @@ export default function App() {
 
   // Core Data
   const [classes, setClasses] = useState([]);
-  const [students, setStudents] = useState([]);
+  const [students, setStudents] = useState(() => {
+    try {
+      const cls = localStorage.getItem("madrasa_selected_class");
+      if (cls) {
+        const saved = localStorage.getItem("madrasa_cached_students_" + cls);
+        return saved ? JSON.parse(saved) : [];
+      }
+    } catch {}
+    return [];
+  });
   const [selectedClass, setSelectedClassState] = useState(() => {
     try {
       return localStorage.getItem("madrasa_selected_class") || "";
@@ -960,6 +969,7 @@ export default function App() {
       if (studentsRes.status === "fulfilled") {
         const unique = Array.from(new Map(studentsRes.value.data.map((s) => [String(s._id || s.id), s])).values());
         setStudents(unique);
+        try { localStorage.setItem("madrasa_cached_students_" + classId, JSON.stringify(unique)); } catch {}
         await cacheStudents(unique, classId);
       }
 
@@ -1140,15 +1150,17 @@ export default function App() {
       setError("");
       setNotice("Verifying secondary MongoDB Atlas cluster...");
       const res = await api.post("/admin/storage/verify-secondary");
-      if (res.data?.ok) {
-        setNotice(`Secondary database verified successfully ✓ Collections: ${Object.keys(res.data.collections || {}).join(", ")}`);
+      if (res.data?.success || res.data?.ok) {
+        const colls = res.data.collections ? Object.keys(res.data.collections).join(", ") : "All collections ready";
+        const ping = res.data.pingMs ? ` (${res.data.pingMs}ms latency)` : "";
+        setNotice(`Secondary database verified successfully ✓ ${colls}${ping}`);
         addNotification({
           title: "Storage Verified",
           message: "Secondary MongoDB Atlas cluster connection and collections verified.",
           type: "success"
         });
       } else {
-        setError(`Secondary database verification failed: ${res.data?.message || "Unknown error"}`);
+        setError(`Secondary database verification failed: ${res.data?.message || res.data?.error || "Unknown error"}`);
       }
       fetchStorageStatus();
     } catch (err) {
@@ -1166,7 +1178,9 @@ export default function App() {
       setStorageLoading(true);
       setError("");
       setNotice("Initiating storage rotation...");
-      const res = await api.post("/admin/storage/rotate", { reason: "Admin manual rotation trigger" });
+      const currentTarget = storageReport?.activeWriteTarget || "primary";
+      const nextTarget = currentTarget === "secondary" ? "primary" : "secondary";
+      const res = await api.post("/admin/storage/rotate", { target: nextTarget, reason: "Admin manual rotation trigger" });
       setNotice(`Storage rotated to ${res.data?.activeStorage || "secondary"} ✓`);
       addNotification({
         title: "Storage Rotated",
@@ -3985,7 +3999,7 @@ export default function App() {
           <div>
             <div className="section-title">
               <div>
-                <h2>{tab === "reports" ? t.reports : (t.settingsOperations || "Settings & Operations")}</h2>
+                <h2>{tab === "reports" ? t.reports : t("settings.title", "Settings & System Operations")}</h2>
                 <p className="muted">{t("settings.settingsSub", "Reports, offline cache control, database storage, and email automation.")}</p>
               </div>
             </div>

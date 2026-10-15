@@ -350,28 +350,30 @@ export async function getStorageHealthReport() {
 }
 
 export async function rotateWriteDestination({ target, reason, trigger = "admin", actorId = null }) {
-  if (!["primary", "secondary"].includes(target)) {
-    throw new Error("Invalid rotation destination. Expected 'primary' or 'secondary'.");
-  }
-
-  if (target === "secondary") {
-    const verifyRes = await verifySecondaryDatabase();
-    if (!verifyRes.success) {
-      throw new Error(`Cannot rotate to secondary database: ${verifyRes.message}`);
-    }
-  }
-
   let settings = await SystemSetting.findOne({ key: "global" });
   if (!settings) {
     settings = new SystemSetting({ key: "global" });
   }
 
   const previousTarget = settings.activeWriteTarget || "primary";
-  settings.activeWriteTarget = target;
+  const destination = target || (previousTarget === "secondary" ? "primary" : "secondary");
+
+  if (!["primary", "secondary"].includes(destination)) {
+    throw new Error("Invalid rotation destination. Expected 'primary' or 'secondary'.");
+  }
+
+  if (destination === "secondary") {
+    const verifyRes = await verifySecondaryDatabase();
+    if (!verifyRes.success) {
+      throw new Error(`Cannot rotate to secondary database: ${verifyRes.message}`);
+    }
+  }
+
+  settings.activeWriteTarget = destination;
   settings.rotationHistory.push({
     timestamp: new Date(),
     from: previousTarget,
-    to: target,
+    to: destination,
     reason: reason || `Storage rotation triggered by ${trigger}`,
     trigger
   });
@@ -384,14 +386,15 @@ export async function rotateWriteDestination({ target, reason, trigger = "admin"
       action: "storage.rotate",
       entityType: "SystemSetting",
       entityId: String(settings._id),
-      details: { from: previousTarget, to: target, reason, trigger }
+      details: { from: previousTarget, to: destination, reason, trigger }
     });
   }
 
   return {
     success: true,
     previousDestination: previousTarget,
-    activeWriteDestination: target,
+    activeWriteDestination: destination,
+    activeStorage: destination,
     rotatedAt: new Date().toISOString()
   };
 }
