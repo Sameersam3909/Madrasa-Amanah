@@ -151,6 +151,8 @@
     "addStudent": "Add Student",
     "editStudent": "Edit Student",
     "studentProfile": "Student Profile",
+    "downloadData": "Download Student Record",
+    "exportAllData": "Download All Students Data",
     "viewProfile": "View Profile",
     "editDetails": "Edit Details",
     "changePhoto": "Change Photo",
@@ -446,8 +448,10 @@
   "security": {
     "downloadPinTitle": "Security Verification",
     "authorizedPersonnel": "Authorized export access",
-    "downloadPinPrompt": "Please enter the security PIN (12@12) to authorize downloading this data file.",
+    "downloadPinPrompt": "Please enter the security PIN to authorize downloading this data file.",
     "enterPin": "Security PIN",
+    "enterPinPlaceholder": "••••••••",
+    "pinRequired": "Please enter the security PIN.",
     "verifyAndDownload": "Verify & Download"
   }
 }

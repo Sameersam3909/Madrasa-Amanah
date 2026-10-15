@@ -24,6 +24,7 @@ import {
   History,
   Image,
   LayoutDashboard,
+  LayoutGrid,
   Lock,
   LogOut,
   MapPin,
@@ -115,7 +116,40 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
   const [lang, setLang] = useState(localStorage.getItem("madrasa_lang") || "en");
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTabState] = useState(() => {
+    try {
+      const hash = window.location.hash.replace("#", "");
+      if (hash && ["dashboard", "attendance", "monitoring", "sync", "students", "reports", "settings", "more", "add-student"].includes(hash)) {
+        return hash;
+      }
+    } catch (_) {}
+    return "dashboard";
+  });
+
+  function setTab(newTab, replace = false) {
+    if (!newTab) return;
+    setTabState(newTab);
+    try {
+      if (replace) {
+        window.history.replaceState({ tab: newTab }, "", `#${newTab}`);
+      } else if (window.location.hash.replace("#", "") !== newTab) {
+        window.history.pushState({ tab: newTab }, "", `#${newTab}`);
+      }
+    } catch (_) {}
+  }
+
+  // Synchronize browser back/forward buttons with application tabs
+  useEffect(() => {
+    function handlePopState(e) {
+      const hash = window.location.hash.replace("#", "");
+      const targetTab = e.state?.tab || hash || "dashboard";
+      if (targetTab) {
+        setTabState(targetTab);
+      }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   // Core Data
@@ -661,6 +695,22 @@ export default function App() {
     }
   }
 
+  async function downloadSingleStudentData(student, format = "json") {
+    if (!student) return;
+    setLoading(true);
+    try {
+      const sId = student._id || student.id;
+      const cleanName = (student.name || "Student").replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
+      const filename = `Madrasa-Amanah-Student-${student.admissionNo || "Data"}-${cleanName}-${today()}.${format}`;
+      await triggerFileDownload(`/students/${sId}/export`, { format }, filename);
+      setNotice(`Student record for ${student.name} downloaded ✓`);
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // Save notifications
   useEffect(() => {
     localStorage.setItem("madrasa_notifications", JSON.stringify(notifications));
@@ -1041,7 +1091,7 @@ export default function App() {
   // Periodic Admin Health Check (Only while settings/reports tab is open)
   useEffect(() => {
     if (!token || !user || user.role !== "admin") return;
-    if (tab === "more" || tab === "reports") {
+    if (tab === "more" || tab === "reports" || tab === "settings") {
       fetchHealthCheck();
       const interval = setInterval(fetchHealthCheck, 30000);
       return () => clearInterval(interval);
@@ -1096,7 +1146,7 @@ export default function App() {
   // System Settings, Teachers & Storage Admin loaders
   useEffect(() => {
     if (!token || !user) return;
-    if (tab === "more" || tab === "reports") {
+    if (tab === "more" || tab === "reports" || tab === "settings") {
       fetchEmailStatus();
       if (user.role === "admin") {
         fetchTeachers();
@@ -2141,7 +2191,7 @@ export default function App() {
     if (!downloadPinModal) return;
     const pin = downloadPinInput.trim();
     if (!pin) {
-      setDownloadPinError("Please enter the security PIN (12@12).");
+      setDownloadPinError(t("security.pinRequired", "Please enter the security PIN."));
       return;
     }
     setDownloadPinLoading(true);
@@ -3604,6 +3654,28 @@ export default function App() {
         {/* TAB 4: STUDENTS DIRECTORY & MANAGEMENT */}
         {tab === "students" && (
           <div>
+            {/* Mobile Breadcrumb / Back to More */}
+            <div className="mobile-only" style={{ marginBottom: 10 }}>
+              <button
+                type="button"
+                onClick={() => setTab("more")}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--primary)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  padding: "4px 0",
+                  cursor: "pointer"
+                }}
+              >
+                ← {t.more} / {t.students}
+              </button>
+            </div>
+
             <div className="section-title" style={{ flexWrap: "wrap", gap: 10 }}>
               <div>
                 <h2>{t.studentsTitle}</h2>
@@ -3840,6 +3912,17 @@ export default function App() {
                           <Edit3 size={15} />
                         </button>
 
+                        <button
+                          type="button"
+                          className="btn secondary"
+                          onClick={() => downloadSingleStudentData(s)}
+                          title={t("students.downloadData", "Download Student Record")}
+                          aria-label={`Download ${localizeStudentName(s.name, lang)} data`}
+                          style={{ minHeight: 34, padding: "5px 9px", fontSize: 12 }}
+                        >
+                          <Download size={15} />
+                        </button>
+
                         <div style={{ position: "relative" }}>
                           <button
                             type="button"
@@ -3948,6 +4031,18 @@ export default function App() {
                                   >
                                     <History size={15} color="var(--primary)" />
                                     <span>{t.attendanceHistory}</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="student-action-item"
+                                    onClick={() => {
+                                      setActiveMenuStudentId(null);
+                                      downloadSingleStudentData(s);
+                                    }}
+                                  >
+                                    <Download size={15} color="var(--primary)" />
+                                    <span>{t("students.downloadData", "Download Student Record")}</span>
                                   </button>
 
                                   {user?.role === "admin" && (
@@ -4232,15 +4327,145 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 5: REPORTS & ADMIN SETTINGS (MORE) */}
-        {(tab === "more" || tab === "reports") && (
+        {/* TAB 5: REPORTS & ADMIN SETTINGS & MORE */}
+        {(tab === "more" || tab === "reports" || tab === "settings") && (
           <div>
-            <div className="section-title">
+            <div className="section-title" style={{ flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
               <div>
-                <h2>{tab === "reports" ? t.reports : t("settings.title", "Settings & System Operations")}</h2>
-                <p className="muted">{t("settings.settingsSub", "Reports, offline cache control, database storage, and email automation.")}</p>
+                <h2>
+                  {tab === "reports"
+                    ? t.reports
+                    : tab === "settings"
+                    ? t.settings
+                    : t("settings.title", "Settings & System Operations")}
+                </h2>
+                <p className="muted" style={{ margin: 0 }}>
+                  {tab === "reports"
+                    ? t("reports.reportsSub", "Download attendance registers, weekly reports, and student rosters.")
+                    : t("settings.settingsSub", "Reports, offline cache control, database storage, and email automation.")}
+                </p>
+              </div>
+
+              {/* Sub-view switcher pill bar */}
+              <div style={{ display: "inline-flex", background: "var(--border)", borderRadius: "var(--radius-sm)", padding: 3, gap: 3 }}>
+                <button
+                  type="button"
+                  className={`btn ${tab === "reports" ? "primary" : "secondary"}`}
+                  onClick={() => setTab("reports")}
+                  style={{ minHeight: 32, padding: "4px 12px", fontSize: 12, border: "none" }}
+                >
+                  <FileSpreadsheet size={14} /> {t.reports}
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${tab === "settings" ? "primary" : "secondary"}`}
+                  onClick={() => setTab("settings")}
+                  style={{ minHeight: 32, padding: "4px 12px", fontSize: 12, border: "none" }}
+                >
+                  <Settings size={14} /> {t.settings}
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${tab === "more" ? "primary" : "secondary"}`}
+                  onClick={() => setTab("more")}
+                  style={{ minHeight: 32, padding: "4px 12px", fontSize: 12, border: "none" }}
+                >
+                  <MoreHorizontal size={14} /> {t.more}
+                </button>
               </div>
             </div>
+
+            {/* Quick Access Hub Cards for More View */}
+            {tab === "more" && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10, marginBottom: 20 }}>
+                {/* Students Card */}
+                <div
+                  className="card"
+                  onClick={() => setTab("students")}
+                  style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: 8, padding: 14, border: "1.5px solid var(--border)", transition: "all 0.15s ease" }}
+                >
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: "#EAF5EE", color: "var(--primary)", display: "grid", placeItems: "center" }}>
+                    <Users size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{t.students}</h3>
+                    <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--muted)", lineHeight: 1.25 }}>
+                      {t.manageStudentsSub || "View and search students directory"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Reports Card */}
+                <div
+                  className="card"
+                  onClick={() => setTab("reports")}
+                  style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: 8, padding: 14, border: "1.5px solid var(--border)", transition: "all 0.15s ease" }}
+                >
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: "#EEF4F8", color: "var(--info)", display: "grid", placeItems: "center" }}>
+                    <FileSpreadsheet size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{t.reports}</h3>
+                    <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--muted)", lineHeight: 1.25 }}>
+                      {t("reports.reportsSub", "Download registers and rosters")}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Settings Card */}
+                <div
+                  className="card"
+                  onClick={() => setTab("settings")}
+                  style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: 8, padding: 14, border: "1.5px solid var(--border)", transition: "all 0.15s ease" }}
+                >
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: "#FEF9EB", color: "#D97706", display: "grid", placeItems: "center" }}>
+                    <Settings size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{t.settings}</h3>
+                    <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--muted)", lineHeight: 1.25 }}>
+                      {t("settings.settingsSub", "Class and system operations")}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Add Student Card (Admin only) */}
+                {user?.role === "admin" && (
+                  <div
+                    className="card"
+                    onClick={() => {
+                      setStudentForm({
+                        admissionNo: "",
+                        name: "",
+                        gender: "",
+                        dob: "",
+                        guardianName: "",
+                        guardianPhone: "",
+                        address: "",
+                        enrollmentDate: today(),
+                        consentGiven: true
+                      });
+                      setTab("add-student");
+                    }}
+                    style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: 8, padding: 14, border: "1.5px solid var(--border)", transition: "all 0.15s ease" }}
+                  >
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: "#FDF0F0", color: "var(--danger)", display: "grid", placeItems: "center" }}>
+                      <Plus size={20} />
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{t.addStudent}</h3>
+                      <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--muted)", lineHeight: 1.25 }}>
+                        Enroll new student with biometric photo
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* REPORTS SECTION */}
+            {(tab === "more" || tab === "reports") && (
+              <>
 
             {/* Download Registers */}
             <div className="card">
@@ -4427,7 +4652,12 @@ export default function App() {
                 </div>
               </div>
             )}
+            </>
+            )}
 
+            {/* SETTINGS & SYSTEM OPERATIONS SECTION */}
+            {(tab === "more" || tab === "settings") && (
+              <>
             {/* Universal User Profile & Password Change */}
             <div className="card">
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
@@ -4957,6 +5187,8 @@ export default function App() {
                 <LogOut size={16} /> {t.signout}
               </button>
             </div>
+            </>
+            )}
           </div>
         )}
       </main>
@@ -5428,6 +5660,13 @@ export default function App() {
                 style={{ minHeight: 40 }}
               >
                 <History size={16} /> {t.attendanceHistory || "Attendance History"}
+              </button>
+              <button
+                className="btn secondary"
+                onClick={() => downloadSingleStudentData(viewingStudentProfile)}
+                style={{ minHeight: 40 }}
+              >
+                <Download size={16} /> {t("students.downloadData", "Download Student Record")}
               </button>
             </div>
           </div>
@@ -6222,7 +6461,7 @@ export default function App() {
             </div>
 
             <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
-              {t("security.downloadPinPrompt", "Please enter the security PIN (12@12) to authorize downloading this data file.")}
+              {t("security.downloadPinPrompt", "Please enter the security PIN to authorize downloading this data file.")}
             </p>
 
             {downloadPinError && (
@@ -6246,7 +6485,7 @@ export default function App() {
                     setDownloadPinInput(e.target.value);
                     if (downloadPinError) setDownloadPinError("");
                   }}
-                  placeholder="12@12"
+                  placeholder={t("security.enterPinPlaceholder", "••••••••")}
                   style={{
                     width: "100%",
                     fontSize: 16,
@@ -6283,54 +6522,66 @@ export default function App() {
         </div>
       )}
 
-      {/* MOBILE BOTTOM NAVIGATION */}
-      <nav className="bottom-nav">
+      {/* MOBILE BOTTOM NAVIGATION — PROFESSIONAL SINGLE-ROW FIXED LAYOUT */}
+      <nav className="bottom-nav" aria-label="Mobile Navigation">
+        {/* Item 1: Dashboard */}
         <button
+          type="button"
           className={`bottom-nav-item ${tab === "dashboard" ? "active" : ""}`}
           onClick={() => setTab("dashboard")}
+          aria-label={t.dashboard}
+          aria-current={tab === "dashboard" ? "page" : undefined}
         >
-          <LayoutDashboard size={20} />
+          <LayoutGrid size={20} strokeWidth={1.8} />
           <span>{t.dashboard}</span>
         </button>
 
+        {/* Item 2: Take Attendance */}
         <button
+          type="button"
           className={`bottom-nav-item ${tab === "attendance" ? "active" : ""}`}
           onClick={() => setTab("attendance")}
+          aria-label={t.takeAttendanceAction || t.attendance}
+          aria-current={tab === "attendance" ? "page" : undefined}
         >
-          <Camera size={20} />
-          <span>{t.attendance}</span>
+          <Camera size={20} strokeWidth={1.8} />
+          <span>{t.takeAttendanceAction || t.attendance}</span>
         </button>
 
+        {/* Item 3: Attendance Monitoring */}
         <button
+          type="button"
           className={`bottom-nav-item ${tab === "monitoring" ? "active" : ""}`}
           onClick={() => setTab("monitoring")}
+          aria-label={t.monitoring}
+          aria-current={tab === "monitoring" ? "page" : undefined}
         >
-          <Activity size={20} />
+          <Activity size={20} strokeWidth={1.8} />
           <span>{t.monitoring}</span>
         </button>
 
+        {/* Item 4: Sync Center */}
         <button
+          type="button"
           className={`bottom-nav-item ${tab === "sync" ? "active" : ""}`}
           onClick={() => setTab("sync")}
+          aria-label={t.syncCenter}
+          aria-current={tab === "sync" ? "page" : undefined}
         >
-          <RefreshCw size={20} />
+          <RefreshCw size={20} strokeWidth={1.8} />
           <span>{t.syncCenter}</span>
           {pendingCount > 0 && <span className="bottom-badge">{pendingCount}</span>}
         </button>
 
+        {/* Item 5: More (Access Students, Reports, Settings, Add Student) */}
         <button
-          className={`bottom-nav-item ${tab === "students" ? "active" : ""}`}
-          onClick={() => setTab("students")}
-        >
-          <Users size={20} />
-          <span>{t.students}</span>
-        </button>
-
-        <button
-          className={`bottom-nav-item ${tab === "more" || tab === "reports" ? "active" : ""}`}
+          type="button"
+          className={`bottom-nav-item ${["more", "students", "reports", "settings", "add-student"].includes(tab) ? "active" : ""}`}
           onClick={() => setTab("more")}
+          aria-label={t.more}
+          aria-current={["more", "students", "reports", "settings", "add-student"].includes(tab) ? "page" : undefined}
         >
-          <MoreHorizontal size={20} />
+          <MoreHorizontal size={20} strokeWidth={1.8} />
           <span>{t.more}</span>
         </button>
       </nav>

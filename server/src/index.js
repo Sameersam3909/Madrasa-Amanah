@@ -980,6 +980,84 @@ app.get("/api/students/:id/attendance", async (req, res) => {
   });
 });
 
+// Single Student Complete Record & Attendance Export (JSON or CSV)
+app.get("/api/students/:id/export", exportRateLimiter, requireExportPin, async (req, res) => {
+  try {
+    const student = await Student.findById(req.params.id).select("-faceDescriptor").populate("classId", "name section academicYear");
+    if (!student) return res.status(404).json({ message: "Student not found." });
+    if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
+
+    const attendance = await Attendance.find({ studentId: student._id }).populate("classId", "name section").sort({ dateKey: -1 }).lean();
+    const format = req.query.format || "json";
+    const cleanName = (student.name || "Student").replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    if (format === "csv") {
+      const filename = `Madrasa-Amanah-Student-${student.admissionNo || "Data"}-${cleanName}-${todayStr}.csv`;
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+
+      let csv = "\uFEFF"; // UTF-8 BOM
+      csv += "Admission No,Student Name,English Name,Urdu Name,Telugu Name,Class,Status,Gender,Guardian Name,Guardian Phone,Address,Consent Recorded\n";
+      csv += `"${student.admissionNo || ""}","${student.name || ""}","${student.nameEn || ""}","${student.nameUr || ""}","${student.nameTe || ""}","${student.classId?.name || ""} (${student.classId?.section || ""})","${student.active !== false ? "Active" : "Archived"}","${student.gender || ""}","${student.guardianName || ""}","${student.guardianPhone || ""}","${student.address || ""}","${student.consentGiven ? "Yes" : "No"}"\n\n`;
+      csv += "Date,Status,Confirmed,Session,Notes\n";
+      attendance.forEach(a => {
+        csv += `"${a.dateKey}","${a.status}","${a.confirmed ? "Yes" : "No"}","${a.session || "Morning"}","${(a.notes || "").replace(/"/g, '""')}"\n`;
+      });
+      return res.send(csv);
+    }
+
+    const filename = `Madrasa-Amanah-Student-${student.admissionNo || "Data"}-${cleanName}-${todayStr}.json`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+
+    const exportData = {
+      system: "Madrasa Amanah Smart Attendance",
+      exportTimestamp: new Date().toISOString(),
+      student: {
+        id: String(student._id),
+        admissionNo: student.admissionNo,
+        name: student.name,
+        nameEn: student.nameEn,
+        nameUr: student.nameUr,
+        nameTe: student.nameTe,
+        gender: student.gender,
+        dob: student.dob,
+        class: student.classId ? { id: String(student.classId._id), name: student.classId.name, section: student.classId.section } : null,
+        guardianName: student.guardianName,
+        guardianPhone: student.guardianPhone,
+        address: student.address,
+        active: student.active !== false,
+        consentGiven: !!student.consentGiven,
+        enrollmentDate: student.enrollmentDate,
+        createdAt: student.createdAt,
+        updatedAt: student.updatedAt
+      },
+      attendanceSummary: {
+        totalRecords: attendance.length,
+        present: attendance.filter(a => a.status === "present").length,
+        absent: attendance.filter(a => a.status === "absent").length,
+        late: attendance.filter(a => a.status === "late").length,
+        excused: attendance.filter(a => a.status === "excused").length,
+        attendanceRatePercent: attendance.length > 0
+          ? Math.round((attendance.filter(a => a.status === "present").length / attendance.length) * 100)
+          : 0
+      },
+      attendanceRecords: attendance.map(a => ({
+        dateKey: a.dateKey,
+        status: a.status,
+        confirmed: a.confirmed,
+        notes: a.notes,
+        updatedAt: a.updatedAt
+      }))
+    };
+
+    res.json(exportData);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to export student data.", error: err.message });
+  }
+});
+
 // Student Archival (Soft Delete) — Admin Only
 app.post("/api/students/:id/archive", requireAdmin, async (req, res) => {
   const student = await Student.findById(req.params.id);

@@ -151,6 +151,8 @@
     "addStudent": "طالب علم شامل کریں",
     "editStudent": "طالب علم میں ترمیم",
     "studentProfile": "طالب علم کا پروفائل",
+    "downloadData": "طالب علم کا ریکارڈ ڈاؤن لوڈ کریں",
+    "exportAllData": "تمام طلباء کا ڈیٹا ڈاؤن لوڈ کریں",
     "viewProfile": "پروفائل دیکھیں",
     "editDetails": "تفصیلات میں ترمیم کریں",
     "changePhoto": "تصویر تبدیل کریں",
@@ -358,8 +360,10 @@
   "security": {
     "downloadPinTitle": "سیکیورٹی توثیق",
     "authorizedPersonnel": "مجاز ڈاؤن لوڈ رسائی",
-    "downloadPinPrompt": "ڈیٹا فائل ڈاؤن لوڈ کرنے کے لیے سیکیورٹی پن (12@12) درج کریں۔",
+    "downloadPinPrompt": "ڈیٹا فائل ڈاؤن لوڈ کرنے کے لیے مجاز سیکیورٹی پن درج کریں۔",
     "enterPin": "سیکیورٹی پن",
+    "enterPinPlaceholder": "••••••••",
+    "pinRequired": "براہ کرم سیکیورٹی پن درج کریں۔",
     "verifyAndDownload": "توثیق اور ڈاؤن لوڈ کریں"
   }
 }
