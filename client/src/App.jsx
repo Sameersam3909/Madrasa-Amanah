@@ -1263,17 +1263,22 @@ export default function App() {
   }
 
   async function handleDeactivateTeacher(teacher) {
-    if (!window.confirm(`Are you sure you want to deactivate teacher ${teacher.name}? Safe account rules apply: historical attendance records, class logs, and audit trails will be strictly preserved.`)) {
+    const tId = teacher._id || teacher.id;
+    if (!window.confirm(`Are you sure you want to remove teacher "${teacher.name}"? Historical attendance records will remain safely preserved in the archive.`)) {
       return;
     }
     setError("");
     setNotice("");
+    setLoading(true);
     try {
-      await api.delete(`/admin/users/${teacher._id || teacher.id}`);
-      setNotice(`Teacher ${teacher.name} has been deactivated. Historical records preserved.`);
+      await api.delete(`/admin/users/${tId}?permanent=true`);
+      setTeachers((prev) => prev.filter((t) => (t._id || t.id) !== tId));
+      setNotice(`Teacher "${teacher.name}" was removed successfully.`);
       fetchTeachers();
     } catch (err) {
       setError(errText(err));
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -4619,7 +4624,7 @@ export default function App() {
                   </div>
 
                   <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
-                    {classes.map((cls) => (
+                    {classes.filter(c => c.active !== false).map((cls) => (
                       <div
                         key={cls._id || cls.id}
                         style={{
@@ -4711,11 +4716,11 @@ export default function App() {
                     </button>
                   </div>
 
-                  {teachers.filter(u => u.role === "teacher").length === 0 ? (
+                  {teachers.filter(u => u.role === "teacher" && u.active !== false).length === 0 ? (
                     <p className="muted" style={{ fontSize: 13 }}>{t("teachers.noTeachers", "No teachers registered yet.")}</p>
                   ) : (
                     <div style={{ display: "grid", gap: 8 }}>
-                      {teachers.filter(u => u.role === "teacher").map((teacher) => (
+                      {teachers.filter(u => u.role === "teacher" && u.active !== false).map((teacher) => (
                         <div
                           key={teacher._id || teacher.id}
                           style={{

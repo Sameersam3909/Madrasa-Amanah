@@ -275,10 +275,33 @@ app.post("/api/classes/:id/restore", requireAdmin, async (req, res) => {
 app.delete("/api/classes/:id", requireAdmin, async (req, res) => {
   const cls = await Class.findById(req.params.id);
   if (!cls) return res.status(404).json({ message: "Class not found." });
+
+  const studentCount = await Student.countDocuments({ classId: cls._id });
+  const attCount = await Attendance.countDocuments({ classId: cls._id });
+  const isPermanent = req.query.permanent === "true" || (studentCount === 0 && attCount === 0);
+
+  if (isPermanent && studentCount === 0 && attCount === 0) {
+    await Class.findByIdAndDelete(cls._id);
+    await AuditLog.create({
+      actorId: req.user._id,
+      action: "class.delete",
+      entityType: "Class",
+      entityId: String(cls._id),
+      details: { name: cls.name, permanent: true }
+    });
+    return res.json({ success: true, deleted: true, message: `Class ${cls.name} permanently deleted.`, id: String(cls._id) });
+  }
+
   cls.active = false;
   await cls.save();
-  await AuditLog.create({ actorId: req.user._id, action: "class.deactivate", entityType: "Class", entityId: String(cls._id) });
-  res.json({ message: `Class ${cls.name} deactivated successfully.`, id: String(cls._id) });
+  await AuditLog.create({
+    actorId: req.user._id,
+    action: "class.deactivate",
+    entityType: "Class",
+    entityId: String(cls._id),
+    details: { name: cls.name, studentCount }
+  });
+  res.json({ success: true, deactivated: true, message: `Class ${cls.name} removed successfully.`, id: String(cls._id) });
 });
 
 // Students API
@@ -2210,32 +2233,52 @@ app.patch("/api/admin/users/:id", requireAdmin, async (req, res) => {
   res.json({ id: user._id, name: user.name, email: user.email, role: user.role, active: user.active, assignedClasses: user.assignedClasses });
 });
 
-// Safe Teacher / User Deactivation (Preserves attendance and audit records)
+// Safe Teacher / User Deactivation & Removal (Preserves attendance and audit records)
 app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user) return res.status(404).json({ message: "User not found." });
   if (String(user._id) === String(req.user._id)) {
-    return res.status(400).json({ message: "You cannot deactivate your own administrative account." });
+    return res.status(400).json({ message: "You cannot remove your own administrative account." });
   }
 
-  // Safe Account Rule: Deactivate, revoke class assignment, but NEVER delete historical attendance!
-  user.active = false;
-  await user.save();
-
+  // Remove teacher from any class assignments
   await Class.updateMany({ teacherIds: user._id }, { $pull: { teacherIds: user._id } });
 
-  await AuditLog.create({
-    actorId: req.user._id,
-    action: "user.deactivate",
-    entityType: "User",
-    entityId: String(user._id),
-    details: { name: user.name, email: user.email, role: user.role, reason: req.body?.reason || "Deactivated by administrator" }
-  });
+  const attCount = await Attendance.countDocuments({ markedBy: user._id });
+  const isPermanent = req.query.permanent === "true" || attCount === 0;
 
-  res.json({
-    message: `Account for ${user.name} safely deactivated. Historical attendance records are preserved.`,
-    user: { id: user._id, name: user.name, email: user.email, active: false }
-  });
+  if (isPermanent) {
+    await User.findByIdAndDelete(user._id);
+    await AuditLog.create({
+      actorId: req.user._id,
+      action: "user.delete",
+      entityType: "User",
+      entityId: String(user._id),
+      details: { name: user.name, email: user.email, role: user.role, permanentlyDeleted: true }
+    });
+    return res.json({
+      success: true,
+      deleted: true,
+      message: `Teacher ${user.name} removed successfully.`,
+      id: String(user._id)
+    });
+  } else {
+    user.active = false;
+    await user.save();
+    await AuditLog.create({
+      actorId: req.user._id,
+      action: "user.deactivate",
+      entityType: "User",
+      entityId: String(user._id),
+      details: { name: user.name, email: user.email, role: user.role, permanentlyDeleted: false }
+    });
+    return res.json({
+      success: true,
+      deactivated: true,
+      message: `Teacher ${user.name} removed and deactivated from active roster.`,
+      user: { id: user._id, name: user.name, email: user.email, active: false }
+    });
+  }
 });
 
 app.post("/api/admin/users/:id/reset-password", requireAdmin, async (req, res) => {
