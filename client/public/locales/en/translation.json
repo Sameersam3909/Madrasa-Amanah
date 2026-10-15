@@ -40,9 +40,17 @@
     "optedOut": "Opted out",
     "all": "All",
     "back": "Back",
-    "next": "Next",
     "from": "From",
-    "to": "To"
+    "to": "To",
+    "name": "Student Name",
+    "studentName": "Student Name",
+    "admissionNo": "Admission Number",
+    "gender": "Gender",
+    "dob": "Date of Birth",
+    "guardian": "Guardian / Parent",
+    "guardianName": "Guardian Name",
+    "phone": "Phone Number",
+    "guardianPhone": "Guardian Phone"
   },
   "navigation": {
     "brand": "Madrasa Amanah",

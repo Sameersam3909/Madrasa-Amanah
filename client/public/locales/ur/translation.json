@@ -40,9 +40,17 @@
     "optedOut": "انکار کیا گیا",
     "all": "سب",
     "back": "واپس",
-    "next": "اگلا",
     "from": "شروع",
-    "to": "آخر"
+    "to": "آخر",
+    "name": "طالب علم کا نام",
+    "studentName": "طالب علم کا نام",
+    "admissionNo": "داخلہ نمبر",
+    "gender": "جنس",
+    "dob": "تاریخ پیدائش",
+    "guardian": "سرپرست / والد",
+    "guardianName": "سرپرست کا نام",
+    "phone": "فون نمبر",
+    "guardianPhone": "سرپرست کا فون"
   },
   "navigation": {
     "brand": "مدرسہ امانہ",

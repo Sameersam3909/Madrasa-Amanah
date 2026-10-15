@@ -3486,7 +3486,7 @@ export default function App() {
                     <table className="monitoring-table">
                       <thead>
                         <tr>
-                          <th>{t.name}</th>
+                          <th>{t("students.studentName", t.studentName || t("name") || "Student Name")}</th>
                           <th>{t.admissionNo}</th>
                           <th>{t.class}</th>
                           <th>{t.date}</th>
@@ -4237,7 +4237,7 @@ export default function App() {
               </div>
 
               <label>
-                {t.name} *
+                {t("students.studentName", t.studentName || t("name") || "Student Name")} *
                 <input
                   required
                   value={studentForm.name}
@@ -4248,7 +4248,7 @@ export default function App() {
 
               <div className="responsive-grid-2">
                 <label>
-                  {t.gender || "Gender"}
+                  {t.gender || t("common.gender", "Gender")}
                   <select
                     value={studentForm.gender}
                     onChange={(e) => setStudentForm({ ...studentForm, gender: e.target.value })}
@@ -4260,7 +4260,7 @@ export default function App() {
                 </label>
 
                 <label>
-                  {t.dob || "Date of Birth"}
+                  {t.dob || t("students.dob", "Date of Birth")}
                   <input
                     type="date"
                     value={studentForm.dob}
@@ -4271,7 +4271,7 @@ export default function App() {
 
               <div className="responsive-grid-2">
                 <label>
-                  {t.guardian}
+                  {t.guardian || t("students.guardian", "Guardian / Parent")}
                   <input
                     value={studentForm.guardianName}
                     onChange={(e) => setStudentForm({ ...studentForm, guardianName: e.target.value })}
@@ -4280,7 +4280,7 @@ export default function App() {
                 </label>
 
                 <label>
-                  {t.phone}
+                  {t.phone || t("students.phone", "Phone Number")}
                   <input
                     type="tel"
                     value={studentForm.guardianPhone}
@@ -5735,7 +5735,7 @@ export default function App() {
               </div>
 
               <label>
-                {t.name} *
+                {t("students.studentName", t.studentName || t("name") || "Student Name")} *
                 <input
                   required
                   value={editingStudent.name}
@@ -6273,7 +6273,7 @@ export default function App() {
             </div>
             <form onSubmit={handleCreateTeacher} style={{ display: "grid", gap: 12 }}>
               <label>
-                {t.name} *
+                {t("teachers.teacherName", t.name || "Teacher Name")} *
                 <input
                   required
                   value={teacherForm.name}

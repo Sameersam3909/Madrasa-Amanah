@@ -90,10 +90,14 @@ export function createTranslator(lang = "en") {
     return val;
   }
 
-  // Allow direct property access (e.g. t.brand, t.students, t.save)
+  // Allow direct property access (e.g. t.brand, t.students, t.save, t.name)
   return new Proxy(t, {
     get(target, prop) {
       if (typeof prop !== "string") return target[prop];
+      if (prop === "call" || prop === "apply" || prop === "bind") return target[prop];
+      if (prop in currentDict || prop in fallbackDict) {
+        return t(prop);
+      }
       if (prop in target) return target[prop];
       return t(prop);
     }

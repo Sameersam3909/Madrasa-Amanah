@@ -2082,6 +2082,14 @@ th {
 .monitoring-kpi-card.kpi-excused::before { background: var(--info); }
 .monitoring-kpi-card.kpi-unmarked::before { background: #A0AEC0; }
 .monitoring-kpi-card.kpi-rate::before { background: linear-gradient(90deg, var(--primary), var(--accent)); }
+.monitoring-kpi-card.kpi-rate {
+  grid-column: 1 / -1;
+}
+@media (min-width: 640px) {
+  .monitoring-kpi-card.kpi-rate {
+    grid-column: auto;
+  }
+}
 
 .monitoring-kpi-label {
   font-size: 11px;
