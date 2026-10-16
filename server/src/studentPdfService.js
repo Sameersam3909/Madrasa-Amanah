@@ -70,7 +70,7 @@ export function calculateAge(dobStr) {
 
 /**
  * Safely fetches a student photograph as a Buffer
- * Supports both HTTP/HTTPS URLs (including Cloudinary) and Base64 Data URIs
+ * Supports HTTP/HTTPS URLs (including Cloudinary) and Base64 Data URIs
  */
 export async function fetchStudentPhotoBuffer(photoUrl) {
   if (!photoUrl || typeof photoUrl !== "string") return null;
@@ -87,7 +87,6 @@ export async function fetchStudentPhotoBuffer(photoUrl) {
     }
 
     if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-      // If it's a Cloudinary URL, ensure it is served in a compatible JPEG/PNG format
       let fetchUrl = trimmed;
       if (fetchUrl.includes("res.cloudinary.com") && !fetchUrl.endsWith(".jpg") && !fetchUrl.endsWith(".png")) {
         fetchUrl = fetchUrl.replace(/\/image\/upload\//, "/image/upload/f_jpg/");
@@ -96,15 +95,7 @@ export async function fetchStudentPhotoBuffer(photoUrl) {
       const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(7000) });
       if (res.ok) {
         const arrayBuf = await res.arrayBuffer();
-        const buf = Buffer.from(arrayBuf);
-        // Quick verification of JPEG or PNG magic header
-        const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
-        const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-        if (isJpeg || isPng) {
-          return buf;
-        }
-        // Even if not standard magic byte, PDFKit might support or we return it
-        return buf;
+        return Buffer.from(arrayBuf);
       }
     }
   } catch (err) {
@@ -117,7 +108,7 @@ export async function fetchStudentPhotoBuffer(photoUrl) {
  * Generates the official Madrasa Amanah Student Profile PDF
  * 
  * @param {Object} options
- * @param {Object} options.student - Student document (populated with classId)
+ * @param {Object} options.student - Student document (populated with classId and teacherIds)
  * @param {Array} options.attendance - Array of attendance records
  * @param {NodeJS.WritableStream} options.outputStream - Stream to pipe PDF into
  * @returns {Promise<PDFKit.PDFDocument>}
@@ -162,12 +153,13 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   const accentGold = "#D4A759";
   const textColor = "#1F2937";
   const textMuted = "#6B7280";
-  const borderGray = "#E5E7EB";
-  const lightBg = "#F9FAFB";
-  const cardBorder = "#D1D5DB";
+  const borderGray = "#E2E8F0";
+  const lightBg = "#F8FAFC";
+  const cardBorder = "#CBD5E1";
 
-  // Preload photo
-  const imageBuffer = await fetchStudentPhotoBuffer(student.photoUrl);
+  // Preload photo (checks photoUrl or referencePhotoUrl)
+  const candidatePhoto = student.photoUrl || student.referencePhotoUrl || student.photoDataUrl || "";
+  const imageBuffer = await fetchStudentPhotoBuffer(candidatePhoto);
 
   // Helper for drawing localized text
   const drawLocalizedText = (text, x, y, options = {}) => {
@@ -200,16 +192,15 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
 
   // Helper for drawing field key-value pairs
   const drawField = (label, value, x, y, labelW = 80, valW = 160) => {
-    doc.fillColor(textMuted).fontSize(7.5).font("Helvetica-Bold").text(label.toUpperCase(), x, y);
-    const valY = y + 10;
+    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text(label.toUpperCase(), x, y);
+    const valY = y + 9.5;
     const displayVal = value !== undefined && value !== null && String(value).trim() !== "" ? String(value) : "—";
     drawLocalizedText(displayVal, x, valY, { fontSize: 8.5, color: textColor, width: valW, ellipsis: true });
   };
 
   // =========================================================================
-  // PAGE 1: HEADER & DOSSIER OVERVIEW
+  // TOP HEADER BANNER
   // =========================================================================
-
   const drawHeaderBanner = () => {
     // Top Banner Background
     doc.roundedRect(36, 36, 523, 62, 5).fill(primaryColor);
@@ -243,8 +234,8 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     doc.fillColor("#FFFFFF").fontSize(10).font("Helvetica-Bold").text("OFFICIAL STUDENT DOSSIER", 340, 46, { align: "right", width: 205 });
     const formattedDate = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
     const formattedTime = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text(`Report Date: ${formattedDate} ${formattedTime}`, 340, 64, { align: "right", width: 205 });
-    doc.fillColor("#A7F3D0").fontSize(7).font("Helvetica").text(`Madrasa ID: MA-ATT-2026`, 340, 76, { align: "right", width: 205 });
+    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text(`Generated: ${formattedDate} ${formattedTime}`, 340, 64, { align: "right", width: 205 });
+    doc.fillColor("#A7F3D0").fontSize(7).font("Helvetica").text(`Institution: Madrasa Amanah (Atmakur)`, 340, 76, { align: "right", width: 205 });
   };
 
   drawHeaderBanner();
@@ -252,17 +243,17 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   // =========================================================================
   // SECTION A: STUDENT PROFILE & PHOTOGRAPH
   // =========================================================================
-  const profileY = 108;
-  const profileH = 138;
+  const profileY = 106;
+  const profileH = 142;
   doc.roundedRect(36, profileY, 523, profileH, 5).fillAndStroke(lightBg, borderGray);
 
   // Photo Frame
   const photoX = 48;
-  const photoY = profileY + 13;
-  const photoW = 88;
-  const photoH = 112;
+  const photoY = profileY + 12;
+  const photoW = 90;
+  const photoH = 118;
 
-  // Frame Background & Shadow border
+  // Frame Outer Background & Shadow border
   doc.roundedRect(photoX, photoY, photoW, photoH, 4).fillAndStroke("#FFFFFF", cardBorder);
 
   let photoRendered = false;
@@ -286,26 +277,26 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
 
   // Graceful Professional Vector Photo Placeholder if image is missing or invalid
   if (!photoRendered) {
-    doc.roundedRect(photoX + 2, photoY + 2, photoW - 4, photoH - 4, 3).fill("#F3F4F6");
+    doc.roundedRect(photoX + 2, photoY + 2, photoW - 4, photoH - 4, 3).fill("#F1F5F9");
 
     // Stylized user avatar silhouette
     const avX = photoX + photoW / 2;
-    const avY = photoY + 45;
+    const avY = photoY + 46;
     doc.save();
-    doc.fillColor("#D1D5DB");
+    doc.fillColor("#CBD5E1");
     // Head circle
-    doc.circle(avX, avY, 16).fill();
+    doc.circle(avX, avY, 17).fill();
     // Shoulders arc
-    doc.path(`M ${avX - 25} ${avY + 36} C ${avX - 25} ${avY + 20}, ${avX + 25} ${avY + 20}, ${avX + 25} ${avY + 36} Z`).fill();
+    doc.path(`M ${avX - 28} ${avY + 40} C ${avX - 28} ${avY + 22}, ${avX + 28} ${avY + 22}, ${avX + 28} ${avY + 40} Z`).fill();
     doc.restore();
 
-    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text("STUDENT PHOTO", photoX, photoY + 86, { align: "center", width: photoW });
-    doc.fillColor("#9CA3AF").fontSize(6.5).font("Helvetica").text(imageBuffer ? "Format Unsupported" : "No Photo on Record", photoX, photoY + 97, { align: "center", width: photoW });
+    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text("STUDENT PHOTO", photoX, photoY + 92, { align: "center", width: photoW });
+    doc.fillColor("#94A3B8").fontSize(6.5).font("Helvetica").text(imageBuffer ? "Format Unsupported" : "No Photo on Record", photoX, photoY + 103, { align: "center", width: photoW });
   }
 
   // Student Identity Info (Right of Photo)
-  const infoX = 148;
-  let curY = profileY + 13;
+  const infoX = 150;
+  let curY = profileY + 12;
 
   // Student Primary Display Name
   const canonicalName = normalizeStudentName(student.name || "Student");
@@ -314,7 +305,7 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   const nameTe = (student.nameTe || "").trim();
 
   // Primary English / Canonical Name
-  drawLocalizedText(nameEn || canonicalName, infoX, curY, { fontSize: 15, bold: true, color: textColor, width: 320 });
+  drawLocalizedText(nameEn || canonicalName, infoX, curY, { fontSize: 15, bold: true, color: textColor, width: 330 });
   curY += 19;
 
   // Multilingual Secondary Names (Urdu & Telugu) if present
@@ -336,51 +327,62 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     curY += 16;
   }
 
-  // Identity Badges (Admission No & Active Status)
+  // Identity Badges (Admission No, Active Status, Class)
   const badgeY = curY;
   // Admission badge
   const admText = `ROLL / ADM #${student.admissionNo || "—"}`;
-  doc.roundedRect(infoX, badgeY, 115, 17, 3).fill("#E0E7FF");
-  doc.fillColor("#3730A3").fontSize(8).font("Helvetica-Bold").text(admText, infoX + 7, badgeY + 4);
+  doc.roundedRect(infoX, badgeY, 110, 16, 3).fill("#E0E7FF");
+  doc.fillColor("#3730A3").fontSize(8).font("Helvetica-Bold").text(admText, infoX + 6, badgeY + 4);
 
   // Status badge
   const isActive = student.active !== false;
   const statusBg = isActive ? "#D1FAE5" : "#FEE2E2";
   const statusColor = isActive ? "#065F46" : "#991B1B";
   const statusLabel = isActive ? "ACTIVE ENROLLMENT" : "ARCHIVED / INACTIVE";
-  doc.roundedRect(infoX + 122, badgeY, 115, 17, 3).fill(statusBg);
-  doc.fillColor(statusColor).fontSize(8).font("Helvetica-Bold").text(statusLabel, infoX + 128, badgeY + 4);
+  doc.roundedRect(infoX + 116, badgeY, 115, 16, 3).fill(statusBg);
+  doc.fillColor(statusColor).fontSize(8).font("Helvetica-Bold").text(statusLabel, infoX + 122, badgeY + 4);
 
   // Class Badge
-  const classDisplayName = `${student.classId?.name || "Unassigned"}${student.classId?.section ? ` - Sec ${student.classId.section}` : ""}`;
-  doc.roundedRect(infoX + 244, badgeY, 155, 17, 3).fill("#FEF3C7");
-  doc.fillColor("#92400E").fontSize(8).font("Helvetica-Bold").text(classDisplayName.toUpperCase(), infoX + 250, badgeY + 4, { width: 145, ellipsis: true });
+  const classDisplayName = `${student.classId?.name || "Unassigned"}${student.classId?.section ? ` - ${student.classId.section}` : ""}`;
+  doc.roundedRect(infoX + 237, badgeY, 162, 16, 3).fill("#FEF3C7");
+  doc.fillColor("#92400E").fontSize(8).font("Helvetica-Bold").text(classDisplayName.toUpperCase(), infoX + 243, badgeY + 4, { width: 152, ellipsis: true });
 
+  curY += 23;
+
+  // Multi-column Profile Details Grid
+  const pCol1 = infoX;
+  const pCol2 = infoX + 130;
+  const pCol3 = infoX + 260;
+
+  drawField("Assigned Class", classDisplayName, pCol1, curY, 70, 120);
+  drawField("Academic Year", student.classId?.academicYear || "2026-2027", pCol2, curY, 70, 120);
+  const formattedEnroll = student.enrollmentDate ? String(student.enrollmentDate).slice(0, 10) : "Not Recorded";
+  drawField("Enrollment Date", formattedEnroll, pCol3, curY, 70, 130);
   curY += 25;
 
-  // Two-column Profile Details Grid
-  const pCol1 = infoX;
-  const pCol2 = infoX + 195;
-
-  drawField("Class & Section", classDisplayName, pCol1, curY, 80, 185);
-  drawField("Academic Year", student.classId?.academicYear || "Current 2026-2027", pCol2, curY, 80, 110);
-  curY += 24;
-
-  drawField("Gender", student.gender || "Not Specified", pCol1, curY, 80, 185);
+  drawField("Gender", student.gender || "Not Specified", pCol1, curY, 70, 120);
   const formattedDob = student.dob ? String(student.dob).slice(0, 10) : "Not Recorded";
   const age = calculateAge(student.dob);
   const dobDisplay = age !== null ? `${formattedDob} (${age} yrs)` : formattedDob;
-  drawField("Date of Birth", dobDisplay, pCol2, curY, 80, 110);
-  curY += 24;
+  drawField("Date of Birth", dobDisplay, pCol2, curY, 70, 120);
 
-  const formattedEnroll = student.enrollmentDate ? String(student.enrollmentDate).slice(0, 10) : "Not Recorded";
-  drawField("Enrollment Date", formattedEnroll, pCol1, curY, 80, 185);
-  drawField("Photo Consent", student.consentGiven ? "Recorded (Consent Given ✓)" : "Pending / Not Given", pCol2, curY, 80, 110);
+  // Teachers assigned
+  let teacherDisplay = "Madrasa Staff";
+  if (Array.isArray(student.classId?.teacherIds) && student.classId.teacherIds.length > 0) {
+    teacherDisplay = student.classId.teacherIds.map(t => t.name || t).filter(Boolean).join(", ") || "Madrasa Staff";
+  }
+  drawField("Assigned Teacher", teacherDisplay, pCol3, curY, 70, 130);
+  curY += 25;
+
+  drawField("Photo Consent", student.consentGiven ? "Recorded (Granted ✓)" : "Pending / Not Given", pCol1, curY, 70, 120);
+  const hasBiometrics = Boolean(student.faceDescriptor && student.faceDescriptor.length > 0);
+  drawField("AI Biometrics", hasBiometrics ? "Enrolled (Face Model ✓)" : "Standard Registry", pCol2, curY, 70, 120);
+  drawField("Assigned Madrasa", "Madrasa Amanah (Atmakur)", pCol3, curY, 70, 130);
 
   // =========================================================================
   // SECTION B: PERSONAL & GUARDIAN DETAILS
   // =========================================================================
-  const guardY = profileY + profileH + 10;
+  const guardY = profileY + profileH + 9;
   const guardH = 68;
   doc.roundedRect(36, guardY, 523, guardH, 5).fillAndStroke(lightBg, borderGray);
 
@@ -389,8 +391,8 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   doc.moveTo(48, guardY + 20).lineTo(547, guardY + 20).strokeColor(borderGray).stroke();
 
   const gY = guardY + 26;
-  drawField("Father / Guardian", student.guardianName || "Not Recorded", 48, gY, 95, 140);
-  drawField("Authorized Phone", student.guardianPhone || "Not Recorded", 215, gY, 90, 120);
+  drawField("Father / Guardian", student.guardianName || "Not Recorded on file", 48, gY, 95, 145);
+  drawField("Authorized Contact", student.guardianPhone || "Not Recorded on file", 215, gY, 90, 130);
   drawField("Student Database ID", String(student._id || "—"), 365, gY, 90, 180);
 
   drawField("Residential Address", student.address || "Not Recorded on file", 48, gY + 22, 95, 495);
@@ -398,10 +400,10 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   // =========================================================================
   // SECTION C: ATTENDANCE SUMMARY & KPIS
   // =========================================================================
-  const statsSectionY = guardY + guardH + 12;
-  doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold").text("ATTENDANCE PERFORMANCE METRICS", 36, statsSectionY);
+  const statsSectionY = guardY + guardH + 11;
+  doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold").text("ATTENDANCE PERFORMANCE METRICS & STANDING", 36, statsSectionY);
 
-  // Sorting attendance: chronologically (oldest to newest) for detailed log, with clear metric calculation
+  // Sorting attendance: chronologically (oldest to newest)
   const sortedAttendance = [...attendance].sort((a, b) => {
     const da = String(a.dateKey || "");
     const db = String(b.dateKey || "");
@@ -414,10 +416,25 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   const late = sortedAttendance.filter(a => a.status === "late").length;
   const excused = sortedAttendance.filter(a => a.status === "excused").length;
 
-  // Attendance rate standard formula: (Present / Total) * 100
-  // In Madrasa Amanah, late arrivals are counted as attended with minor demerit
+  // Attendance rate standard formula: ((Present + 0.75 * Late) / Total) * 100
   const rate = total > 0 ? Math.round(((present + (late * 0.75)) / total) * 100) : 0;
   const purePresentRate = total > 0 ? Math.round((present / total) * 100) : 0;
+
+  // Academic Standing Badge
+  let standingLabel = "N/A (No Sessions)";
+  let standingColor = textMuted;
+  if (total > 0) {
+    if (rate >= 90) {
+      standingLabel = "Excellent (ممتاز) ★";
+      standingColor = "#059669";
+    } else if (rate >= 75) {
+      standingLabel = "Good / Satisfactory (جید) ✓";
+      standingColor = "#0D9488";
+    } else {
+      standingLabel = "Attendance Alert / Low (ضعیف) ⚠";
+      standingColor = "#DC2626";
+    }
+  }
 
   // Reporting Period
   let reportingPeriod = "No attendance sessions logged";
@@ -428,7 +445,9 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   }
 
   doc.fillColor(textMuted).fontSize(7.5).font("Helvetica")
-    .text(`Reporting Period: ${reportingPeriod}  •  Formula: ((Present + 0.75 × Late) / Total) × 100`, 36, statsSectionY + 11);
+    .text(`Reporting Period: ${reportingPeriod}  •  Attendance Standing: `, 36, statsSectionY + 11);
+  const standX = 36 + doc.widthOfString(`Reporting Period: ${reportingPeriod}  •  Attendance Standing: `);
+  drawLocalizedText(standingLabel, standX, statsSectionY + 11, { fontSize: 7.5, bold: true, color: standingColor });
 
   // 5 KPI Cards
   const kpiY = statsSectionY + 23;
@@ -445,16 +464,16 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     }
   };
 
-  drawKpiCard("Total Sessions", total, 36, textColor, lightBg, `${total} logged`);
-  drawKpiCard("Present", present, 36 + kpiW + kpiGap, "#059669", "#ECFDF5", `${purePresentRate}% pure`);
+  drawKpiCard("Total Sessions", total, 36, textColor, lightBg, `${total} records`);
+  drawKpiCard("Present", present, 36 + kpiW + kpiGap, "#059669", "#ECFDF5", `${purePresentRate}% pure on-time`);
   drawKpiCard("Absent", absent, 36 + (kpiW + kpiGap) * 2, "#DC2626", "#FEF2F2", `${absent} unexcused`);
   drawKpiCard("Late / Tardy", late, 36 + (kpiW + kpiGap) * 3, "#D97706", "#FFFBEB", `${late} arrivals`);
-  drawKpiCard("Attendance Rate", `${rate}%`, 36 + (kpiW + kpiGap) * 4, rate >= 75 ? "#059669" : "#DC2626", rate >= 75 ? "#ECFDF5" : "#FEF2F2", rate >= 75 ? "Good Standing ✓" : "Requires Attention");
+  drawKpiCard("Attendance Rate", `${rate}%`, 36 + (kpiW + kpiGap) * 4, rate >= 75 ? "#059669" : "#DC2626", rate >= 75 ? "#ECFDF5" : "#FEF2F2", rate >= 75 ? "Qualified ✓" : "Review Required");
 
   // =========================================================================
   // SECTION D: ATTENDANCE HISTORY LOG TABLE (WITH AUTO PAGINATION)
   // =========================================================================
-  let tableStartY = kpiY + kpiH + 14;
+  let tableStartY = kpiY + kpiH + 13;
   doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold").text("CHRONOLOGICAL ATTENDANCE REGISTER", 36, tableStartY);
 
   const tCols = [44, 126, 206, 286, 366];
@@ -470,8 +489,8 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     });
   };
 
-  drawTableHeader(tableStartY + 13);
-  let curRowY = tableStartY + 32;
+  drawTableHeader(tableStartY + 12);
+  let curRowY = tableStartY + 31;
 
   // Max Y before triggering page break
   const pageBottomLimit = 730;
@@ -492,7 +511,7 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
         curRowY += 31;
       }
 
-      const bg = idx % 2 === 0 ? "#FFFFFF" : "#F9FAFB";
+      const bg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
       doc.rect(36, curRowY, 523, rowH).fill(bg);
 
       // Date
@@ -525,7 +544,7 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     });
 
     // Outer table border for the current page
-    doc.rect(36, tableStartY + 13, 523, Math.min(curRowY, pageBottomLimit) - (tableStartY + 13)).strokeColor(borderGray).stroke();
+    doc.rect(36, tableStartY + 12, 523, Math.min(curRowY, pageBottomLimit) - (tableStartY + 12)).strokeColor(borderGray).stroke();
   }
 
   // =========================================================================
@@ -545,7 +564,7 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     doc.text(`Student Database Record: ${student._id}  •  Page ${i + 1} of ${range.count}`, 36, footY + 17);
 
     // Official Seal and Signature Line
-    doc.moveTo(420, footY + 40).lineTo(540, footY + 40).strokeColor("#9CA3AF").stroke();
+    doc.moveTo(420, footY + 40).lineTo(540, footY + 40).strokeColor("#94A3B8").stroke();
     doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text("Authorized Signature & Seal", 420, footY + 44, { align: "center", width: 120 });
   }
 

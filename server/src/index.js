@@ -996,7 +996,14 @@ app.get("/api/students/:id/attendance", async (req, res) => {
 // Single Student Complete Record & Attendance Export (JSON or CSV)
 app.get("/api/students/:id/export", exportRateLimiter, requireExportPin, async (req, res) => {
   try {
-    const student = await Student.findById(req.params.id).select("-faceDescriptor").populate("classId", "name section academicYear");
+    const student = await Student.findById(req.params.id)
+      .select("+faceDescriptor")
+      .populate({
+        path: "classId",
+        select: "name section academicYear code teacherIds",
+        populate: { path: "teacherIds", select: "name email role" }
+      })
+      .lean();
     if (!student) return res.status(404).json({ message: "Student not found." });
     if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
 
