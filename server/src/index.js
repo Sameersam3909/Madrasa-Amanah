@@ -31,6 +31,7 @@ import {
   verifyMonthlyExcelBackup,
   exportAndSaveMonthlyBackup
 } from "./monthlyBackupService.js";
+import { compareRollNumbers, compareStudentsByClassAndRoll, sortStudentsByRoll } from "./utils/studentSort.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -313,6 +314,7 @@ app.get("/api/students/face-index", async (req, res) => {
   if (!classId) return res.status(400).json({ message: "classId is required." });
   if (!(await canAccessClass(req.user, classId))) return res.status(403).json({ message: "Class access denied." });
   const students = await Student.find({ classId, active: true }).select("+faceDescriptor admissionNo name photoUrl consentGiven").lean();
+  students.sort(compareRollNumbers);
   res.json(students.map(s => ({
     id: s._id,
     name: s.name,
@@ -361,7 +363,8 @@ app.get("/api/students", async (req, res) => {
   let query = Student.find(filter)
     .select("-faceDescriptor")
     .populate("classId", "name section academicYear")
-    .sort({ name: 1 })
+    .collation({ locale: "en", numericOrdering: true })
+    .sort({ admissionNo: 1, name: 1 })
     .lean();
 
   if (limit > 0) {
@@ -373,6 +376,7 @@ app.get("/api/students", async (req, res) => {
   }
 
   const students = await query;
+  students.sort(compareRollNumbers);
 
   res.json(students.map(s => ({
     ...s,
@@ -848,7 +852,9 @@ app.get("/api/students/export", exportRateLimiter, requireExportPin, async (req,
 
   const students = await Student.find(filter)
     .populate("classId", "name section academicYear")
-    .sort({ name: 1 });
+    .collation({ locale: "en", numericOrdering: true })
+    .sort({ admissionNo: 1, name: 1 });
+  students.sort(compareRollNumbers);
 
   const rows = students.map(s => ({
     "Admission No": s.admissionNo,
@@ -988,9 +994,211 @@ app.get("/api/students/:id/export", exportRateLimiter, requireExportPin, async (
     if (!(await canAccessClass(req.user, student.classId))) return res.status(403).json({ message: "Class access denied." });
 
     const attendance = await Attendance.find({ studentId: student._id }).populate("classId", "name section").sort({ dateKey: -1 }).lean();
-    const format = req.query.format || "json";
+    const format = (req.query.format || "pdf").toLowerCase();
     const cleanName = (student.name || "Student").replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
     const todayStr = new Date().toISOString().slice(0, 10);
+
+    if (format === "pdf") {
+      const filename = `Madrasa-Amanah-Student-${student.admissionNo || "Data"}-${cleanName}-${todayStr}.pdf`;
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+      res.setHeader("Content-Type", "application/pdf");
+
+      let imageBuffer = null;
+      if (student.photoUrl) {
+        try {
+          const imgRes = await fetch(student.photoUrl, { signal: AbortSignal.timeout(6000) });
+          if (imgRes.ok) {
+            imageBuffer = Buffer.from(await imgRes.arrayBuffer());
+          }
+        } catch (imgErr) {
+          console.warn("Could not fetch student photo for PDF export:", imgErr.message);
+        }
+      }
+
+      const doc = new PDFDocument({ margin: 36, size: "A4" });
+      doc.pipe(res);
+
+      const primaryColor = "#174B36";
+      const textColor = "#1F2937";
+      const mutedColor = "#6B7280";
+      const borderGray = "#E5E7EB";
+      const lightBg = "#F9FAFB";
+
+      // 1. TOP HEADER BANNER
+      doc.roundedRect(36, 36, 523, 56, 4).fill(primaryColor);
+      doc.fillColor("#FFFFFF").fontSize(16).font("Helvetica-Bold").text("MADRASA AMANAH", 50, 48);
+      doc.fillColor("#D1FAE5").fontSize(8.5).font("Helvetica").text("SMART ATTENDANCE MANAGEMENT SYSTEM", 50, 68);
+
+      doc.fillColor("#FFFFFF").fontSize(10).font("Helvetica-Bold").text("OFFICIAL STUDENT DOSSIER", 340, 48, { align: "right", width: 200 });
+      const formattedDate = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+      doc.fillColor("#D1FAE5").fontSize(8).font("Helvetica").text(`Generated: ${formattedDate}`, 340, 66, { align: "right", width: 200 });
+
+      // 2. STUDENT IDENTITY & PHOTO BOX
+      const topY = 104;
+      doc.roundedRect(36, topY, 523, 136, 4).fillAndStroke(lightBg, borderGray);
+
+      // Photo Frame
+      const photoX = 48;
+      const photoY = topY + 12;
+      const photoW = 88;
+      const photoH = 112;
+
+      doc.rect(photoX, photoY, photoW, photoH).fillAndStroke("#FFFFFF", "#D1D5DB");
+      if (imageBuffer) {
+        try {
+          doc.image(imageBuffer, photoX + 2, photoY + 2, { fit: [photoW - 4, photoH - 4], align: "center", valign: "center" });
+        } catch (e) {
+          doc.fillColor(mutedColor).fontSize(9).font("Helvetica").text("Photo\nUnavailable", photoX, photoY + 45, { align: "center", width: photoW });
+        }
+      } else {
+        doc.fillColor(mutedColor).fontSize(9).font("Helvetica").text("No Photo\nRecorded", photoX, photoY + 45, { align: "center", width: photoW });
+      }
+
+      // Student Info
+      const infoX = 150;
+      let curY = topY + 12;
+
+      // Normalize student name: replace accidental Urdu full-stop (U+06D4) with standard dot in Latin names
+      const normalizeName = (n) => {
+        if (!n) return "";
+        let val = String(n).trim();
+        if (/[a-zA-Z]/.test(val) && val.includes("\u06D4")) {
+          val = val.replace(/([a-zA-Z])\u06D4\s*/g, "$1. ").replace(/\s*\u06D4\s*([a-zA-Z])/g, ". $1").replace(/\u06D4/g, ".").replace(/\s+/g, " ").trim();
+        }
+        return val;
+      };
+      const studentDisplayName = normalizeName(student.nameEn) || normalizeName(student.name) || "Student";
+      doc.fillColor(textColor).fontSize(16).font("Helvetica-Bold").text(studentDisplayName, infoX, curY);
+      curY += 20;
+
+      // Badges
+      doc.roundedRect(infoX, curY, 95, 17, 3).fill("#E0E7FF");
+      doc.fillColor("#3730A3").fontSize(8.5).font("Helvetica-Bold").text(`ADMISSION #${student.admissionNo || "—"}`, infoX + 6, curY + 4);
+
+      const statusColor = student.active !== false ? "#065F46" : "#991B1B";
+      const statusBg = student.active !== false ? "#D1FAE5" : "#FEE2E2";
+      const statusText = student.active !== false ? "ACTIVE STUDENT" : "ARCHIVED";
+      doc.roundedRect(infoX + 105, curY, 85, 17, 3).fill(statusBg);
+      doc.fillColor(statusColor).fontSize(8.5).font("Helvetica-Bold").text(statusText, infoX + 111, curY + 4);
+
+      curY += 26;
+
+      const col1X = infoX;
+      const col2X = 350;
+      const labelW = 75;
+      const valW = 115;
+
+      const drawField = (label, val, x, y) => {
+        doc.fillColor(mutedColor).fontSize(8).font("Helvetica-Bold").text(label.toUpperCase(), x, y);
+        doc.fillColor(textColor).fontSize(9).font("Helvetica").text(String(val || "—"), x + labelW, y, { width: valW, ellipsis: true });
+      };
+
+      drawField("Class:", `${student.classId?.name || "Class"}${student.classId?.section ? ` (${student.classId.section})` : ""}`, col1X, curY);
+      drawField("Academic Yr:", student.classId?.academicYear || "Current", col2X, curY);
+      curY += 16;
+
+      drawField("Gender:", student.gender || "—", col1X, curY);
+      drawField("Date of Birth:", student.dob ? String(student.dob).slice(0, 10) : "—", col2X, curY);
+      curY += 16;
+
+      drawField("Enrollment:", student.enrollmentDate ? String(student.enrollmentDate).slice(0, 10) : "—", col1X, curY);
+      drawField("Photo Consent:", student.consentGiven ? "Recorded (Yes)" : "Not Given", col2X, curY);
+
+      // 3. GUARDIAN & CONTACT INFORMATION
+      const guardY = 250;
+      doc.roundedRect(36, guardY, 523, 62, 4).fillAndStroke(lightBg, borderGray);
+      doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold").text("GUARDIAN & CONTACT DETAILS", 48, guardY + 10);
+      doc.moveTo(48, guardY + 22).lineTo(547, guardY + 22).strokeColor("#E5E7EB").stroke();
+
+      drawField("Guardian:", student.guardianName || "—", 48, guardY + 28);
+      drawField("Phone:", student.guardianPhone || "—", 240, guardY + 28);
+      drawField("Address:", student.address || "—", 48, guardY + 44);
+
+      // 4. ATTENDANCE METRICS SUMMARY
+      const statsY = 322;
+      doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold").text("ATTENDANCE PERFORMANCE SUMMARY", 36, statsY);
+
+      const total = attendance.length;
+      const present = attendance.filter(a => a.status === "present").length;
+      const absent = attendance.filter(a => a.status === "absent").length;
+      const late = attendance.filter(a => a.status === "late").length;
+      const pct = total > 0 ? Math.round((present / total) * 100) : 0;
+
+      const cardW = 98;
+      const cardH = 46;
+      const cardGap = 8;
+      const cardY = statsY + 14;
+
+      const drawKpi = (label, val, x, valColor = textColor, bg = lightBg) => {
+        doc.roundedRect(x, cardY, cardW, cardH, 4).fillAndStroke(bg, borderGray);
+        doc.fillColor(mutedColor).fontSize(7.5).font("Helvetica-Bold").text(label.toUpperCase(), x + 8, cardY + 8);
+        doc.fillColor(valColor).fontSize(15).font("Helvetica-Bold").text(String(val), x + 8, cardY + 22);
+      };
+
+      drawKpi("Total Sessions", total, 36);
+      drawKpi("Present", present, 36 + cardW + cardGap, "#059669", "#ECFDF5");
+      drawKpi("Absent", absent, 36 + (cardW + cardGap) * 2, "#DC2626", "#FEF2F2");
+      drawKpi("Late", late, 36 + (cardW + cardGap) * 3, "#D97706", "#FFFBEB");
+      drawKpi("Attendance Rate", `${pct}%`, 36 + (cardW + cardGap) * 4, pct >= 75 ? "#059669" : "#DC2626", lightBg);
+
+      // 5. ATTENDANCE LOG HISTORY (TABLE)
+      const tableY = 394;
+      doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold").text("RECENT ATTENDANCE LOG", 36, tableY);
+
+      const tHeaderY = tableY + 14;
+      doc.rect(36, tHeaderY, 523, 20).fill(primaryColor);
+      const tCols = [44, 130, 210, 290, 370];
+      const tHeads = ["DATE", "SESSION", "STATUS", "VERIFIED", "REMARKS / NOTES"];
+
+      doc.fillColor("#FFFFFF").fontSize(7.5).font("Helvetica-Bold");
+      tHeads.forEach((h, i) => {
+        doc.text(h, tCols[i], tHeaderY + 6);
+      });
+
+      let rowY = tHeaderY + 20;
+      const rowH = 17;
+      const maxRows = 17;
+      const displayRows = attendance.slice(0, maxRows);
+
+      displayRows.forEach((r, idx) => {
+        const bg = idx % 2 === 0 ? "#FFFFFF" : "#F9FAFB";
+        doc.rect(36, rowY, 523, rowH).fill(bg);
+
+        doc.fillColor(textColor).fontSize(8).font("Helvetica");
+        doc.text(r.dateKey || "—", tCols[0], rowY + 4);
+        doc.text(r.session || "Morning", tCols[1], rowY + 4);
+
+        const st = (r.status || "unmarked").toLowerCase();
+        const stColor = st === "present" ? "#059669" : st === "absent" ? "#DC2626" : st === "late" ? "#D97706" : "#2563EB";
+        doc.fillColor(stColor).font("Helvetica-Bold").text(st.toUpperCase(), tCols[2], rowY + 4);
+
+        doc.fillColor(mutedColor).font("Helvetica").text(r.confirmed ? "Yes (Confirmed)" : "Draft", tCols[3], rowY + 4);
+        doc.fillColor(textColor).font("Helvetica").text(r.notes ? String(r.notes).slice(0, 32) : "—", tCols[4], rowY + 4, { width: 175, ellipsis: true });
+
+        rowY += rowH;
+      });
+
+      if (displayRows.length === 0) {
+        doc.rect(36, rowY, 523, 24).fill("#FFFFFF");
+        doc.fillColor(mutedColor).fontSize(8.5).font("Helvetica").text("No attendance entries recorded for this student yet.", 48, rowY + 7);
+        rowY += 24;
+      }
+
+      doc.rect(36, tHeaderY, 523, rowY - tHeaderY).strokeColor(borderGray).stroke();
+
+      // 6. OFFICIAL FOOTER
+      const footY = 740;
+      doc.moveTo(36, footY).lineTo(559, footY).strokeColor("#D1D5DB").stroke();
+
+      doc.fillColor(mutedColor).fontSize(7.5).font("Helvetica")
+        .text("Madrasa Amanah Smart Attendance System • Official Confidential Academic & Attendance Record", 36, footY + 8);
+      doc.text(`Record ID: ${student._id} • Page 1 of 1`, 36, footY + 18);
+
+      doc.moveTo(420, footY + 42).lineTo(540, footY + 42).strokeColor("#9CA3AF").stroke();
+      doc.fillColor(mutedColor).fontSize(7.5).font("Helvetica-Bold").text("Authorized Signature / Seal", 420, footY + 45, { align: "center", width: 120 });
+
+      return doc.end();
+    }
 
     if (format === "csv") {
       const filename = `Madrasa-Amanah-Student-${student.admissionNo || "Data"}-${cleanName}-${todayStr}.csv`;
@@ -1182,7 +1390,9 @@ app.get("/api/attendance/monitoring", async (req, res) => {
 
   const eligibleStudents = await Student.find(studentFilter)
     .populate("classId", "name section academicYear")
-    .sort({ name: 1 });
+    .collation({ locale: "en", numericOrdering: true })
+    .sort({ admissionNo: 1, name: 1 });
+  eligibleStudents.sort(compareRollNumbers);
 
   // Mode: Date Range Monitoring
   if (startDate && endDate) {
@@ -1372,6 +1582,8 @@ app.get("/api/attendance/monitoring", async (req, res) => {
   if (statusFilter && statusFilter !== "all") {
     rows = rows.filter((r) => r.status.toLowerCase() === statusFilter);
   }
+
+  rows.sort(compareRollNumbers);
 
   res.json({
     mode: "single",
@@ -1746,8 +1958,9 @@ app.get("/api/reports/summary", async (req, res) => {
       excused: 1,
       percentage: { $cond: [{ $gt: ["$total", 0] }, { $round: [{ $multiply: [{ $divide: ["$present", "$total"] }, 100] }, 1] }, 0] }
     } },
-    { $sort: { name: 1 } }
+    { $sort: { admissionNo: 1, name: 1 } }
   ]);
+  rows.sort(compareRollNumbers);
   res.json(rows);
 });
 

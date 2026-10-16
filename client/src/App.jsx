@@ -87,6 +87,8 @@ import {
 } from "./offlineDb";
 import StudentSearchDropdown from "./components/StudentSearchDropdown.jsx";
 import { getStudentDisplayName, getStudentNameDir, matchesStudentSearch } from "./utils/studentName.js";
+import { sortStudentsByRoll, compareStudentsByClassAndRoll } from "./utils/studentSort.js";
+import { checkImageQuality, evaluateFaceMatch } from "./utils/faceQuality.js";
 
 const today = () => new Date().toLocaleDateString("en-CA");
 const errText = (e) => e?.response?.data?.message || e?.message || "Something went wrong.";
@@ -369,14 +371,16 @@ export default function App() {
 
   const filteredStudents = useMemo(
     () =>
-      students.filter((s) =>
-        `${s.name} ${s.admissionNo}`.toLowerCase().includes(search.toLowerCase())
+      sortStudentsByRoll(
+        students.filter((s) =>
+          `${s.name} ${s.admissionNo}`.toLowerCase().includes(search.toLowerCase())
+        )
       ),
     [students, search]
   );
 
   const filteredDirectoryStudents = useMemo(() => {
-    return directoryStudents.filter((s) => {
+    const filtered = directoryStudents.filter((s) => {
       if (studentStatusFilter === "active" && s.active === false) return false;
       if (studentStatusFilter === "archived" && s.active !== false) return false;
       if (studentClassFilter !== "all") {
@@ -394,6 +398,7 @@ export default function App() {
       }
       return true;
     });
+    return [...filtered].sort(compareStudentsByClassAndRoll);
   }, [directoryStudents, studentStatusFilter, studentClassFilter, search]);
 
   // Fetch directory students
@@ -695,7 +700,7 @@ export default function App() {
     }
   }
 
-  async function downloadSingleStudentData(student, format = "json") {
+  async function downloadSingleStudentData(student, format = "pdf") {
     if (!student) return;
     setLoading(true);
     try {
@@ -703,7 +708,7 @@ export default function App() {
       const cleanName = (student.name || "Student").replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
       const filename = `Madrasa-Amanah-Student-${student.admissionNo || "Data"}-${cleanName}-${today()}.${format}`;
       await triggerFileDownload(`/students/${sId}/export`, { format }, filename);
-      setNotice(`Student record for ${student.name} downloaded ✓`);
+      setNotice(`Student record for ${student.name} downloaded (${format.toUpperCase()}) ✓`);
     } catch (err) {
       setError(errText(err));
     } finally {
@@ -1954,6 +1959,12 @@ export default function App() {
         }
       }
 
+      // Pre-check image quality before running face detection
+      const qualityCheck = checkImageQuality(img);
+      if (!qualityCheck.ok) {
+        setNotice(qualityCheck.message + " Face detection will still attempt, but results may be less accurate.");
+      }
+
       const found = await faceapi
         .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.38 }))
         .withFaceLandmarks()
@@ -1987,11 +1998,10 @@ export default function App() {
           best.distance > 0.42
         );
 
-        // Acceptance threshold: distance < 0.52 and not ambiguous
-        const confident = Boolean(best && best.distance < 0.52 && !isAmbiguous);
-        const confidencePct = best
-          ? Math.max(0, Math.min(100, Math.round(Math.max(0, 1 - (best.distance / 0.70)) * 100)))
-          : 0;
+        // Use calibrated face quality scoring for confidence
+        const matchEval = best ? evaluateFaceMatch(best.distance, isAmbiguous) : { confidencePct: 0, isConfident: false };
+        const confident = Boolean(best && matchEval.isConfident);
+        const confidencePct = matchEval.confidencePct;
 
         const assignedStudent = confident ? best.student : null;
         const assignedStudentId = assignedStudent ? String(assignedStudent.id || assignedStudent._id) : "";
@@ -3052,7 +3062,7 @@ export default function App() {
                         )}
                       </div>
                       <div className="student-card-identity">
-                        <strong className="student-card-name" dir={nameDir}>
+                        <strong className="student-card-name" dir="ltr" style={{ textAlign: "left", unicodeBidi: "plaintext" }}>
                           {displayName}
                         </strong>
                         <span className="student-card-id-tag">
@@ -3860,11 +3870,11 @@ export default function App() {
                         tabIndex={0}
                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openStudentProfile(s); }}
                       >
-                        <div className="student-card-name-row">
-                          <strong>{localizeStudentName(s.name, lang)}</strong>
+                        <div className="student-card-name-row" dir="ltr" style={{ textAlign: "left" }}>
+                          <strong style={{ unicodeBidi: "plaintext" }}>{getStudentDisplayName(s, lang)}</strong>
                           {(s.admissionNo || s.admissionNumber) && (
                             <span className="student-card-admission-badge">
-                              {s.admissionNo || s.admissionNumber}
+                              #{s.admissionNo || s.admissionNumber}
                             </span>
                           )}
                         </div>

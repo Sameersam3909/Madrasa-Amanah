@@ -3,6 +3,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { Attendance, Class, Student, User, AuditLog } from "./models.js";
+import { compareRollNumbers } from "./utils/studentSort.js";
 
 /**
  * Calculates previous calendar month based on specified timezone (defaults to Asia/Kolkata).
@@ -100,13 +101,15 @@ export async function generateMonthlyExcelWorkbook({ from, to, monthLabel, month
   // 1. Fetch live application records
   const [classes, students, attendances] = await Promise.all([
     Class.find({ active: true }).populate("teacherIds", "name email").sort({ name: 1 }),
-    Student.find({ active: true }).populate("classId", "name section").sort({ name: 1 }),
+    Student.find({ active: true }).populate("classId", "name section").collation({ locale: "en", numericOrdering: true }).sort({ admissionNo: 1, name: 1 }),
     Attendance.find({ dateKey: { $gte: from, $lte: to } })
       .populate("studentId", "name admissionNo classId")
       .populate("classId", "name section")
       .populate("markedBy", "name email")
       .sort({ dateKey: 1, sessionKey: 1 })
   ]);
+
+  students.sort(compareRollNumbers);
 
   const totalEligibleStudents = students.length;
   const totalRecords = attendances.length;

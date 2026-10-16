@@ -278,16 +278,30 @@ function translateWords(text, lang) {
   return translated.join(" ");
 }
 
+function cleanStudentPunctuation(str) {
+  if (!str || typeof str !== "string") return "";
+  let val = str.trim();
+  if (/[a-zA-Z]/.test(val) && val.includes("\u06D4")) {
+    val = val
+      .replace(/([a-zA-Z])\u06D4\s*/g, "$1. ")
+      .replace(/\s*\u06D4\s*([a-zA-Z])/g, ". $1")
+      .replace(/\u06D4/g, ".")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return val;
+}
+
 /**
  * Localize Student Names in Urdu and Telugu
  */
 export function localizeStudentName(input, lang = "en") {
   if (!input) return "";
   if (typeof input === "object" && input !== null) {
-    const nameEn = (input.nameEn || "").trim();
+    const nameEn = cleanStudentPunctuation(input.nameEn || "");
     const nameUr = (input.nameUr || "").trim();
     const nameTe = (input.nameTe || "").trim();
-    const canonical = (input.name || input.fullName || "").trim();
+    const canonical = cleanStudentPunctuation(input.name || input.fullName || "");
     const admissionNo = (input.admissionNo || input.admissionNumber || "").trim();
     if (lang === "ur" && nameUr) return nameUr;
     if (lang === "te" && nameTe) return nameTe;
@@ -295,7 +309,7 @@ export function localizeStudentName(input, lang = "en") {
     return canonical || nameEn || nameUr || nameTe || admissionNo;
   }
   // Preserve personal names as-is without automatically translating into broken mixed scripts
-  return String(input).trim();
+  return cleanStudentPunctuation(String(input));
 }
 
 /**

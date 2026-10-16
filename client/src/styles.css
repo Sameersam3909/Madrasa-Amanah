@@ -801,7 +801,12 @@ small {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 2px;
+}
+
+[dir="rtl"] .student-card-identity {
+  align-items: flex-start;
 }
 
 .student-card-name {
@@ -812,6 +817,9 @@ small {
   margin: 0;
   word-break: break-word;
   overflow-wrap: break-word;
+  text-align: left;
+  direction: ltr;
+  unicode-bidi: plaintext;
 }
 
 .student-card-id-tag {
@@ -1737,6 +1745,8 @@ th {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  direction: ltr;
+  text-align: left;
 }
 
 .student-card-name-row strong {
@@ -1744,6 +1754,9 @@ th {
   color: var(--text);
   word-break: break-word;
   line-height: 1.25;
+  direction: ltr;
+  unicode-bidi: plaintext;
+  text-align: left;
 }
 
 .student-card-admission-badge {

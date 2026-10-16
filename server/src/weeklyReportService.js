@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import nodemailer from "nodemailer";
 import { Attendance, Class, Student, User, AuditLog, SystemSetting } from "./models.js";
+import { compareRollNumbers } from "./utils/studentSort.js";
 
 /**
  * Calculates previous Monday through Sunday in YYYY-MM-DD format
@@ -34,13 +35,15 @@ export async function generateWeeklyExcelWorkbook({ from, to }) {
   // 1. Fetch authorized data
   const [classes, students, attendances] = await Promise.all([
     Class.find({ active: true }).populate("teacherIds", "name email").sort({ name: 1 }),
-    Student.find({ active: true }).populate("classId", "name section").sort({ name: 1 }),
+    Student.find({ active: true }).populate("classId", "name section").collation({ locale: "en", numericOrdering: true }).sort({ admissionNo: 1, name: 1 }),
     Attendance.find({ dateKey: { $gte: from, $lte: to } })
       .populate("studentId", "name admissionNo classId")
       .populate("classId", "name section")
       .populate("markedBy", "name email")
       .sort({ dateKey: 1, sessionKey: 1 })
   ]);
+
+  students.sort(compareRollNumbers);
 
   const totalEnrolled = students.length;
   const totalRecords = attendances.length;

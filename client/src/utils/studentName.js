@@ -5,6 +5,27 @@
  */
 
 /**
+ * Normalizes accidental Urdu keyboard characters (like Urdu full-stop \u06D4)
+ * that occur in English/Latin names into standard dots.
+ * 
+ * @param {string} str
+ * @returns {string}
+ */
+export function normalizeStudentPunctuation(str) {
+  if (!str || typeof str !== "string") return "";
+  let val = str.trim();
+  if (/[a-zA-Z]/.test(val) && val.includes("\u06D4")) {
+    val = val
+      .replace(/([a-zA-Z])\u06D4\s*/g, "$1. ")
+      .replace(/\s*\u06D4\s*([a-zA-Z])/g, ". $1")
+      .replace(/\u06D4/g, ".")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return val;
+}
+
+/**
  * Returns the preferred display name for a student given the active interface language.
  * Follows documented strict fallback order without concatenating different scripts.
  * 
@@ -19,14 +40,14 @@
  */
 export function getStudentDisplayName(student, language = "en") {
   if (!student) return "";
-  if (typeof student === "string") return student.trim();
+  if (typeof student === "string") return normalizeStudentPunctuation(student);
 
   const lang = String(language || "en").toLowerCase();
 
-  const nameEn = (student.nameEn || "").trim();
+  const nameEn = normalizeStudentPunctuation(student.nameEn || "");
   const nameUr = (student.nameUr || "").trim();
   const nameTe = (student.nameTe || "").trim();
-  const canonical = (student.name || student.fullName || "").trim();
+  const canonical = normalizeStudentPunctuation(student.name || student.fullName || "");
   const admissionNo = (student.admissionNo || student.admissionNumber || "").trim();
 
   if (lang === "ur") {
@@ -40,8 +61,9 @@ export function getStudentDisplayName(student, language = "en") {
 }
 
 /**
- * Returns the correct text direction ('rtl' or 'ltr') for a student's name
- * based on whether the resolved name contains Arabic/Urdu unicode characters.
+ * Returns the correct text direction ('rtl' or 'ltr') for a student's name.
+ * A name is only 'rtl' if it contains actual Arabic/Urdu alphabet letters AND
+ * is not predominantly written in Latin/English characters.
  * 
  * @param {string} name - Resolved name string
  * @param {string} [language='en'] - Active interface language
@@ -49,9 +71,25 @@ export function getStudentDisplayName(student, language = "en") {
  */
 export function getStudentNameDir(name, language = "en") {
   if (!name) return language === "ur" ? "rtl" : "ltr";
-  const hasUrduCharacters = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(name);
-  if (hasUrduCharacters) return "rtl";
-  return "ltr";
+  
+  // Count Latin characters vs Urdu/Arabic alphabet letters
+  const urduLetterMatches = name.match(/[\u0621-\u064A\u0671-\u06D3\u06D5\u06EE-\u06EF\u06FA-\u06FC\u0750-\u077F]/g);
+  const latinLetterMatches = name.match(/[a-zA-Z]/g);
+
+  const urduCount = urduLetterMatches ? urduLetterMatches.length : 0;
+  const latinCount = latinLetterMatches ? latinLetterMatches.length : 0;
+
+  // If Latin letters are present and equal or greater than Urdu letters, text direction is LTR
+  if (latinCount > 0 && latinCount >= urduCount) {
+    return "ltr";
+  }
+
+  // If predominantly Urdu letters, text direction is RTL
+  if (urduCount > 0) {
+    return "rtl";
+  }
+
+  return language === "ur" ? "rtl" : "ltr";
 }
 
 /**
@@ -63,7 +101,7 @@ export function getStudentNameDir(name, language = "en") {
  */
 export function isMixedScript(name) {
   if (!name || typeof name !== "string") return false;
-  const hasUrdu = /[\u0600-\u06FF\u0750-\u077F]/.test(name);
+  const hasUrdu = /[\u0621-\u064A\u0671-\u06D3\u06D5\u06EE-\u06EF\u06FA-\u06FC\u0750-\u077F]/.test(name);
   const hasLatin = /[a-zA-Z]/.test(name);
   return hasUrdu && hasLatin;
 }
