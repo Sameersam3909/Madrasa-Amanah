@@ -25,7 +25,7 @@ async function runTests() {
     const adminLoginData = await adminLoginRes.json();
     assert(adminLoginRes.status === 200 && !!adminLoginData.token, 'Admin login succeeded');
     const adminToken = adminLoginData.token;
-    const adminHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` };
+    const adminHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}`, 'x-export-pin': '12@12' };
 
     // 2. Fetch classes
     const classesRes = await fetch(`${API_BASE}/classes`, { headers: adminHeaders });

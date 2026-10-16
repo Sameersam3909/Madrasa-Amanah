@@ -248,13 +248,17 @@ app.get("/api/classes", async (req, res) => {
 
 app.post("/api/classes", requireAdmin, async (req, res) => {
   try {
+    const teacherIds = Array.isArray(req.body.teacherIds) ? req.body.teacherIds : [];
     const cls = await Class.create({
       name: String(req.body.name || "").trim(),
       section: String(req.body.section || "").trim(),
       academicYear: String(req.body.academicYear || new Date().getFullYear()),
       code: String(req.body.code || "").trim(),
-      teacherIds: req.body.teacherIds || []
+      teacherIds
     });
+    if (teacherIds.length > 0) {
+      await User.updateMany({ _id: { $in: teacherIds } }, { $addToSet: { assignedClasses: cls._id } });
+    }
     await AuditLog.create({ actorId: req.user._id, action: "class.create", entityType: "Class", entityId: String(cls._id), details: { name: cls.name, code: cls.code } });
     res.status(201).json(cls);
   } catch (e) {
@@ -272,6 +276,22 @@ app.patch("/api/classes/:id", requireAdmin, async (req, res) => {
     ...(req.body.active !== undefined ? { active: Boolean(req.body.active) } : {})
   }, { new: true, runValidators: true });
   if (!cls) return res.status(404).json({ message: "Class not found." });
+
+  if (Array.isArray(req.body.teacherIds)) {
+    // Pull this class from teachers no longer in teacherIds
+    await User.updateMany(
+      { _id: { $nin: req.body.teacherIds }, assignedClasses: cls._id },
+      { $pull: { assignedClasses: cls._id } }
+    );
+    // Add this class to newly assigned teachers
+    if (req.body.teacherIds.length > 0) {
+      await User.updateMany(
+        { _id: { $in: req.body.teacherIds } },
+        { $addToSet: { assignedClasses: cls._id } }
+      );
+    }
+  }
+
   await AuditLog.create({ actorId: req.user._id, action: "class.update", entityType: "Class", entityId: String(cls._id), details: { name: cls.name, section: cls.section, code: cls.code, active: cls.active } });
   res.json(cls);
 });
@@ -281,6 +301,9 @@ app.post("/api/classes/:id/restore", requireAdmin, async (req, res) => {
   if (!cls) return res.status(404).json({ message: "Class not found." });
   cls.active = true;
   await cls.save();
+  if (cls.teacherIds && cls.teacherIds.length > 0) {
+    await User.updateMany({ _id: { $in: cls.teacherIds } }, { $addToSet: { assignedClasses: cls._id } });
+  }
   await AuditLog.create({ actorId: req.user._id, action: "class.restore", entityType: "Class", entityId: String(cls._id) });
   res.json({ message: `Class ${cls.name} restored successfully.`, class: cls });
 });
@@ -288,6 +311,9 @@ app.post("/api/classes/:id/restore", requireAdmin, async (req, res) => {
 app.delete("/api/classes/:id", requireAdmin, async (req, res) => {
   const cls = await Class.findById(req.params.id);
   if (!cls) return res.status(404).json({ message: "Class not found." });
+
+  // Clean up user assignments
+  await User.updateMany({ assignedClasses: cls._id }, { $pull: { assignedClasses: cls._id } });
 
   const studentCount = await Student.countDocuments({ classId: cls._id });
   const attCount = await Attendance.countDocuments({ classId: cls._id });
@@ -1469,6 +1495,15 @@ app.post("/api/attendance/bulk", async (req, res) => {
     }
   }
 
+  // Validate that all submitted students strictly belong to this class and are active
+  const mismatched = dedupedRecords.filter(r => !allowed.has(String(r.studentId)));
+  if (mismatched.length > 0) {
+    return res.status(400).json({
+      message: `${mismatched.length} student(s) do not belong to the specified class (${classId}) or are inactive.`,
+      invalidStudentIds: mismatched.map(r => r.studentId)
+    });
+  }
+
   // Audit attendance corrections
   const existingRecords = await Attendance.find({
     classId,
@@ -1643,6 +1678,17 @@ app.post("/api/sync/attendance", async (req, res) => {
         seenStudentIds.add(sId);
         dedupedRecords.push(r);
       }
+    }
+
+    // Validate that all students in mutation strictly belong to this class
+    const mismatched = dedupedRecords.filter(r => !allowed.has(String(r.studentId)));
+    if (mismatched.length > 0) {
+      results.push({
+        mutationId,
+        status: "error",
+        message: `${mismatched.length} student(s) do not belong to class ${classId} or are inactive.`
+      });
+      continue;
     }
 
     // Audit attendance corrections

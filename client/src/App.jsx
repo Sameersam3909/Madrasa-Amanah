@@ -160,8 +160,13 @@ export default function App() {
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState(() => {
     try {
+      const u = JSON.parse(localStorage.getItem("madrasa_user") || "null");
       const cls = localStorage.getItem("madrasa_selected_class");
-      if (cls) {
+      if (cls && u) {
+        if (u.role !== "admin") {
+          const assignedIds = (u.assignedClasses || []).map(c => String(c._id || c.id || c));
+          if (!assignedIds.includes(String(cls))) return [];
+        }
         const saved = localStorage.getItem("madrasa_cached_students_" + cls);
         return saved ? JSON.parse(saved) : [];
       }
@@ -170,7 +175,15 @@ export default function App() {
   });
   const [selectedClass, setSelectedClassState] = useState(() => {
     try {
-      return localStorage.getItem("madrasa_selected_class") || "";
+      const u = JSON.parse(localStorage.getItem("madrasa_user") || "null");
+      const cls = localStorage.getItem("madrasa_selected_class") || "";
+      if (cls && u && u.role !== "admin") {
+        const assignedIds = (u.assignedClasses || []).map(c => String(c._id || c.id || c));
+        if (!assignedIds.includes(String(cls))) {
+          return assignedIds[0] || "";
+        }
+      }
+      return cls;
     } catch {
       return "";
     }
@@ -936,19 +949,39 @@ export default function App() {
     loadClassesOfflineFirst();
   }, [token, user]);
 
+  // Strict Class Authorization Guard: Ensure selectedClass is always a class the current user is assigned to
+  useEffect(() => {
+    if (!classes || classes.length === 0) {
+      if (selectedClass) setSelectedClassState("");
+      return;
+    }
+    const isValid = classes.some((c) => String(c._id || c.id) === String(selectedClass));
+    if (!isValid) {
+      setSelectedClass(classes[0]._id || classes[0].id);
+    }
+  }, [classes, selectedClass]);
+
   async function loadClassesOfflineFirst() {
     // Phase 1: Instant load from IndexedDB cache (<10ms)
     try {
-      const cached = await offlineDb.classes.toArray();
+      let cached = await offlineDb.classes.toArray();
+      if (user && user.role !== "admin") {
+        const assignedIds = (user.assignedClasses || []).map(c => String(c._id || c.id || c));
+        cached = (cached || []).filter(c => assignedIds.includes(String(c._id || c.id)));
+      }
       if (cached && cached.length) {
         setClasses(cached);
         const saved = localStorage.getItem("madrasa_selected_class");
         const found = cached.find((c) => String(c._id || c.id) === String(saved));
         if (found) {
           setSelectedClass(found._id || found.id);
-        } else if (!selectedClass) {
+        } else {
           setSelectedClass(cached[0]._id || cached[0].id);
         }
+      } else if (user && user.role !== "admin" && (!user.assignedClasses || user.assignedClasses.length === 0)) {
+        setClasses([]);
+        setSelectedClass("");
+        setStudents([]);
       }
     } catch (e) {
       console.warn("Cached classes read error:", e.message);
@@ -958,22 +991,30 @@ export default function App() {
     try {
       setClassesLoading(true);
       const res = await api.get("/classes");
-      setClasses(res.data);
-      await cacheClasses(res.data);
-      const saved = localStorage.getItem("madrasa_selected_class");
-      const found = res.data.find((c) => String(c._id || c.id) === String(saved));
-      if (found) {
-        setSelectedClass(found._id || found.id);
-      } else if (!selectedClass && res.data.length) {
-        setSelectedClass(res.data[0]._id || res.data[0].id);
-      }
+      const freshClasses = res.data || [];
+      setClasses(freshClasses);
+      await cacheClasses(freshClasses);
 
-      // Pre-warm all students in background so all classes load in <10ms
-      api.get("/students").then((sRes) => {
-        if (sRes.data && sRes.data.length) {
-          cacheStudents(sRes.data);
+      if (freshClasses.length > 0) {
+        const saved = localStorage.getItem("madrasa_selected_class");
+        const currentSelected = selectedClass || saved;
+        const validClass = freshClasses.find((c) => String(c._id || c.id) === String(currentSelected));
+        if (validClass) {
+          setSelectedClass(validClass._id || validClass.id);
+        } else {
+          setSelectedClass(freshClasses[0]._id || freshClasses[0].id);
         }
-      }).catch(() => {});
+
+        // Pre-warm authorized students in background so classes load in <10ms
+        api.get("/students").then((sRes) => {
+          if (sRes.data && sRes.data.length) {
+            cacheStudents(sRes.data);
+          }
+        }).catch(() => {});
+      } else {
+        setSelectedClass("");
+        setStudents([]);
+      }
     } catch (err) {
       if (err.response?.status === 401 || err.response?.status === 403) return;
       console.warn("Network classes revalidation note:", err.message);
@@ -992,7 +1033,20 @@ export default function App() {
   }, [token, user, selectedClass, dateKey, sessionKey, tab]);
 
   async function loadStudentsAndAttendanceOfflineFirst(classId, date, session) {
-    if (!classId) return;
+    if (!classId) {
+      setStudents([]);
+      return;
+    }
+
+    // Verify teacher authorization before reading cache or setting state
+    if (user && user.role !== "admin") {
+      const authorizedIds = (classes.length ? classes : (user.assignedClasses || [])).map(c => String(c._id || c.id || c));
+      if (authorizedIds.length > 0 && !authorizedIds.includes(String(classId))) {
+        setStudents([]);
+        return;
+      }
+    }
+
     setAttendanceLoading(true);
 
     // Phase 1: Instant cache hydration (<10ms)
@@ -1017,6 +1071,8 @@ export default function App() {
       if (cachedStudents.length) {
         const unique = Array.from(new Map(cachedStudents.map((s) => [String(s._id || s.id), s])).values());
         setStudents(unique);
+      } else {
+        setStudents([]);
       }
 
       if (cachedDrafts.length) {
@@ -1046,6 +1102,11 @@ export default function App() {
         setStudents(unique);
         try { localStorage.setItem("madrasa_cached_students_" + classId, JSON.stringify(unique)); } catch {}
         await cacheStudents(unique, classId);
+      } else {
+        if (studentsRes.reason?.response?.status === 403) {
+          setStudents([]);
+          setRecords({});
+        }
       }
 
       if (attendanceRes.status === "fulfilled") {
@@ -1062,6 +1123,11 @@ export default function App() {
         setConfirmedRecords(confirmed);
         setNotes(noteMap);
         setAttendanceFreshness({ type: "synced", time: new Date().toLocaleTimeString() });
+      } else {
+        if (attendanceRes.reason?.response?.status === 403) {
+          setRecords({});
+          setConfirmedRecords({});
+        }
       }
     } catch (err) {
       console.warn("Parallel fetch error:", err.message);
@@ -1142,12 +1208,23 @@ export default function App() {
   }
 
   async function logout(msg = "") {
+    try {
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith("madrasa_cached_students_") || key === "madrasa_selected_class")) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    } catch {}
     localStorage.removeItem("madrasa_token");
     localStorage.removeItem("madrasa_user");
     localStorage.removeItem("madrasa_session_start");
     setToken("");
     setUser(null);
     setClasses([]);
+    setSelectedClassState("");
     setStudents([]);
     setRecords({});
     setNotes({});

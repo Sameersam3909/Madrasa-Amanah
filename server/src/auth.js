@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { User, Class, AuditLog } from "./models.js";
@@ -55,11 +56,22 @@ export function requireAdmin(req, res, next) {
   next();
 }
 export async function canAccessClass(user, classId) {
+  if (!user) return false;
   if (user.role === "admin") return true;
-  const ids = (user.assignedClasses || []).map(c => String(c._id || c));
-  if (ids.includes(String(classId))) return true;
-  const cls = await Class.findById(classId).select("teacherIds");
-  return Boolean(cls?.teacherIds.some(id => String(id) === String(user._id)));
+  if (!classId) return false;
+
+  const targetId = String(classId?._id || classId?.id || classId);
+  if (!mongoose.Types.ObjectId.isValid(targetId)) return false;
+
+  const cls = await Class.findById(targetId).select("teacherIds active").lean();
+  if (!cls || cls.active === false) return false;
+
+  // 1. Direct check against teacher's assignedClasses
+  const assignedIds = (user.assignedClasses || []).map(c => String(c?._id || c?.id || c));
+  if (assignedIds.includes(targetId)) return true;
+
+  // 2. Direct check against Class teacherIds list
+  return Boolean(cls.teacherIds?.some(id => String(id) === String(user._id)));
 }
 
 // ============================================================

@@ -376,6 +376,16 @@ export async function isolateUserCache(userId) {
         await offlineDb.students.clear();
         await offlineDb.attendanceHistory.clear();
       });
+      try {
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith("madrasa_cached_students_") || key === "madrasa_selected_class")) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+      } catch {}
     }
     await offlineDb.metadata.put({ key: "cachedUserId", value: String(userId) });
   } catch (err) {
@@ -391,6 +401,16 @@ export async function clearUserCache() {
       await offlineDb.attendanceHistory.clear();
       await offlineDb.metadata.delete("cachedUserId");
     });
+    try {
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith("madrasa_cached_students_") || key === "madrasa_selected_class")) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    } catch {}
     console.log("[Cache Isolation] User cache cleared on sign out.");
   } catch (err) {
     console.warn("clearUserCache note:", err.message);
