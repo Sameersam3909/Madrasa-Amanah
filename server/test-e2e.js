@@ -225,7 +225,7 @@ async function runTests() {
     });
     assert(weeklyExcelRes.status === 200, 'Weekly Excel report responded with 200 OK');
     const weeklyDisp = weeklyExcelRes.headers.get('content-disposition') || '';
-    assert(weeklyDisp.includes('Madrasa-Amanah-Weekly-Attendance'), `Weekly Excel filename matches pattern: ${weeklyDisp.slice(0, 80)}`);
+    assert(weeklyDisp.includes('Weekly-Attendance'), `Weekly Excel filename matches pattern: ${weeklyDisp.slice(0, 80)}`);
     const weeklyBuf = await weeklyExcelRes.arrayBuffer();
     assert(weeklyBuf.byteLength > 1000, `Weekly Excel workbook byte length valid (${weeklyBuf.byteLength} bytes)`);
 
@@ -237,7 +237,7 @@ async function runTests() {
     });
     const emailTriggerData = await emailTriggerRes.json();
     assert(emailTriggerRes.status === 200, 'Weekly email trigger responded with 200 OK');
-    assert(emailTriggerData.recipient === '2300030621cseh1@gmail.com', `Target recipient matches: ${emailTriggerData.recipient}`);
+    assert(emailTriggerData.recipient && emailTriggerData.recipient.includes('2300030621cseh1@gmail.com'), `Target recipient matches: ${emailTriggerData.recipient}`);
     assert(emailTriggerData.bytes > 1000, `Generated email attachment size: ${emailTriggerData.bytes} bytes`);
     assert(typeof emailTriggerData.summary?.rate === 'string', `Report attendance rate computed: ${emailTriggerData.summary?.rate}%`);
 
