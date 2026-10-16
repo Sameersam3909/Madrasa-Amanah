@@ -14,7 +14,7 @@ import { User, Class, Student, Attendance, AttendanceArchive, SyncMutation, Audi
 import { requireAuth, requireAdmin, canAccessClass, requireExportPin, exportRateLimiter, securityHeaders } from "./auth.js";
 import { uploadImageDataUrl } from "./cloudinary.js";
 import { connectDB, getDatabaseInfo } from "./db.js";
-import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport, getNextScheduledReportRun } from "./weeklyReportService.js";
+import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport, getNextScheduledReportRun, resolveRecipientEmail } from "./weeklyReportService.js";
 import {
   getStorageHealthReport,
   verifySecondaryDatabase,
@@ -1891,7 +1891,7 @@ app.post("/api/reports/send-weekly-email", requireAdmin, async (req, res) => {
   const to = req.body.to || req.body.endDate || prevWeek.to;
   let settings = null;
   try { settings = await SystemSetting.findOne({ key: "global" }); } catch {}
-  const recipientEmail = req.body.recipientEmail || settings?.reportRecipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com";
+  const recipientEmail = resolveRecipientEmail(req.body.recipientEmail, settings);
 
   const result = await sendWeeklyEmailReport({
     from,
@@ -1909,7 +1909,7 @@ async function buildEmailStatusPayload() {
   const prevWeek = getPreviousReportingWeek();
   let settings = await SystemSetting.findOne({ key: "global" });
   const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
-  const recipient = settings?.reportRecipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com";
+  const recipient = resolveRecipientEmail(null, settings);
   const timezone = settings?.reportTimezone || process.env.REPORT_TIMEZONE || "Asia/Kolkata";
   const schedule = settings?.reportSchedule || "Mondays at 06:00 AM";
   const automationEnabled = Boolean(settings?.reportAutomationEnabled);
@@ -1966,10 +1966,7 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
 
   let settings = null;
   try { settings = await SystemSetting.findOne({ key: "global" }); } catch {}
-  const recipientEmail = req.body.recipientEmail
-    || settings?.reportRecipientEmail
-    || process.env.REPORT_RECIPIENT_EMAIL
-    || "2300030621cseh1@gmail.com";
+  const recipientEmail = resolveRecipientEmail(req.body.recipientEmail, settings);
 
   // Basic email format validation
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
@@ -2131,7 +2128,7 @@ app.get("/api/settings", requireAdmin, async (_req, res) => {
     : null;
 
   res.json({
-    reportRecipientEmail: settings.reportRecipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com",
+    reportRecipientEmail: resolveRecipientEmail(null, settings),
     reportTimezone: settings.reportTimezone || "Asia/Kolkata",
     reportSchedule: settings.reportSchedule || "Mondays at 06:00 AM",
     reportAutomationEnabled: settings.reportAutomationEnabled,
@@ -2802,21 +2799,25 @@ if (adminCount === 0) {
 // ──────────────────────────────────────────────────────────────
 try {
   let globalSettings = await SystemSetting.findOne({ key: "global" });
+  const configuredEmail = (process.env.REPORT_RECIPIENT_EMAIL || process.env.ADMIN_EMAIL || "").trim();
   if (!globalSettings) {
     globalSettings = await SystemSetting.create({
       key: "global",
-      reportRecipientEmail: process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com",
+      reportRecipientEmail: configuredEmail || "2300030621cseh1@gmail.com",
       reportTimezone: process.env.REPORT_TIMEZONE || "Asia/Kolkata",
       reportSchedule: "Mondays at 06:00 AM",
       reportAutomationEnabled: false,
       attendanceCorrectionWindowDays: 7
     });
     console.log("[BOOTSTRAP] SystemSetting created with default recipient:", globalSettings.reportRecipientEmail);
-  } else if (!globalSettings.reportRecipientEmail) {
-    // Migrate: fill in missing recipient from env
-    globalSettings.reportRecipientEmail = process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com";
-    await globalSettings.save();
-    console.log("[BOOTSTRAP] SystemSetting recipient migrated to:", globalSettings.reportRecipientEmail);
+  } else {
+    // If user configured ADMIN_EMAIL or REPORT_RECIPIENT_EMAIL in Render,
+    // and DB still has the legacy developer email or is blank, auto-update it!
+    if (configuredEmail && (!globalSettings.reportRecipientEmail || globalSettings.reportRecipientEmail === "2300030621cseh1@gmail.com")) {
+      globalSettings.reportRecipientEmail = configuredEmail;
+      await globalSettings.save();
+      console.log("[BOOTSTRAP] SystemSetting recipient auto-synced from env to:", globalSettings.reportRecipientEmail);
+    }
   }
 } catch (err) {
   console.warn("[BOOTSTRAP] SystemSetting seed warning:", err.message);
@@ -2868,9 +2869,7 @@ cron.schedule(WEEKLY_REPORT_CRON, async () => {
       return;
     }
 
-    const recipientEmail = settings.reportRecipientEmail
-      || process.env.REPORT_RECIPIENT_EMAIL
-      || "2300030621cseh1@gmail.com";
+    const recipientEmail = resolveRecipientEmail(null, settings);
 
     console.log(`[CRON] Dispatching weekly report for ${from} to ${to} → ${recipientEmail}`);
 

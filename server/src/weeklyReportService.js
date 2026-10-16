@@ -26,7 +26,7 @@ export function getPreviousReportingWeek(baseDate = new Date()) {
 /**
  * Generates the multi-sheet weekly attendance Excel workbook
  */
-export async function generateWeeklyExcelWorkbook({ from, to }) {
+export async function generateWeeklyExcelWorkbook({ from, to, recipientEmail }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Madrasa Amanah Smart Attendance System";
   wb.lastModifiedBy = "Automated Weekly Report";
@@ -70,7 +70,7 @@ export async function generateWeeklyExcelWorkbook({ from, to }) {
   wsSummary.addRow(["مَدْرَسَة  •  MADRASA AMANAH", "Weekly Attendance Report"]);
   wsSummary.addRow(["Reporting Period", `${from} to ${to}`]);
   wsSummary.addRow(["Report Generated At", new Date().toISOString()]);
-  wsSummary.addRow(["Target Recipient", process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com"]);
+  wsSummary.addRow(["Target Recipient", recipientEmail || process.env.REPORT_RECIPIENT_EMAIL || process.env.ADMIN_EMAIL || "2300030621cseh1@gmail.com"]);
   wsSummary.addRow([]);
 
   // High-level KPIs
@@ -230,6 +230,32 @@ export function getNextScheduledReportRun(schedule = "Mondays at 06:00 AM", time
 }
 
 /**
+ * Resolves the effective recipient email:
+ * 1. Explicitly requested recipient (from API/UI call)
+ * 2. REPORT_RECIPIENT_EMAIL environment variable
+ * 3. Saved DB settings (if customized and not equal to legacy developer email)
+ * 4. ADMIN_EMAIL environment variable (configured in Render environment)
+ * 5. Saved DB settings (any value)
+ * 6. Default fallback
+ */
+export function resolveRecipientEmail(explicitRecipient, settings) {
+  if (explicitRecipient && typeof explicitRecipient === "string" && explicitRecipient.trim()) {
+    return explicitRecipient.trim();
+  }
+  if (process.env.REPORT_RECIPIENT_EMAIL && process.env.REPORT_RECIPIENT_EMAIL.trim()) {
+    return process.env.REPORT_RECIPIENT_EMAIL.trim();
+  }
+  const dbRecipient = settings?.reportRecipientEmail?.trim();
+  if (dbRecipient && dbRecipient !== "2300030621cseh1@gmail.com") {
+    return dbRecipient;
+  }
+  if (process.env.ADMIN_EMAIL && process.env.ADMIN_EMAIL.trim() && process.env.ADMIN_EMAIL.trim() !== "2300030621cseh1@gmail.com") {
+    return process.env.ADMIN_EMAIL.trim();
+  }
+  return dbRecipient || process.env.ADMIN_EMAIL?.trim() || "2300030621cseh1@gmail.com";
+}
+
+/**
  * Sends weekly attendance report via email attachment
  */
 export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger = "manual", actorId = null }) {
@@ -238,11 +264,11 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
     settings = await SystemSetting.findOne({ key: "global" });
   } catch {}
 
-  const targetRecipient = recipientEmail || settings?.reportRecipientEmail || process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com";
+  const targetRecipient = resolveRecipientEmail(recipientEmail, settings);
   const safeFilename = `Madrasa-Amanah-Weekly-Attendance-${from}-to-${to}.xlsx`;
 
   // 1. Generate workbook
-  const wb = await generateWeeklyExcelWorkbook({ from, to });
+  const wb = await generateWeeklyExcelWorkbook({ from, to, recipientEmail: targetRecipient });
   const buffer = await wb.xlsx.writeBuffer();
 
   const attendances = await Attendance.find({ dateKey: { $gte: from, $lte: to } });

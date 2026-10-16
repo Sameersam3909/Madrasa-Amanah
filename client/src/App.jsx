@@ -1436,7 +1436,9 @@ export default function App() {
   }
 
   async function handleSaveSettings(e) {
-    e.preventDefault();
+    if (e && typeof e.preventDefault === "function") {
+      e.preventDefault();
+    }
     setError("");
     setNotice("");
     try {
@@ -4668,9 +4670,32 @@ export default function App() {
                   {t("reports.weeklyReportSub", "Executive 3-sheet Excel report covering attendance summary, detailed audit log, and class breakdown.")}
                 </p>
 
-                <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8, marginBottom: 12, fontSize: 13, wordBreak: "break-word" }}>
-                  <div><strong>{t("reports.scheduledRecipient", "Scheduled Recipient")}:</strong> <span style={{ wordBreak: "break-all" }}>{settingsForm.reportRecipientEmail || emailStatus?.recipientEmail || "2300030621cseh1@gmail.com"}</span></div>
-                  <div style={{ color: "var(--muted)", marginTop: 2 }}>{settingsForm.reportSchedule || "Mondays at 06:00 AM"} ({settingsForm.reportTimezone || "Asia/Kolkata"})</div>
+                <div style={{ background: "var(--canvas)", padding: "12px", borderRadius: 8, marginBottom: 12, fontSize: 13, wordBreak: "break-word" }}>
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 4, color: "var(--text)" }}>
+                      {t("reports.scheduledRecipient", "Report Recipient Email")}:
+                    </label>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input
+                        type="email"
+                        value={settingsForm.reportRecipientEmail}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, reportRecipientEmail: e.target.value })}
+                        placeholder="e.g. client@example.com"
+                        style={{ flex: 1, minHeight: 38, fontSize: 13 }}
+                      />
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={handleSaveSettings}
+                        disabled={loading}
+                        title="Save recipient email address"
+                        style={{ minHeight: 38, fontSize: 12, padding: "0 12px", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}
+                      >
+                        <Save size={14} /> {t("common.save", "Save")}
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>{settingsForm.reportSchedule || "Mondays at 06:00 AM"} ({settingsForm.reportTimezone || "Asia/Kolkata"})</div>
                   {emailStatus?.lastSent && (
                     <div style={{ fontSize: 12, marginTop: 4 }}>
                       <strong>{t("reports.lastDelivery", "Last Delivery")}:</strong> {formatDateTime(emailStatus.lastSent, lang)} {emailStatus.lastDelivered ? "✓ (Delivered)" : "⚠ (Attempted)"}
