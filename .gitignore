@@ -25,6 +25,9 @@ yarn-error.log*
 # Backups & Archives (allow structured monthly excel backups, ignore raw database dumps)
 backups/*.archive.gz
 *.archive.gz
+*.json.gz
+backups/attendance-archives/
+server/backups/attendance-archives/
 !backups/
 !backups/**/*.xlsx
 !backups/**/*.sha256

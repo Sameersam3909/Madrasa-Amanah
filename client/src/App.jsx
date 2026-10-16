@@ -32,6 +32,7 @@ import {
   Phone,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
   Settings,
@@ -336,6 +337,12 @@ export default function App() {
   // Storage Rotation & Monitoring
   const [storageReport, setStorageReport] = useState(null);
   const [storageLoading, setStorageLoading] = useState(false);
+  const [archivePreview, setArchivePreview] = useState(null);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [showArchiveConfirmModal, setShowArchiveConfirmModal] = useState(false);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const [selectedArchiveForRestore, setSelectedArchiveForRestore] = useState(null);
 
   // System Settings & Email Automation
   const [emailStatus, setEmailStatus] = useState(null);
@@ -1258,6 +1265,68 @@ export default function App() {
       setStorageLoading(false);
     }
   }
+
+  async function fetchArchivePreview() {
+    try {
+      setStorageLoading(true);
+      setError("");
+      setNotice(t("storage.loadingPreview", "Checking 6-month attendance archival eligibility..."));
+      const res = await api.post("/admin/storage/archive-preview");
+      setArchivePreview(res.data);
+      setShowArchiveConfirmModal(true);
+      setNotice("");
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setStorageLoading(false);
+    }
+  }
+
+  async function executeArchiveCleanup() {
+    try {
+      setIsArchiving(true);
+      setError("");
+      setNotice(t("storage.archivingProgress", "Archiving eligible records to GitHub and verifying integrity..."));
+      const res = await api.post("/admin/storage/archive-execute");
+      setShowArchiveConfirmModal(false);
+      setNotice(res.data?.message || t("storage.archiveSuccess", "Archival and storage cleanup completed successfully!"));
+      addNotification({
+        title: "Attendance Archival Complete",
+        message: res.data?.message || "Records older than 6 months archived to private GitHub repository.",
+        type: "success"
+      });
+      fetchStorageStatus();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setIsArchiving(false);
+    }
+  }
+
+  async function handleRestoreArchive(archiveId) {
+    if (!window.confirm(t("storage.confirmRestore", "Restore historical attendance records from this archive? Existing records will be preserved and not overwritten."))) {
+      return;
+    }
+    try {
+      setIsRestoring(true);
+      setError("");
+      setNotice(t("storage.restoringProgress", "Restoring attendance records from archive..."));
+      const res = await api.post("/admin/storage/archive-restore", { archiveId });
+      setNotice(res.data?.message || t("storage.restoreSuccess", "Attendance records restored successfully!"));
+      addNotification({
+        title: "Archive Restored",
+        message: res.data?.message || "Records restored into attendance collection.",
+        type: "success"
+      });
+      setShowRestoreModal(false);
+      fetchStorageStatus();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setIsRestoring(false);
+    }
+  }
+
 
   async function handleCreateTeacher(e) {
     e.preventDefault();
@@ -3878,6 +3947,14 @@ export default function App() {
                             </span>
                           )}
                         </div>
+                        {/* Multilingual sub-names displayed in English, Urdu, Telugu order */}
+                        {(s.nameUr || s.nameTe || (s.nameEn && s.nameEn !== s.name)) && (
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", fontSize: 11, color: "var(--muted)", marginTop: 2, textAlign: "left" }} dir="ltr">
+                            {lang !== "en" && (s.nameEn || s.name) && <span>EN: {s.nameEn || s.name}</span>}
+                            {lang !== "ur" && s.nameUr && <span dir="rtl" style={{ unicodeBidi: "plaintext" }}>اردو: {s.nameUr}</span>}
+                            {lang !== "te" && s.nameTe && <span>తెలుగు: {s.nameTe}</span>}
+                          </div>
+                        )}
                         {s.consentGiven && (
                           <small style={{ display: "block", color: "var(--success)", fontSize: 10, fontWeight: 700, marginTop: 1 }}>
                             {t.photoConsentRecorded}
@@ -4936,6 +5013,204 @@ export default function App() {
                             </span>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Six-Month Attendance Archival, GitHub Backup & Smart Storage Cleanup */}
+                <div className="card">
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 38, height: 38, borderRadius: "50%", background: "var(--brand-muted, rgba(23,75,54,0.1))", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--brand)" }}>
+                        <Archive size={20} />
+                      </div>
+                      <div>
+                        <h3 style={{ margin: 0 }}>{t("archival.title", "6-Month Attendance Backup & GitHub Archival")}</h3>
+                        <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                          {t("archival.subtitle", "Automated monthly archival of records older than 6 months to private GitHub repository.")}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className={`status-pill ${
+                      storageReport?.archival?.isStorageHigh && (storageReport?.archival?.eligibleCount || 0) > 0
+                        ? "critical"
+                        : storageReport?.archival?.isStorageHigh
+                        ? "warning"
+                        : "online"
+                    }`}>
+                      {storageReport?.archival?.isStorageHigh && (storageReport?.archival?.eligibleCount || 0) > 0
+                        ? t("archival.statusHigh", "Storage High (Archival Needed)")
+                        : storageReport?.archival?.isStorageHigh
+                        ? t("archival.statusHighPreserved", "Storage High (Recent Data Preserved)")
+                        : t("archival.statusHealthy", "Storage Normal (Policy Preserved)")}
+                    </span>
+                  </div>
+
+                  {/* High-level status metrics */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 14 }}>
+                    <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8 }}>
+                      <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>{t("archival.totalAttendance", "Total Attendance Records")}</div>
+                      <strong style={{ fontSize: 18 }}>{storageReport?.archival?.totalAttendance != null ? Number(storageReport.archival.totalAttendance).toLocaleString() : "..."}</strong>
+                    </div>
+
+                    <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8 }}>
+                      <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>{t("archival.olderThan6Months", "Records > 6 Months Old")}</div>
+                      <strong style={{ fontSize: 18, color: (storageReport?.archival?.eligibleCount || 0) > 0 ? "var(--brand)" : "var(--text)" }}>
+                        {storageReport?.archival?.eligibleCount != null ? Number(storageReport.archival.eligibleCount).toLocaleString() : "..."}
+                      </strong>
+                      <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>
+                        {t("archival.cutoff", "Cutoff")}: {storageReport?.archival?.cutoffDate || "6 months ago"}
+                      </div>
+                    </div>
+
+                    <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8 }}>
+                      <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>{t("archival.thresholdPolicy", "Storage Retention Policy")}</div>
+                      <strong style={{ fontSize: 14 }}>{storageReport?.archival?.triggerPercent || 80}% Trigger / {storageReport?.archival?.targetPercent || 70}% Target</strong>
+                      <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>
+                        {storageReport?.primaryStats?.percentageUsed != null ? `${storageReport.primaryStats.percentageUsed}% used` : "Usage calculated from Atlas"}
+                      </div>
+                    </div>
+
+                    <div style={{ background: "var(--canvas)", padding: "10px 12px", borderRadius: 8 }}>
+                      <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>{t("archival.scheduledCheck", "Next Scheduled Check")}</div>
+                      <strong style={{ fontSize: 13 }}>{storageReport?.archival?.nextScheduledCheck || "Monthly (1st, 02:00 UTC)"}</strong>
+                      <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>
+                        {t("archival.automation", "Automated monthly cron scheduler")}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* GitHub Destination & Verification Card */}
+                  <div style={{ background: "var(--canvas)", padding: "12px 14px", borderRadius: 8, marginBottom: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+                      <div>
+                        <strong>{t("archival.destinationRepo", "GitHub Private Archive Repository")}:</strong>{" "}
+                        <a
+                          href={storageReport?.archival?.githubRepo || "https://github.com/Sameersam3909/-Madrasa_Attandace"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "var(--brand)", textDecoration: "none", fontWeight: 600, wordBreak: "break-all" }}
+                        >
+                          {storageReport?.archival?.githubRepo || "Sameersam3909/-Madrasa_Attandace"}
+                        </a>
+                      </div>
+                      <span className={`status-pill ${storageReport?.archival?.githubConfigured ? "online" : "warning"}`}>
+                        {storageReport?.archival?.githubConfigured
+                          ? t("archival.githubConfigured", "GitHub Connected (Private Repo)")
+                          : t("archival.localFallback", "Local Storage (Configure GITHUB_ARCHIVE_TOKEN)")}
+                      </span>
+                    </div>
+
+                    {storageReport?.archival?.latestArchive ? (
+                      <div style={{ fontSize: 12, display: "grid", gap: 4, marginTop: 8, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+                          <span><strong>{t("archival.latestArchive", "Most Recent Archive")}:</strong> {storageReport.archival.latestArchive.archiveId}</span>
+                          <span className="status-pill online" style={{ fontSize: 10 }}>VERIFIED ROUND-TRIP ✓</span>
+                        </div>
+                        <div className="muted" style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11 }}>
+                          <span>{t("archival.period", "Period")}: {storageReport.archival.latestArchive.dateRange?.from} to {storageReport.archival.latestArchive.dateRange?.to}</span>
+                          <span>{t("archival.records", "Records")}: {storageReport.archival.latestArchive.recordCount}</span>
+                          <span>SHA-256: <code>{storageReport.archival.latestArchive.sha256?.slice(0, 16)}...</code></span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                        {t("archival.noArchivesYet", "No archives generated yet. Archival will trigger automatically when storage reaches the 80% quota, or can be run manually below.")}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Notice / Warning Message */}
+                  {storageReport?.archival?.message && (
+                    <div style={{
+                      padding: "10px 12px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      marginBottom: 14,
+                      background: storageReport.archival.isStorageHigh ? "rgba(239, 68, 68, 0.08)" : "rgba(34, 197, 94, 0.08)",
+                      border: `1px solid ${storageReport.archival.isStorageHigh ? "rgba(239, 68, 68, 0.2)" : "rgba(34, 197, 94, 0.2)"}`,
+                      color: "var(--text)"
+                    }}>
+                      <strong>{t("archival.policyNotice", "Policy Status")}:</strong> {storageReport.archival.message}
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="responsive-grid-3" style={{ gap: 10 }}>
+                    <button
+                      className="btn secondary"
+                      onClick={fetchArchivePreview}
+                      disabled={storageLoading || isArchiving}
+                      style={{ minHeight: 42, fontSize: 13 }}
+                    >
+                      <Eye size={15} /> {t("archival.previewBtn", "Preview Eligible Records")}
+                    </button>
+
+                    <button
+                      className="btn primary"
+                      onClick={fetchArchivePreview}
+                      disabled={storageLoading || isArchiving || (storageReport?.archival?.eligibleCount || 0) === 0}
+                      style={{ minHeight: 42, fontSize: 13 }}
+                    >
+                      <Archive size={15} /> {t("archival.runManualBtn", "Archive & Prune to GitHub")}
+                    </button>
+
+                    <button
+                      className="btn secondary"
+                      onClick={() => setShowRestoreModal(true)}
+                      disabled={storageLoading || isRestoring || !(storageReport?.archival?.recentArchives?.length > 0)}
+                      style={{ minHeight: 42, fontSize: 13 }}
+                    >
+                      <History size={15} /> {t("archival.restoreBtn", "Restore From Archive")}
+                    </button>
+                  </div>
+
+                  {/* Recent Archives History Table */}
+                  {storageReport?.archival?.recentArchives?.length > 0 && (
+                    <div style={{ marginTop: 16 }}>
+                      <strong style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 8 }}>
+                        {t("archival.recentArchivesHistory", "Archived Batches & Integrity Verification History")}:
+                      </strong>
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                          <thead>
+                            <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left", color: "var(--muted)" }}>
+                              <th style={{ padding: "6px 8px" }}>{t("archival.archiveId", "Archive ID")}</th>
+                              <th style={{ padding: "6px 8px" }}>{t("archival.period", "Date Range")}</th>
+                              <th style={{ padding: "6px 8px" }}>{t("archival.records", "Records")}</th>
+                              <th style={{ padding: "6px 8px" }}>SHA-256 Checksum</th>
+                              <th style={{ padding: "6px 8px" }}>Status</th>
+                              <th style={{ padding: "6px 8px", textAlign: "right" }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {storageReport.archival.recentArchives.map((arch) => (
+                              <tr key={arch.archiveId} style={{ borderBottom: "1px solid var(--border)" }}>
+                                <td style={{ padding: "6px 8px", fontWeight: 600 }}>{arch.archiveId}</td>
+                                <td style={{ padding: "6px 8px" }}>{arch.dateRange?.from} ~ {arch.dateRange?.to}</td>
+                                <td style={{ padding: "6px 8px" }}>{arch.recordCount}</td>
+                                <td style={{ padding: "6px 8px" }}><code>{arch.sha256?.slice(0, 12)}...</code></td>
+                                <td style={{ padding: "6px 8px" }}>
+                                  <span className={`status-pill ${arch.verificationStatus === "verified" ? "online" : "warning"}`} style={{ fontSize: 10 }}>
+                                    {arch.verificationStatus?.toUpperCase() || "VERIFIED"}
+                                  </span>
+                                </td>
+                                <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                                  <button
+                                    className="btn secondary"
+                                    onClick={() => handleRestoreArchive(arch.archiveId)}
+                                    disabled={isRestoring}
+                                    style={{ fontSize: 11, padding: "3px 8px", minHeight: "auto" }}
+                                  >
+                                    {t("archival.restoreAction", "Restore")}
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   )}
@@ -6528,6 +6803,153 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 6-MONTH ATTENDANCE ARCHIVAL CONFIRMATION MODAL */}
+      {showArchiveConfirmModal && archivePreview && (
+        <div className="sheet-overlay" onClick={() => !isArchiving && setShowArchiveConfirmModal(false)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(23, 75, 54, 0.1)", color: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Archive size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0 }}>{t("archival.confirmTitle", "Confirm 6-Month Attendance Archival")}</h3>
+                  <small className="muted">{t("archival.confirmSubtitle", "Review eligible records before archiving to private GitHub")}</small>
+                </div>
+              </div>
+              <button className="btn icon-btn" disabled={isArchiving} onClick={() => setShowArchiveConfirmModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gap: 10, background: "var(--canvas)", padding: 12, borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span className="muted">{t("archival.cutoffDateLabel", "6-Month Cutoff Date")}:</span>
+                <strong>{archivePreview.cutoffDate}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span className="muted">{t("archival.eligibleRecordsCount", "Eligible Records for Archival")}:</span>
+                <strong style={{ color: "var(--brand)" }}>{Number(archivePreview.eligibleCount || 0).toLocaleString()} records</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span className="muted">{t("archival.dateRangeLabel", "Historical Date Range")}:</span>
+                <strong>{archivePreview.dateRange?.from} ~ {archivePreview.dateRange?.to}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span className="muted">{t("archival.archiveTarget", "Archive Destination")}:</span>
+                <span style={{ fontWeight: 600, color: "var(--brand)" }}>Sameersam3909/-Madrasa_Attandace</span>
+              </div>
+            </div>
+
+            {/* Critical Data Protection Notice */}
+            <div style={{
+              background: "rgba(34, 197, 94, 0.08)",
+              border: "1px solid rgba(34, 197, 94, 0.25)",
+              color: "var(--text)",
+              padding: "10px 12px",
+              borderRadius: 8,
+              fontSize: 12,
+              marginBottom: 16
+            }}>
+              <strong style={{ color: "var(--success)", display: "block", marginBottom: 3 }}>
+                ✓ {t("archival.dataProtectionGuarantee", "Critical Data Protection Guarantee")}:
+              </strong>
+              {t("archival.protectionDetails", "Student profiles, names, photos, face descriptors, teacher accounts, classes, and examination marks remain 100% intact. Only verified attendance records older than 6 months will be pruned after round-trip verification.")}
+            </div>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={isArchiving}
+                onClick={() => setShowArchiveConfirmModal(false)}
+              >
+                {t.cancel}
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={isArchiving || (archivePreview.eligibleCount || 0) === 0}
+                onClick={executeArchiveCleanup}
+                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+              >
+                {isArchiving ? <RefreshCw size={16} className="spin" /> : <ShieldCheck size={16} />}
+                <span>{isArchiving ? t("archival.archivingBtnProgress", "Archiving & Verifying...") : t("archival.confirmArchiveBtn", "Verify & Archive to GitHub")}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESTORE ARCHIVE MODAL */}
+      {showRestoreModal && (
+        <div className="sheet-overlay" onClick={() => !isRestoring && setShowRestoreModal(false)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(23, 75, 54, 0.1)", color: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <History size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0 }}>{t("archival.restoreModalTitle", "Restore Historical Attendance Archive")}</h3>
+                  <small className="muted">{t("archival.restoreModalSub", "Safely restore archived records without duplicating existing data")}</small>
+                </div>
+              </div>
+              <button className="btn icon-btn" disabled={isRestoring} onClick={() => setShowRestoreModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>
+              {t("archival.restoreInstruction", "Select an archived batch to restore into the active database. Restoration is idempotent and will never overwrite existing records or modify student or teacher profiles.")}
+            </p>
+
+            <div style={{ display: "grid", gap: 8, maxHeight: 260, overflowY: "auto", marginBottom: 14 }}>
+              {storageReport?.archival?.recentArchives?.map((arch) => (
+                <div
+                  key={arch.archiveId}
+                  style={{
+                    padding: "10px 12px",
+                    background: "var(--canvas)",
+                    borderRadius: 8,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    border: "1px solid var(--border)"
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontSize: 13 }}>{arch.archiveId}</strong>
+                    <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                      {arch.dateRange?.from} ~ {arch.dateRange?.to} · {arch.recordCount} records
+                    </div>
+                  </div>
+                  <button
+                    className="btn primary"
+                    onClick={() => handleRestoreArchive(arch.archiveId)}
+                    disabled={isRestoring}
+                    style={{ fontSize: 12, padding: "5px 12px", minHeight: "auto" }}
+                  >
+                    {isRestoring ? <RefreshCw size={14} className="spin" /> : <RotateCcw size={14} />} {t("archival.restoreNow", "Restore")}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={isRestoring}
+                onClick={() => setShowRestoreModal(false)}
+              >
+                {t.close || "Close"}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -10,7 +10,7 @@ import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import nodemailer from "nodemailer";
 import cron from "node-cron";
-import { User, Class, Student, Attendance, SyncMutation, AuditLog, SystemSetting } from "./models.js";
+import { User, Class, Student, Attendance, AttendanceArchive, SyncMutation, AuditLog, SystemSetting } from "./models.js";
 import { requireAuth, requireAdmin, canAccessClass, requireExportPin, exportRateLimiter, securityHeaders } from "./auth.js";
 import { uploadImageDataUrl } from "./cloudinary.js";
 import { connectDB, getDatabaseInfo } from "./db.js";
@@ -31,6 +31,12 @@ import {
   verifyMonthlyExcelBackup,
   exportAndSaveMonthlyBackup
 } from "./monthlyBackupService.js";
+import {
+  checkStorageAndArchivalEligibility,
+  runAutomatedArchivalCycle,
+  restoreAttendanceArchive,
+  getSixMonthCutoffDate
+} from "./attendanceArchiveService.js";
 import { compareRollNumbers, compareStudentsByClassAndRoll, sortStudentsByRoll } from "./utils/studentSort.js";
 
 const app = express();
@@ -2598,7 +2604,13 @@ app.post("/api/admin/users/:id/reset-password", requireAdmin, async (req, res) =
 // Returns backend-native shape AND frontend-compatible bridge fields so both API
 // consumers (dashboard UI + integration tests) work without a breaking change.
 app.get("/api/admin/storage/status", requireAdmin, async (_req, res) => {
-  const report = await getStorageHealthReport();
+  const [report, eligibility, recentArchives, latestArchive, settings] = await Promise.all([
+    getStorageHealthReport(),
+    checkStorageAndArchivalEligibility().catch(err => ({ error: err.message, eligibleCount: 0 })),
+    AttendanceArchive.find().sort({ createdAt: -1 }).limit(10).lean().catch(() => []),
+    AttendanceArchive.findOne().sort({ createdAt: -1 }).lean().catch(() => null),
+    SystemSetting.findOne({ key: "global" }).lean().catch(() => null)
+  ]);
 
   // Bridge: flatten to the shape the frontend dashboard expects
   const primaryUri = process.env.MONGODB_URI_PRIMARY || process.env.MONGODB_URI || "";
@@ -2619,6 +2631,8 @@ app.get("/api/admin/storage/status", requireAdmin, async (_req, res) => {
   };
 
   const secondaryConfigured = Boolean(secondaryUri && secondaryUri.length > 10);
+  const githubRepoName = process.env.GITHUB_ARCHIVE_REPO || "Sameersam3909/-Madrasa_Attandace";
+  const hasGitHubToken = Boolean(process.env.GITHUB_ARCHIVE_TOKEN || process.env.GITHUB_TOKEN);
 
   res.json({
     // Native backend fields (keep for API consumers & tests)
@@ -2636,8 +2650,137 @@ app.get("/api/admin/storage/status", requireAdmin, async (_req, res) => {
       to: r.to,
       reason: r.reason,
       rotatedAt: r.timestamp || r.rotatedAt
-    }))
+    })),
+    // Six-Month Archival & Storage Management Status
+    archival: {
+      cutoffDate: eligibility.cutoffDate || null,
+      eligibleCount: eligibility.eligibleCount || 0,
+      totalAttendance: eligibility.totalAttendance || 0,
+      retentionMonths: eligibility.retentionMonths || 6,
+      triggerPercent: eligibility.triggerPercent || 80,
+      targetPercent: eligibility.targetPercent || 70,
+      recommendation: eligibility.recommendation || "NORMAL",
+      message: eligibility.message || "",
+      isStorageHigh: eligibility.isStorageHigh || false,
+      githubRepo: `https://github.com/${githubRepoName.replace(/^https?:\/\/github\.com\//, "")}`,
+      githubConfigured: hasGitHubToken,
+      latestArchive: latestArchive ? {
+        archiveId: latestArchive.archiveId,
+        dateRange: latestArchive.dateRange,
+        recordCount: latestArchive.recordCount,
+        sha256: latestArchive.sha256,
+        byteSize: latestArchive.byteSize,
+        githubUrl: latestArchive.githubFileUrl,
+        verificationStatus: latestArchive.verificationStatus,
+        archivedAt: latestArchive.createdAt,
+        deletedFromDb: latestArchive.deletedFromDb,
+        deletedCount: latestArchive.deletedCount
+      } : null,
+      recentArchives: (recentArchives || []).map(a => ({
+        archiveId: a.archiveId,
+        dateRange: a.dateRange,
+        recordCount: a.recordCount,
+        sha256: a.sha256,
+        byteSize: a.byteSize,
+        githubUrl: a.githubFileUrl,
+        verificationStatus: a.verificationStatus,
+        archivedAt: a.createdAt,
+        deletedFromDb: a.deletedFromDb,
+        deletedCount: a.deletedCount,
+        status: a.status
+      })),
+      lastArchivalRun: settings?.lastArchivalRun || null,
+      lastArchivalFailure: settings?.lastArchivalFailure || null,
+      nextScheduledCheck: "1st of every month at 02:00 AM UTC"
+    }
   });
+});
+
+// --- SIX-MONTH ATTENDANCE ARCHIVAL & STORAGE MANAGEMENT ENDPOINTS ---
+
+// 1. Preview eligible records without any modification
+app.post("/api/admin/storage/archive-preview", requireAdmin, async (_req, res) => {
+  const eligibility = await checkStorageAndArchivalEligibility();
+  const cutoffDate = eligibility.cutoffDate;
+
+  const [eligibleRecords, classBreakdown] = await Promise.all([
+    Attendance.find({ dateKey: { $lt: cutoffDate } })
+      .populate("classId", "name section")
+      .sort({ dateKey: 1 })
+      .limit(20)
+      .lean(),
+    Attendance.aggregate([
+      { $match: { dateKey: { $lt: cutoffDate } } },
+      { $group: { _id: "$classId", count: { $sum: 1 } } }
+    ])
+  ]);
+
+  const classMap = {};
+  for (const c of classBreakdown) {
+    if (c._id) classMap[String(c._id)] = c.count;
+  }
+
+  const oldestDate = eligibility.oldestDateKey;
+  const newestDate = eligibility.newestEligibleDateKey;
+
+  res.json({
+    cutoffDate,
+    retentionMonths: eligibility.retentionMonths,
+    totalAttendance: eligibility.totalAttendance,
+    eligibleCount: eligibility.eligibleCount,
+    dateRange: {
+      from: oldestDate || "N/A",
+      to: newestDate || "N/A"
+    },
+    sampleRecordsCount: eligibleRecords.length,
+    storageMetrics: eligibility.storageMetrics,
+    isStorageHigh: eligibility.isStorageHigh,
+    recommendation: eligibility.recommendation,
+    destination: `https://github.com/${process.env.GITHUB_ARCHIVE_REPO || "Sameersam3909/-Madrasa_Attandace"}`,
+    message: eligibility.message
+  });
+});
+
+// 2. Trigger automated check and conditional archival
+app.post("/api/admin/storage/archive-check", requireAdmin, async (req, res) => {
+  const force = Boolean(req.body.force);
+  const result = await runAutomatedArchivalCycle({
+    trigger: "manual-admin",
+    force,
+    actorId: req.user._id
+  });
+  res.json(result);
+});
+
+// 3. Admin-confirmed manual archival execution
+app.post("/api/admin/storage/archive-execute", requireAdmin, async (req, res) => {
+  const result = await runAutomatedArchivalCycle({
+    trigger: "manual-admin-confirmed",
+    force: true,
+    actorId: req.user._id
+  });
+  res.json(result);
+});
+
+// 4. Restore attendance archive
+app.post("/api/admin/storage/archive-restore", requireAdmin, async (req, res) => {
+  const { archiveId, payload } = req.body;
+  if (!archiveId && !payload) {
+    return res.status(400).json({ message: "Either archiveId or payload is required to restore an archive." });
+  }
+
+  const result = await restoreAttendanceArchive({
+    archiveId,
+    archiveBufferOrJson: payload,
+    actorId: req.user._id
+  });
+  res.json(result);
+});
+
+// 5. List historical archives
+app.get("/api/admin/storage/archives", requireAdmin, async (_req, res) => {
+  const archives = await AttendanceArchive.find().sort({ createdAt: -1 }).limit(50).lean();
+  res.json(archives);
 });
 
 // --- INDEPENDENT DUAL DATABASE HEALTH DIAGNOSTICS (ADMIN ONLY) ---
@@ -2905,6 +3048,30 @@ cron.schedule(WEEKLY_REPORT_CRON, async () => {
 });
 
 console.log(`[CRON] Weekly report scheduler registered. Expression: "${WEEKLY_REPORT_CRON}" UTC (= Monday 06:00 AM Asia/Kolkata)`);
+
+// ──────────────────────────────────────────────────────────────
+// Monthly Attendance Archival & Storage Retention Scheduler
+// Runs 1st of every month at 02:00 AM UTC (= 07:30 AM IST)
+// Cron expression: "0 2 1 * *"
+// Idempotency: Checks storage usage and 6-month retention cutoff.
+// Never deletes records if storage is below configured threshold (80%).
+// ──────────────────────────────────────────────────────────────
+const MONTHLY_ARCHIVAL_CRON = "0 2 1 * *";
+
+cron.schedule(MONTHLY_ARCHIVAL_CRON, async () => {
+  console.log("[CRON] Monthly storage retention and 6-month archival check triggered at", new Date().toISOString());
+  try {
+    const result = await runAutomatedArchivalCycle({ trigger: "cron-monthly-scheduler" });
+    console.log(`[CRON] Monthly archival cycle result:`, result.message);
+  } catch (err) {
+    console.error("[CRON] Monthly archival scheduler error:", err.message);
+  }
+}, {
+  scheduled: true,
+  timezone: "UTC"
+});
+
+console.log(`[CRON] Monthly attendance archival scheduler registered. Expression: "${MONTHLY_ARCHIVAL_CRON}" UTC (= 1st of every month at 02:00 AM UTC)`);
 
 app.listen(port, () => {
   console.log(`\n=================================================`);

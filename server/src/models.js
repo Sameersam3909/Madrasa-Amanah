@@ -96,13 +96,64 @@ const systemSettingSchema = new mongoose.Schema({
     to: String,
     reason: String,
     trigger: String
-  }]
+  }],
+  storageArchiveTriggerPercent: { type: Number, default: 80 },
+  storageArchiveTargetPercent: { type: Number, default: 70 },
+  storageArchiveRetentionMonths: { type: Number, default: 6 },
+  storageArchiveAutomationEnabled: { type: Boolean, default: true },
+  lastArchivalRun: { type: mongoose.Schema.Types.Mixed, default: null },
+  lastArchivalFailure: { type: mongoose.Schema.Types.Mixed, default: null },
+  archivalLock: {
+    isLocked: { type: Boolean, default: false },
+    lockedAt: { type: Date, default: null },
+    processId: { type: String, default: "" }
+  }
 }, { timestamps: true });
+
+const attendanceArchiveSchema = new mongoose.Schema({
+  archiveId: { type: String, required: true, unique: true, index: true },
+  year: { type: Number, required: true },
+  month: { type: Number, required: true },
+  dateRange: {
+    from: { type: String, required: true },
+    to: { type: String, required: true }
+  },
+  recordCount: { type: Number, required: true },
+  recordIds: [{ type: String }],
+  recordIdsHash: { type: String, required: true },
+  sha256: { type: String, required: true },
+  byteSize: { type: Number, required: true },
+  archivePath: { type: String, required: true },
+  manifestPath: { type: String, required: true },
+  githubRepo: { type: String, default: "Sameersam3909/-Madrasa_Attandace" },
+  githubCommitSha: { type: String, default: "" },
+  githubFileUrl: { type: String, default: "" },
+  verificationStatus: {
+    type: String,
+    enum: ["verified", "pending", "failed"],
+    default: "pending"
+  },
+  verifiedAt: { type: Date, default: null },
+  deletedFromDb: { type: Boolean, default: false },
+  deletedAt: { type: Date, default: null },
+  deletedCount: { type: Number, default: 0 },
+  restoredAt: { type: Date, default: null },
+  status: {
+    type: String,
+    enum: ["archived", "verified", "purged", "restored", "failed"],
+    default: "archived"
+  },
+  summary: { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { timestamps: true });
+attendanceArchiveSchema.index({ year: -1, month: -1 });
+attendanceArchiveSchema.index({ "dateRange.from": 1, "dateRange.to": 1 });
 
 export const User = mongoose.model("User", userSchema);
 export const Class = mongoose.model("Class", classSchema);
 export const Student = mongoose.model("Student", studentSchema);
 export const Attendance = mongoose.model("Attendance", attendanceSchema);
+export const AttendanceArchive = mongoose.model("AttendanceArchive", attendanceArchiveSchema);
 export const SyncMutation = mongoose.model("SyncMutation", syncMutationSchema);
 export const AuditLog = mongoose.model("AuditLog", auditSchema);
 export const SystemSetting = mongoose.model("SystemSetting", systemSettingSchema);
+

@@ -10,7 +10,8 @@
     "test": "node test-rbac-and-auth.js && node test-student-management.js && node test-e2e.js",
     "test:rbac": "node test-rbac-and-auth.js",
     "test:student-mgmt": "node test-student-management.js",
-    "test:monthly-backup": "node test-monthly-backup.js"
+    "test:monthly-backup": "node test-monthly-backup.js",
+    "test:archival": "node test-attendance-archival.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
