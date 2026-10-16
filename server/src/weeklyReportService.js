@@ -253,73 +253,143 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
   const total = attendances.length;
   const rate = total > 0 ? (((presentTotal + lateTotal) / total) * 100).toFixed(1) : "0.0";
 
+  const resendApiKey = (process.env.RESEND_API_KEY || "").trim();
+  const brevoApiKey = (process.env.BREVO_API_KEY || "").trim();
   const smtpUser = (process.env.SMTP_USER || "").trim();
   const smtpPass = (process.env.SMTP_PASS || "").replace(/\s+/g, "");
   const smtpHost = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const smtpPort = Number(process.env.SMTP_PORT || 587);
   const isSecure = process.env.SMTP_SECURE === "true" || smtpPort === 465;
-  const smtpFrom = process.env.SMTP_FROM || `"Madrasa Amanah Reports" <${smtpUser}>`;
+  const smtpFrom = process.env.SMTP_FROM || `"Madrasa Amanah Reports" <${smtpUser || "reports@madrasa-amanah.com"}>`;
 
-  // If SMTP is configured, attempt real email delivery
-  if (smtpUser && smtpPass) {
+  const emailConfigured = Boolean(resendApiKey || brevoApiKey || (smtpUser && smtpPass));
+
+  const mailText = `Assalamu Alaikum,\n\nPlease find attached the Madrasa Amanah Smart Attendance System weekly attendance report for the period ${from} to ${to}.\n\nWeekly Summary:\n- Total Records: ${total}\n- Present: ${presentTotal}\n- Absent: ${absentTotal}\n- Late: ${lateTotal}\n- Excused: ${excusedTotal}\n- Attendance Rate: ${rate}%\n\nGenerated automatically on ${new Date().toUTCString()}.\n\nMadrasa Amanah Administration`;
+
+  const mailHtml = `
+    <div style="font-family: Arial, sans-serif; color: #23342A; max-width: 600px; border: 1px solid #DFE5E0; border-radius: 8px; padding: 24px; background: #F7F6F0;">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <h2 style="color: #174B36; margin: 0;">مَدْرَسَة • MADRASA AMANAH</h2>
+        <p style="color: #68776D; margin: 4px 0 0 0; font-size: 13px;">Smart Attendance System · Weekly Executive Report</p>
+      </div>
+      <div style="background: #FFFFFF; border-radius: 8px; padding: 18px; border: 1px solid #DFE5E0;">
+        <p style="margin: 0 0 12px 0;"><strong>Reporting Period:</strong> ${from} to ${to}</p>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Total Records Logged:</td><td style="text-align: right; font-weight: bold;">${total}</td></tr>
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Present:</td><td style="text-align: right; color: #237547; font-weight: bold;">${presentTotal}</td></tr>
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Absent:</td><td style="text-align: right; color: #B23A3A; font-weight: bold;">${absentTotal}</td></tr>
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Late:</td><td style="text-align: right; color: #94620C; font-weight: bold;">${lateTotal}</td></tr>
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Excused:</td><td style="text-align: right; color: #285A84; font-weight: bold;">${excusedTotal}</td></tr>
+          <tr><td style="padding: 8px 0; font-size: 14px; font-weight: bold;">Overall Attendance Rate:</td><td style="text-align: right; font-size: 15px; font-weight: bold; color: #174B36;">${rate}%</td></tr>
+        </table>
+      </div>
+      <p style="font-size: 12px; color: #68776D; margin-top: 16px;">
+        The full Excel report with Detailed Attendance and Class Summaries is attached to this email.
+      </p>
+    </div>
+  `;
+
+  if (emailConfigured) {
     try {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: isSecure,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass
-        },
-        connectionTimeout: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 20000
-      });
+      let messageId = null;
 
-      const mailOptions = {
-        from: smtpFrom,
-        to: targetRecipient,
-        subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
-        text: `Assalamu Alaikum,\n\nPlease find attached the Madrasa Amanah Smart Attendance System weekly attendance report for the period ${from} to ${to}.\n\nWeekly Summary:\n- Total Records: ${total}\n- Present: ${presentTotal}\n- Absent: ${absentTotal}\n- Late: ${lateTotal}\n- Excused: ${excusedTotal}\n- Attendance Rate: ${rate}%\n\nGenerated automatically on ${new Date().toUTCString()}.\n\nMadrasa Amanah Administration`,
-        html: `
-          <div style="font-family: Arial, sans-serif; color: #23342A; max-width: 600px; border: 1px solid #DFE5E0; border-radius: 8px; padding: 24px; background: #F7F6F0;">
-            <div style="text-align: center; margin-bottom: 20px;">
-              <h2 style="color: #174B36; margin: 0;">مَدْرَسَة • MADRASA AMANAH</h2>
-              <p style="color: #68776D; margin: 4px 0 0 0; font-size: 13px;">Smart Attendance System · Weekly Executive Report</p>
-            </div>
-            <div style="background: #FFFFFF; border-radius: 8px; padding: 18px; border: 1px solid #DFE5E0;">
-              <p style="margin: 0 0 12px 0;"><strong>Reporting Period:</strong> ${from} to ${to}</p>
-              <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-                <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Total Records Logged:</td><td style="text-align: right; font-weight: bold;">${total}</td></tr>
-                <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Present:</td><td style="text-align: right; color: #237547; font-weight: bold;">${presentTotal}</td></tr>
-                <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Absent:</td><td style="text-align: right; color: #B23A3A; font-weight: bold;">${absentTotal}</td></tr>
-                <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Late:</td><td style="text-align: right; color: #94620C; font-weight: bold;">${lateTotal}</td></tr>
-                <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Excused:</td><td style="text-align: right; color: #285A84; font-weight: bold;">${excusedTotal}</td></tr>
-                <tr><td style="padding: 8px 0; font-size: 14px; font-weight: bold;">Overall Attendance Rate:</td><td style="text-align: right; font-size: 15px; font-weight: bold; color: #174B36;">${rate}%</td></tr>
-              </table>
-            </div>
-            <p style="font-size: 12px; color: #68776D; margin-top: 16px;">
-              The full Excel report with Detailed Attendance and Class Summaries is attached to this email.
-            </p>
-          </div>
-        `,
-        attachments: [
-          {
-            filename: safeFilename,
-            content: buffer,
-            contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          }
-        ]
-      };
+      // 1. Resend HTTPS API (Port 443 — Bypasses Render Firewall)
+      if (resendApiKey) {
+        const resendFrom = process.env.RESEND_FROM || "Madrasa Amanah <onboarding@resend.dev>";
+        const res = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${resendApiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            from: resendFrom,
+            to: [targetRecipient],
+            subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
+            text: mailText,
+            html: mailHtml,
+            attachments: [
+              {
+                filename: safeFilename,
+                content: buffer.toString("base64")
+              }
+            ]
+          })
+        });
+        const resData = await res.json();
+        if (!res.ok) {
+          throw new Error(resData?.message || resData?.error?.message || `Resend error: ${res.statusText}`);
+        }
+        messageId = resData.id || "resend-dispatched";
+      }
+      // 2. Brevo HTTPS API (Port 443 — Bypasses Render Firewall)
+      else if (brevoApiKey) {
+        const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+          method: "POST",
+          headers: {
+            "api-key": brevoApiKey,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            sender: { name: "Madrasa Amanah", email: process.env.BREVO_FROM || smtpUser || "admin@example.com" },
+            to: [{ email: targetRecipient }],
+            subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
+            textContent: mailText,
+            htmlContent: mailHtml,
+            attachment: [
+              {
+                name: safeFilename,
+                content: buffer.toString("base64")
+              }
+            ]
+          })
+        });
+        const resData = await res.json();
+        if (!res.ok) {
+          throw new Error(resData?.message || `Brevo error: ${res.statusText}`);
+        }
+        messageId = resData.messageId || "brevo-dispatched";
+      }
+      // 3. Direct Nodemailer SMTP (standard ports 587 / 465)
+      else {
+        const transporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: isSecure,
+          auth: {
+            user: smtpUser,
+            pass: smtpPass
+          },
+          connectionTimeout: 15000,
+          greetingTimeout: 15000,
+          socketTimeout: 20000
+        });
 
-      const info = await transporter.sendMail(mailOptions);
+        const mailOptions = {
+          from: smtpFrom,
+          to: targetRecipient,
+          subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
+          text: mailText,
+          html: mailHtml,
+          attachments: [
+            {
+              filename: safeFilename,
+              content: buffer,
+              contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+          ]
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        messageId = info.messageId;
+      }
 
       if (actorId) {
         await AuditLog.create({
           actorId,
           action: "report.weekly_email_sent",
           entityType: "Report",
-          details: { recipient: targetRecipient, from, to, weekKey: `${from}_${to}`, messageId: info.messageId, trigger }
+          details: { recipient: targetRecipient, from, to, weekKey: `${from}_${to}`, messageId, trigger }
         });
       }
 
@@ -330,7 +400,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
           sentAt: new Date(),
           recipient: targetRecipient,
           period: `${from} to ${to}`,
-          messageId: info.messageId,
+          messageId,
           bytes: buffer.byteLength
         };
         settings.lastReportFailure = null;
@@ -340,7 +410,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
       return {
         success: true,
         delivered: true,
-        messageId: info.messageId,
+        messageId,
         recipient: targetRecipient,
         filename: safeFilename,
         bytes: buffer.byteLength,
@@ -349,14 +419,19 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
         summary: { total, present: presentTotal, absent: absentTotal, late: lateTotal, excused: excusedTotal, rate }
       };
     } catch (err) {
-      console.error("SMTP Delivery error:", err.message);
+      console.error("Email Delivery error:", err.message);
+
+      let cleanError = err.message || "Failed to deliver email.";
+      if (cleanError.toLowerCase().includes("timeout") || err.code === "ETIMEDOUT") {
+        cleanError = "Connection timeout. Render Free Tier blocks outbound SMTP (port 587/465). Use RESEND_API_KEY in Render to send via HTTPS.";
+      }
 
       // Record failure in system settings
       try {
         if (!settings) settings = new SystemSetting({ key: "global" });
         settings.lastReportFailure = {
           failedAt: new Date(),
-          error: err.message,
+          error: cleanError,
           recipient: targetRecipient,
           period: `${from} to ${to}`
         };
@@ -366,8 +441,8 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
       return {
         success: false,
         delivered: false,
-        error: err.message,
-        message: err.message,
+        error: cleanError,
+        message: cleanError,
         recipient: targetRecipient,
         filename: safeFilename,
         bytes: buffer.byteLength,

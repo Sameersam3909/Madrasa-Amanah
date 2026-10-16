@@ -1945,18 +1945,22 @@ app.get("/api/reports/weekly/status", requireAdmin, async (_req, res) => {
 
 // --- SEND TEST EMAIL (Admin Only) ---
 app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
+  const resendApiKey = (process.env.RESEND_API_KEY || "").trim();
+  const brevoApiKey = (process.env.BREVO_API_KEY || "").trim();
   const smtpUser = (process.env.SMTP_USER || "").trim();
   const smtpPass = (process.env.SMTP_PASS || "").replace(/\s+/g, "");
   const smtpHost = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const smtpPort = Number(process.env.SMTP_PORT || 587);
   const isSecure = process.env.SMTP_SECURE === "true" || smtpPort === 465;
-  const smtpFrom = process.env.SMTP_FROM || `"Madrasa Amanah" <${smtpUser}>`;
+  const smtpFrom = process.env.SMTP_FROM || `"Madrasa Amanah" <${smtpUser || "reports@madrasa-amanah.com"}>`;
 
-  if (!smtpUser || !smtpPass) {
+  const emailConfigured = Boolean(resendApiKey || brevoApiKey || (smtpUser && smtpPass));
+
+  if (!emailConfigured) {
     return res.status(400).json({
       success: false,
-      message: "SMTP credentials are not configured. Add SMTP_USER and SMTP_PASS to Render environment variables before sending a test email.",
-      actionRequired: "Configure SMTP_USER (your Gmail address) and SMTP_PASS (Gmail App Password) in the Render service environment."
+      message: "Email credentials are not configured. Add RESEND_API_KEY (recommended for Render) or SMTP_USER and SMTP_PASS in environment variables.",
+      actionRequired: "Configure RESEND_API_KEY in Render service environment to bypass free tier SMTP port restrictions."
     });
   }
 
@@ -1974,34 +1978,83 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
 
   const startTime = Date.now();
   try {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: isSecure,
-      auth: { user: smtpUser, pass: smtpPass },
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
-      socketTimeout: 20000
-    });
+    let providerInfo = `${smtpHost}:${smtpPort}`;
 
-    const info = await transporter.sendMail({
-      from: smtpFrom,
-      to: recipientEmail,
-      subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
-      text: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System.\n\nIf you received this message the SMTP provider accepted the request.\nNote: Provider acceptance does not guarantee inbox delivery — check your spam folder if the message is not visible.\n\nSent: ${new Date().toUTCString()}\nRecipient: ${recipientEmail}\nProvider: ${smtpHost}:${smtpPort}\n\nMadrasa Amanah Administration`,
-      html: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
-        <h2 style="color:#174B36">مَدْرَسَة • MADRASA AMANAH</h2>
-        <p style="color:#68776D;font-size:13px">Email Configuration Test</p>
-        <hr style="border:none;border-top:1px solid #DFE5E0;margin:16px 0">
-        <p>✅ Your SMTP provider accepted this test message.</p>
-        <p style="font-size:12px;color:#68776D">Note: Provider acceptance does not guarantee inbox delivery. Check spam if not visible.</p>
-        <table style="font-size:12px;color:#555;border-collapse:collapse;width:100%">
-          <tr><td style="padding:4px 0"><strong>Sent:</strong></td><td>${new Date().toUTCString()}</td></tr>
-          <tr><td style="padding:4px 0"><strong>Recipient:</strong></td><td>${recipientEmail}</td></tr>
-          <tr><td style="padding:4px 0"><strong>Provider:</strong></td><td>${smtpHost}:${smtpPort}</td></tr>
-        </table>
-      </div>`
-    });
+    if (resendApiKey) {
+      providerInfo = "Resend HTTPS API (Port 443)";
+      const resendFrom = process.env.RESEND_FROM || "Madrasa Amanah <onboarding@resend.dev>";
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          from: resendFrom,
+          to: [recipientEmail],
+          subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
+          text: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System via Resend HTTPS API.\n\nSent: ${new Date().toUTCString()}\nRecipient: ${recipientEmail}\n\nMadrasa Amanah Administration`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
+            <h2 style="color:#174B36">مَدْرَسَة • MADRASA AMANAH</h2>
+            <p style="color:#68776D;font-size:13px">Email Configuration Test (Resend HTTPS)</p>
+            <hr style="border:none;border-top:1px solid #DFE5E0;margin:16px 0">
+            <p>✅ Your email configuration is working via HTTPS Port 443.</p>
+          </div>`
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.message || data?.error?.message || "Resend error");
+    } else if (brevoApiKey) {
+      providerInfo = "Brevo HTTPS API (Port 443)";
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": brevoApiKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          sender: { name: "Madrasa Amanah", email: process.env.BREVO_FROM || smtpUser || "admin@example.com" },
+          to: [{ email: recipientEmail }],
+          subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
+          textContent: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System via Brevo HTTPS API.`,
+          htmlContent: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
+            <h2 style="color:#174B36">مَدْرَسَة • MADRASA AMANAH</h2>
+            <p>✅ Email configuration is working via Brevo HTTPS.</p>
+          </div>`
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.message || "Brevo error");
+    } else {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: isSecure,
+        auth: { user: smtpUser, pass: smtpPass },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 20000
+      });
+
+      await transporter.sendMail({
+        from: smtpFrom,
+        to: recipientEmail,
+        subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
+        text: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System.\n\nIf you received this message the SMTP provider accepted the request.\nNote: Provider acceptance does not guarantee inbox delivery — check your spam folder if the message is not visible.\n\nSent: ${new Date().toUTCString()}\nRecipient: ${recipientEmail}\nProvider: ${smtpHost}:${smtpPort}\n\nMadrasa Amanah Administration`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
+          <h2 style="color:#174B36">مَدْرَسَة • MADRASA AMANAH</h2>
+          <p style="color:#68776D;font-size:13px">Email Configuration Test</p>
+          <hr style="border:none;border-top:1px solid #DFE5E0;margin:16px 0">
+          <p>✅ Your SMTP provider accepted this test message.</p>
+          <p style="font-size:12px;color:#68776D">Note: Provider acceptance does not guarantee inbox delivery. Check spam if not visible.</p>
+          <table style="font-size:12px;color:#555;border-collapse:collapse;width:100%">
+            <tr><td style="padding:4px 0"><strong>Sent:</strong></td><td>${new Date().toUTCString()}</td></tr>
+            <tr><td style="padding:4px 0"><strong>Recipient:</strong></td><td>${recipientEmail}</td></tr>
+            <tr><td style="padding:4px 0"><strong>Provider:</strong></td><td>${smtpHost}:${smtpPort}</td></tr>
+          </table>
+        </div>`
+      });
+    }
 
     const latencyMs = Date.now() - startTime;
 

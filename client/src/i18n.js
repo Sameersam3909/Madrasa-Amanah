@@ -78,9 +78,12 @@ export function createTranslator(lang = "en") {
   const currentDict = flatTranslations[lang] || flatTranslations.en;
   const fallbackDict = flatTranslations.en;
 
-  function t(key, params) {
+  function t(key, fallbackOrParams, maybeParams) {
     if (!key) return "";
-    let val = currentDict[key] ?? fallbackDict[key] ?? key;
+    const hasStringFallback = typeof fallbackOrParams === "string";
+    const defaultVal = hasStringFallback ? fallbackOrParams : key;
+    const params = hasStringFallback ? maybeParams : fallbackOrParams;
+    let val = currentDict[key] ?? fallbackDict[key] ?? defaultVal;
     if (typeof val !== "string") return String(val);
     if (params && typeof params === "object") {
       for (const [pKey, pVal] of Object.entries(params)) {
