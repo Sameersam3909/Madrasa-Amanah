@@ -15,6 +15,7 @@ import { requireAuth, requireAdmin, canAccessClass, requireExportPin, exportRate
 import { uploadImageDataUrl } from "./cloudinary.js";
 import { connectDB, getDatabaseInfo } from "./db.js";
 import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport, getNextScheduledReportRun, resolveRecipientEmail, parseRecipientEmails } from "./weeklyReportService.js";
+import { generateWeeklyAttendancePdfBuffer } from "./weeklyAttendancePdfService.js";
 import {
   getStorageHealthReport,
   verifySecondaryDatabase,
@@ -1871,18 +1872,30 @@ app.get("/api/reports/export", exportRateLimiter, requireExportPin, async (req, 
   res.end();
 });
 
-// --- WEEKLY EXCEL REPORT & EMAIL AUTOMATION ---
+// --- WEEKLY EXCEL & PDF REPORT & EMAIL AUTOMATION ---
 app.get("/api/reports/weekly-excel", requireAdmin, exportRateLimiter, requireExportPin, async (req, res) => {
   const prevWeek = getPreviousReportingWeek();
   const from = req.query.from || req.query.startDate || prevWeek.from;
   const to = req.query.to || req.query.endDate || prevWeek.to;
-  const safeFilename = `Madrasa-Amanah-Weekly-Attendance-${from}-to-${to}.xlsx`;
+  const safeFilename = `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${from}-to-${to}.xlsx`;
 
   const wb = await generateWeeklyExcelWorkbook({ from, to });
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`);
   await wb.xlsx.write(res);
   res.end();
+});
+
+app.get("/api/reports/weekly-pdf", requireAdmin, exportRateLimiter, requireExportPin, async (req, res) => {
+  const prevWeek = getPreviousReportingWeek();
+  const from = req.query.from || req.query.startDate || prevWeek.from;
+  const to = req.query.to || req.query.endDate || prevWeek.to;
+  const safeFilename = `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${from}-to-${to}.pdf`;
+
+  const pdfBuffer = await generateWeeklyAttendancePdfBuffer({ from, to });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`);
+  res.send(pdfBuffer);
 });
 
 app.post("/api/reports/send-weekly-email", requireAdmin, async (req, res) => {
@@ -1904,24 +1917,95 @@ app.post("/api/reports/send-weekly-email", requireAdmin, async (req, res) => {
   res.json(result);
 });
 
+// --- EXTERNAL / VERCEL CRON TRIGGER (Protected by secret) ---
+app.all(["/api/reports/cron-weekly", "/api/cron/weekly-report"], async (req, res) => {
+  const scheduleSecret = (process.env.ATTENDANCE_REPORT_SCHEDULE_SECRET || process.env.CRON_SECRET || "").trim();
+  const authHeader = req.headers["authorization"] || "";
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  const querySecret = (req.query.secret || req.headers["x-cron-secret"] || "").trim();
+
+  if (!scheduleSecret || (bearerToken !== scheduleSecret && querySecret !== scheduleSecret)) {
+    return res.status(401).json({ success: false, message: "Unauthorized: Invalid or missing ATTENDANCE_REPORT_SCHEDULE_SECRET." });
+  }
+
+  try {
+    const { from, to } = getPreviousReportingWeek();
+    const isoWeekKey = `${from}_${to}`;
+    const force = req.query.force === "true" || req.body?.force === true;
+
+    if (!force) {
+      const existing = await AuditLog.findOne({
+        action: "report.weekly_email_sent",
+        "details.weekKey": isoWeekKey
+      });
+      if (existing) {
+        return res.json({
+          success: true,
+          skipped: true,
+          message: `Weekly report for ${isoWeekKey} already dispatched (messageId: ${existing.details?.messageId}). Skipping duplicate. Use ?force=true to override.`
+        });
+      }
+    }
+
+    let settings = null;
+    try { settings = await SystemSetting.findOne({ key: "global" }); } catch {}
+    const recipientEmail = resolveRecipientEmail(null, settings);
+
+    const result = await sendWeeklyEmailReport({
+      from,
+      to,
+      recipientEmail,
+      trigger: "cron-external"
+    });
+
+    if (result.delivered) {
+      const adminUser = await User.findOne({ role: "admin" }).select("_id");
+      await AuditLog.create({
+        actorId: adminUser ? adminUser._id : new mongoose.Types.ObjectId(),
+        action: "report.weekly_email_sent",
+        entityType: "Report",
+        details: {
+          recipient: recipientEmail,
+          from,
+          to,
+          weekKey: isoWeekKey,
+          messageId: result.messageId,
+          trigger: "cron-external"
+        }
+      });
+    }
+
+    return res.json({
+      success: result.delivered,
+      result
+    });
+  } catch (err) {
+    console.error("[CRON-ENDPOINT] Error executing weekly report cron:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Shared email status helper
 async function buildEmailStatusPayload() {
   const prevWeek = getPreviousReportingWeek();
   let settings = await SystemSetting.findOne({ key: "global" });
-  const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+  const brevoApiKey = (process.env.BREVO_API_KEY || "").trim();
+  const resendApiKey = (process.env.RESEND_API_KEY || "").trim();
+  const smtpUser = (process.env.SMTP_USER || "").trim();
+  const smtpPass = (process.env.SMTP_PASS || "").trim();
+  const emailConfigured = Boolean(brevoApiKey || resendApiKey || (smtpUser && smtpPass));
   const recipient = resolveRecipientEmail(null, settings);
   const timezone = settings?.reportTimezone || process.env.REPORT_TIMEZONE || "Asia/Kolkata";
-  const schedule = settings?.reportSchedule || "Mondays at 06:00 AM";
+  const schedule = settings?.reportSchedule || "Sundays at 07:00 PM (IST)";
   const automationEnabled = Boolean(settings?.reportAutomationEnabled);
-  const isAutomated = automationEnabled && smtpConfigured;
+  const isAutomated = automationEnabled && emailConfigured;
   const nextRun = isAutomated ? getNextScheduledReportRun(schedule, timezone) : null;
 
   return {
     recipientEmail: recipient,
-    smtpConfigured,
-    smtpHost: process.env.SMTP_HOST || "smtp.gmail.com",
-    smtpPort: Number(process.env.SMTP_PORT || 587),
-    smtpUser: process.env.SMTP_USER ? "configured" : "not_configured",
+    emailConfigured,
+    smtpConfigured: emailConfigured,
+    provider: brevoApiKey ? "Brevo HTTPS API (Port 443)" : (resendApiKey ? "Resend HTTPS API (Port 443)" : (smtpUser ? "SMTP" : "None")),
     timezone,
     schedule,
     automationEnabled,
@@ -1977,83 +2061,116 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
   try {
     let providerInfo = `${smtpHost}:${smtpPort}`;
 
-    if (brevoApiKey) {
-      providerInfo = "Brevo HTTPS API (Port 443)";
-      const brevoSenderEmail = (process.env.BREVO_FROM || process.env.SMTP_USER || recipients[0]).trim();
-      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
-        method: "POST",
-        headers: {
-          "api-key": brevoApiKey,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          sender: { name: "Madrasa Amanah", email: brevoSenderEmail },
-          to: recipients.map(email => ({ email })),
-          subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
-          textContent: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System via Brevo HTTPS API.\n\nRecipients: ${recipients.join(", ")}`,
-          htmlContent: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
-            <h2 style="color:#174B36">مَدْرَسَة • MADRASA AMANAH</h2>
-            <p>✅ Email configuration is working via Brevo HTTPS.</p>
-            <p style="font-size:12px;color:#68776D">Delivered to: ${recipients.join(", ")}</p>
-          </div>`
-        })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.message || "Brevo error");
-    } else if (resendApiKey) {
-      providerInfo = "Resend HTTPS API (Port 443)";
-      const resendFrom = process.env.RESEND_FROM || "Madrasa Amanah <onboarding@resend.dev>";
-      const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${resendApiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          from: resendFrom,
-          to: recipients,
-          subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
-          text: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System via Resend HTTPS API.\n\nSent: ${new Date().toUTCString()}\nRecipient: ${recipients.join(", ")}\n\nMadrasa Amanah Administration`,
-          html: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
-            <h2 style="color:#174B36">مَدْرَسَة • MADRASA AMANAH</h2>
-            <p style="color:#68776D;font-size:13px">Email Configuration Test (Resend HTTPS)</p>
-            <hr style="border:none;border-top:1px solid #DFE5E0;margin:16px 0">
-            <p>✅ Your email configuration is working via HTTPS Port 443.</p>
-            <p style="font-size:12px;color:#68776D">Delivered to: ${recipients.join(", ")}</p>
-          </div>`
-        })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.message || data?.error?.message || "Resend error");
-    } else {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: isSecure,
-        auth: { user: smtpUser, pass: smtpPass },
-        connectionTimeout: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 20000
-      });
+    let testSuccess = false;
+    let messageId = null;
+    let lastError = null;
 
-      await transporter.sendMail({
-        from: smtpFrom,
-        to: recipientEmail,
-        subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
-        text: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System.\n\nIf you received this message the SMTP provider accepted the request.\nNote: Provider acceptance does not guarantee inbox delivery — check your spam folder if the message is not visible.\n\nSent: ${new Date().toUTCString()}\nRecipient: ${recipientEmail}\nProvider: ${smtpHost}:${smtpPort}\n\nMadrasa Amanah Administration`,
-        html: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
-          <h2 style="color:#174B36">مَدْرَسَة • MADRASA AMANAH</h2>
-          <p style="color:#68776D;font-size:13px">Email Configuration Test</p>
-          <hr style="border:none;border-top:1px solid #DFE5E0;margin:16px 0">
-          <p>✅ Your SMTP provider accepted this test message.</p>
-          <p style="font-size:12px;color:#68776D">Note: Provider acceptance does not guarantee inbox delivery. Check spam if not visible.</p>
-          <table style="font-size:12px;color:#555;border-collapse:collapse;width:100%">
-            <tr><td style="padding:4px 0"><strong>Sent:</strong></td><td>${new Date().toUTCString()}</td></tr>
-            <tr><td style="padding:4px 0"><strong>Recipient:</strong></td><td>${recipientEmail}</td></tr>
-            <tr><td style="padding:4px 0"><strong>Provider:</strong></td><td>${smtpHost}:${smtpPort}</td></tr>
-          </table>
-        </div>`
-      });
+    if (brevoApiKey && !testSuccess) {
+      try {
+        providerInfo = "Brevo HTTPS API (Port 443)";
+        const brevoSenderEmail = (process.env.BREVO_FROM || process.env.SMTP_USER || recipients[0]).trim();
+        const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+          method: "POST",
+          headers: {
+            "api-key": brevoApiKey,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            sender: { name: "Darul Uloom Ashraful Ahad, Atmakur", email: brevoSenderEmail },
+            to: recipients.map(email => ({ email })),
+            subject: `[Test] Darul Uloom Ashraful Ahad — Email Test — ${new Date().toUTCString()}`,
+            textContent: `Assalamu Alaikum,\n\nThis is a configuration test email from Darul Uloom Ashraful Ahad, Atmakur (Madrasa Amanah Smart Attendance System).\n\nRecipients: ${recipients.join(", ")}`,
+            htmlContent: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
+              <h2 style="color:#174B36">دار العلوم اشرفیہ اتماکور</h2>
+              <p style="font-weight:bold;color:#174B36">Darul Uloom Ashraful Ahad, Atmakur</p>
+              <p>✅ Email configuration is verified and working via Brevo HTTPS.</p>
+              <p style="font-size:12px;color:#68776D">Delivered to: ${recipients.join(", ")}</p>
+            </div>`
+          })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          messageId = data.messageId || "brevo-test-ok";
+          testSuccess = true;
+        } else {
+          lastError = new Error(data?.message || "Brevo error");
+        }
+      } catch (e) {
+        lastError = e;
+      }
+    }
+
+    if (!testSuccess && smtpUser && smtpPass) {
+      try {
+        providerInfo = `Gmail SMTP (${smtpHost}:${smtpPort})`;
+        const transporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: isSecure,
+          auth: { user: smtpUser, pass: smtpPass },
+          connectionTimeout: 15000,
+          greetingTimeout: 15000,
+          socketTimeout: 20000
+        });
+
+        const info = await transporter.sendMail({
+          from: smtpFrom,
+          to: recipients.join(", "),
+          subject: `[Test] Darul Uloom Ashraful Ahad — Email Test — ${new Date().toUTCString()}`,
+          text: `Assalamu Alaikum,\n\nThis is a configuration test email from Darul Uloom Ashraful Ahad, Atmakur.\n\nRecipients: ${recipients.join(", ")}`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
+            <h2 style="color:#174B36">دار العلوم اشرفیہ اتماکور</h2>
+            <p style="font-weight:bold;color:#174B36">Darul Uloom Ashraful Ahad, Atmakur</p>
+            <p>✅ Email configuration is verified and working via SMTP.</p>
+            <p style="font-size:12px;color:#68776D">Delivered to: ${recipients.join(", ")}</p>
+          </div>`
+        });
+        messageId = info.messageId || "smtp-test-ok";
+        testSuccess = true;
+        lastError = null;
+      } catch (e) {
+        if (!lastError) lastError = e;
+      }
+    }
+
+    if (!testSuccess && resendApiKey) {
+      try {
+        providerInfo = "Resend HTTPS API (Port 443)";
+        const resendFrom = process.env.RESEND_FROM || "Darul Uloom Ashraful Ahad <onboarding@resend.dev>";
+        const response = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${resendApiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            from: resendFrom,
+            to: recipients,
+            subject: `[Test] Darul Uloom Ashraful Ahad — Email Test — ${new Date().toUTCString()}`,
+            text: `Assalamu Alaikum,\n\nThis is a configuration test email from Darul Uloom Ashraful Ahad, Atmakur.\n\nSent: ${new Date().toUTCString()}\nRecipients: ${recipients.join(", ")}`,
+            html: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
+              <h2 style="color:#174B36">دار العلوم اشرفیہ اتماکور</h2>
+              <p style="font-weight:bold;color:#174B36">Darul Uloom Ashraful Ahad, Atmakur</p>
+              <p>✅ Email configuration is working via Resend HTTPS.</p>
+              <p style="font-size:12px;color:#68776D">Delivered to: ${recipients.join(", ")}</p>
+            </div>`
+          })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          messageId = data.id || "resend-test-ok";
+          testSuccess = true;
+          lastError = null;
+        } else {
+          if (!lastError) lastError = new Error(data?.message || data?.error?.message || "Resend error");
+        }
+      } catch (e) {
+        if (!lastError) lastError = e;
+      }
+    }
+
+    if (!testSuccess) {
+      throw (lastError || new Error("Failed to send test email through all available providers."));
     }
 
     const latencyMs = Date.now() - startTime;
@@ -2062,7 +2179,7 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
       actorId: req.user._id,
       action: "report.test_email_sent",
       entityType: "Report",
-      details: { recipient: recipientEmail, messageId: info.messageId, latencyMs, trigger: "manual-test" }
+      details: { recipient: recipientEmail, messageId, latencyMs, trigger: "manual-test" }
     });
 
     // Record last success so dashboard can display it
@@ -2072,7 +2189,7 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
         sentAt: new Date(),
         recipient: recipientEmail,
         period: "Test Email",
-        messageId: info.messageId,
+        messageId,
         bytes: 0
       };
       await settings.save();
@@ -2114,29 +2231,36 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
 // Application Settings & Weekly Report Configuration (Admin Only)
 app.get("/api/settings", requireAdmin, async (_req, res) => {
   let settings = await SystemSetting.findOne({ key: "global" });
+  const defaultEmail = (process.env.ATTENDANCE_REPORT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL || "mdrafiq12118@gmail.com").trim();
   if (!settings) {
     settings = await SystemSetting.create({
       key: "global",
-      reportRecipientEmail: process.env.REPORT_RECIPIENT_EMAIL || "2300030621cseh1@gmail.com",
+      reportRecipientEmail: defaultEmail,
       reportTimezone: process.env.REPORT_TIMEZONE || "Asia/Kolkata",
-      reportSchedule: "Mondays at 06:00 AM",
+      reportSchedule: "Sundays at 07:00 PM (IST)",
       reportAutomationEnabled: false,
       attendanceCorrectionWindowDays: 7
     });
   }
 
-  const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
-  const nextRun = settings.reportAutomationEnabled && smtpConfigured
-    ? getNextScheduledReportRun(settings.reportSchedule, settings.reportTimezone)
+  const brevoApiKey = (process.env.BREVO_API_KEY || "").trim();
+  const resendApiKey = (process.env.RESEND_API_KEY || "").trim();
+  const smtpUser = (process.env.SMTP_USER || "").trim();
+  const smtpPass = (process.env.SMTP_PASS || "").trim();
+  const emailConfigured = Boolean(brevoApiKey || resendApiKey || (smtpUser && smtpPass));
+  const nextRun = settings.reportAutomationEnabled && emailConfigured
+    ? getNextScheduledReportRun(settings.reportSchedule || "Sundays at 07:00 PM (IST)", settings.reportTimezone || "Asia/Kolkata")
     : null;
 
   res.json({
     reportRecipientEmail: resolveRecipientEmail(null, settings),
     reportTimezone: settings.reportTimezone || "Asia/Kolkata",
-    reportSchedule: settings.reportSchedule || "Mondays at 06:00 AM",
+    reportSchedule: settings.reportSchedule || "Sundays at 07:00 PM (IST)",
     reportAutomationEnabled: settings.reportAutomationEnabled,
-    isAutomated: settings.reportAutomationEnabled && smtpConfigured,
-    smtpConfigured,
+    isAutomated: settings.reportAutomationEnabled && emailConfigured,
+    emailConfigured,
+    smtpConfigured: emailConfigured,
+    provider: brevoApiKey ? "Brevo HTTPS API (Port 443)" : (resendApiKey ? "Resend HTTPS API (Port 443)" : (smtpUser ? "SMTP" : "None")),
     attendanceCorrectionWindowDays: settings.attendanceCorrectionWindowDays || 7,
     lastReportSuccess: settings.lastReportSuccess,
     lastReportFailure: settings.lastReportFailure,
@@ -2173,8 +2297,12 @@ app.patch("/api/settings", requireAdmin, async (req, res) => {
     details: req.body
   });
 
-  const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
-  const nextRun = settings.reportAutomationEnabled && smtpConfigured
+  const brevoApiKey = (process.env.BREVO_API_KEY || "").trim();
+  const resendApiKey = (process.env.RESEND_API_KEY || "").trim();
+  const smtpUser = (process.env.SMTP_USER || "").trim();
+  const smtpPass = (process.env.SMTP_PASS || "").trim();
+  const emailConfigured = Boolean(brevoApiKey || resendApiKey || (smtpUser && smtpPass));
+  const nextRun = settings.reportAutomationEnabled && emailConfigured
     ? getNextScheduledReportRun(settings.reportSchedule, settings.reportTimezone)
     : null;
 
@@ -2185,8 +2313,10 @@ app.patch("/api/settings", requireAdmin, async (req, res) => {
       reportTimezone: settings.reportTimezone,
       reportSchedule: settings.reportSchedule,
       reportAutomationEnabled: settings.reportAutomationEnabled,
-      isAutomated: settings.reportAutomationEnabled && smtpConfigured,
-      smtpConfigured,
+      isAutomated: settings.reportAutomationEnabled && emailConfigured,
+      emailConfigured,
+      smtpConfigured: emailConfigured,
+      provider: brevoApiKey ? "Brevo HTTPS API (Port 443)" : (resendApiKey ? "Resend HTTPS API (Port 443)" : (smtpUser ? "SMTP" : "None")),
       attendanceCorrectionWindowDays: settings.attendanceCorrectionWindowDays,
       lastReportSuccess: settings.lastReportSuccess,
       lastReportFailure: settings.lastReportFailure,
@@ -2802,22 +2932,22 @@ if (adminCount === 0) {
 // ──────────────────────────────────────────────────────────────
 try {
   let globalSettings = await SystemSetting.findOne({ key: "global" });
-  const configuredEmail = (process.env.REPORT_RECIPIENT_EMAIL || process.env.ADMIN_EMAIL || "").trim();
+  const configuredEmail = (process.env.ATTENDANCE_REPORT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL || process.env.ADMIN_EMAIL || "mdrafiq12118@gmail.com").trim();
   if (!globalSettings) {
     globalSettings = await SystemSetting.create({
       key: "global",
-      reportRecipientEmail: configuredEmail || "2300030621cseh1@gmail.com",
+      reportRecipientEmail: configuredEmail,
       reportTimezone: process.env.REPORT_TIMEZONE || "Asia/Kolkata",
-      reportSchedule: "Mondays at 06:00 AM",
+      reportSchedule: "Sundays at 07:00 PM (IST)",
       reportAutomationEnabled: false,
       attendanceCorrectionWindowDays: 7
     });
     console.log("[BOOTSTRAP] SystemSetting created with default recipient:", globalSettings.reportRecipientEmail);
   } else {
-    // If user configured ADMIN_EMAIL or REPORT_RECIPIENT_EMAIL in Render,
-    // and DB still has the legacy developer email or is blank, auto-update it!
-    if (configuredEmail && (!globalSettings.reportRecipientEmail || globalSettings.reportRecipientEmail === "2300030621cseh1@gmail.com")) {
+    // If DB still has the legacy developer email or is blank, auto-update it to the client email
+    if (!globalSettings.reportRecipientEmail || globalSettings.reportRecipientEmail === "2300030621cseh1@gmail.com") {
       globalSettings.reportRecipientEmail = configuredEmail;
+      globalSettings.reportSchedule = "Sundays at 07:00 PM (IST)";
       await globalSettings.save();
       console.log("[BOOTSTRAP] SystemSetting recipient auto-synced from env to:", globalSettings.reportRecipientEmail);
     }
@@ -2827,34 +2957,34 @@ try {
 }
 
 // ──────────────────────────────────────────────────────────────
-// Weekly Report Cron Scheduler — Monday 06:00 AM Asia/Kolkata
+// Weekly Report Cron Scheduler — Sunday 07:00 PM Asia/Kolkata
 // ──────────────────────────────────────────────────────────────
-// Cron expression: "0 6 * * 1" = minute 0, hour 6, every Monday
-// node-cron runs in the server's local time. Since Render uses UTC
-// we convert: Asia/Kolkata = UTC+05:30, so 06:00 IST = 00:30 UTC.
-// Cron expression for 00:30 UTC on Monday: "30 0 * * 1"
+// Cron expression: Sunday 19:00 IST (UTC+05:30) = 13:30 UTC Sunday
+// Cron expression for 13:30 UTC on Sunday: "30 13 * * 0"
 //
 // Idempotency: We record the ISO week key (YYYY-W##) in the audit
 // log before sending. If a record for this week already exists
 // (e.g. from a duplicate instance or retry), we skip dispatch.
 // ──────────────────────────────────────────────────────────────
-const WEEKLY_REPORT_CRON = "30 0 * * 1"; // 00:30 UTC = 06:00 IST Monday
+const WEEKLY_REPORT_CRON = "30 13 * * 0"; // 13:30 UTC = 19:00 (7:00 PM) IST Sunday
 
 cron.schedule(WEEKLY_REPORT_CRON, async () => {
   console.log("[CRON] Weekly report scheduler triggered at", new Date().toISOString());
 
   try {
-    // Load settings — automation must be enabled AND SMTP must be configured
+    // Load settings — automation must be enabled AND an email provider configured
     const settings = await SystemSetting.findOne({ key: "global" });
     if (!settings?.reportAutomationEnabled) {
       console.log("[CRON] Weekly report automation is disabled in settings. Skipping.");
       return;
     }
 
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
-    if (!smtpUser || !smtpPass) {
-      console.warn("[CRON] SMTP credentials not configured (SMTP_USER/SMTP_PASS). Cannot dispatch weekly report.");
+    const brevoApiKey = (process.env.BREVO_API_KEY || "").trim();
+    const resendApiKey = (process.env.RESEND_API_KEY || "").trim();
+    const smtpUser = (process.env.SMTP_USER || "").trim();
+    const smtpPass = (process.env.SMTP_PASS || "").trim();
+    if (!brevoApiKey && !resendApiKey && (!smtpUser || !smtpPass)) {
+      console.warn("[CRON] No email provider configured (BREVO_API_KEY, RESEND_API_KEY, or SMTP_USER/SMTP_PASS). Cannot dispatch weekly report.");
       return;
     }
 
@@ -2885,8 +3015,9 @@ cron.schedule(WEEKLY_REPORT_CRON, async () => {
 
     if (result.delivered) {
       // Stamp the weekKey so duplicate instances cannot re-send
+      const adminUser = await User.findOne({ role: "admin" }).select("_id");
       await AuditLog.create({
-        actorId: (await User.findOne({ role: "admin" }).select("_id"))._id,
+        actorId: adminUser ? adminUser._id : new mongoose.Types.ObjectId(),
         action: "report.weekly_email_sent",
         entityType: "Report",
         details: {
@@ -2907,10 +3038,10 @@ cron.schedule(WEEKLY_REPORT_CRON, async () => {
   }
 }, {
   scheduled: true,
-  timezone: "UTC" // We converted IST to UTC in the expression above
+  timezone: "UTC"
 });
 
-console.log(`[CRON] Weekly report scheduler registered. Expression: "${WEEKLY_REPORT_CRON}" UTC (= Monday 06:00 AM Asia/Kolkata)`);
+console.log(`[CRON] Weekly report scheduler registered. Expression: "${WEEKLY_REPORT_CRON}" UTC (= Sunday 07:00 PM Asia/Kolkata)`);
 
 // ──────────────────────────────────────────────────────────────
 // Monthly Attendance Archival & Storage Retention Scheduler

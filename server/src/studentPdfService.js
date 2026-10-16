@@ -208,34 +208,45 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     // Decorative Gold Accent Stripe at bottom of banner
     doc.rect(36, 95, 523, 3).fill(accentGold);
 
-    // Madrasa Amanah Open Book Vector Crest
+    // Official Madrasa Logo
     const cx = 56;
     const cy = 66;
-    doc.save();
-    // Crest circular shield
-    doc.circle(cx, cy, 18).fillAndStroke(primaryDark, accentGold);
-    // Crest Book Pages
-    doc.strokeColor("#FFFFFF").lineWidth(1.5);
-    doc.moveTo(cx - 10, cy + 5).quadraticCurveTo(cx - 5, cy, cx, cy + 4).stroke();
-    doc.moveTo(cx + 10, cy + 5).quadraticCurveTo(cx + 5, cy, cx, cy + 4).stroke();
-    doc.moveTo(cx - 10, cy - 2).quadraticCurveTo(cx - 5, cy - 7, cx, cy - 3).stroke();
-    doc.moveTo(cx + 10, cy - 2).quadraticCurveTo(cx + 5, cy - 7, cx, cy - 3).stroke();
-    doc.moveTo(cx, cy - 3).lineTo(cx, cy + 7).strokeColor(accentGold).lineWidth(1.2).stroke();
-    doc.restore();
+    const logoPath = path.join(__dirname, "assets", "logo.png");
+    let logoDrawn = false;
+    if (fs.existsSync(logoPath)) {
+      try {
+        doc.save();
+        doc.circle(cx, cy, 20).fill("#FFFFFF");
+        doc.image(logoPath, cx - 18, cy - 18, { width: 36, height: 36 });
+        doc.restore();
+        logoDrawn = true;
+      } catch (err) {
+        console.warn("Failed to render logo image in student PDF:", err.message);
+      }
+    }
+
+    if (!logoDrawn) {
+      doc.save();
+      doc.circle(cx, cy, 18).fillAndStroke(primaryDark, accentGold);
+      doc.strokeColor("#FFFFFF").lineWidth(1.5);
+      doc.moveTo(cx - 10, cy + 5).quadraticCurveTo(cx - 5, cy, cx, cy + 4).stroke();
+      doc.moveTo(cx + 10, cy + 5).quadraticCurveTo(cx + 5, cy, cx, cy + 4).stroke();
+      doc.restore();
+    }
 
     // Madrasa Title & Arabic Subtitle
-    doc.fillColor("#FFFFFF").fontSize(15).font("Helvetica-Bold").text("MADRASA AMANAH", 82, 46);
+    doc.fillColor("#FFFFFF").fontSize(12).font("Helvetica-Bold").text("DARUL ULOOM ASHRAFUL AHAD, ATMAKUR", 82, 44, { width: 260 });
     if (hasArabicFont) {
-      doc.fillColor(accentGold).fontSize(11).font("NotoArabic").text("مَدْرَسَة أَمَانَة", 230, 47);
+      doc.fillColor(accentGold).fontSize(10.5).font("NotoArabic").text("دار العلوم اشرفیہ اتماکور", 82, 59, { width: 260 });
     }
-    doc.fillColor("#D1FAE5").fontSize(8).font("Helvetica").text("SMART ATTENDANCE & ACADEMIC MANAGEMENT SYSTEM", 82, 67);
+    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text("Madrasa Amanah Attendance Management System", 82, 73);
 
     // Right side dossier metadata
-    doc.fillColor("#FFFFFF").fontSize(10).font("Helvetica-Bold").text("OFFICIAL STUDENT DOSSIER", 340, 46, { align: "right", width: 205 });
+    doc.fillColor("#FFFFFF").fontSize(9.5).font("Helvetica-Bold").text("OFFICIAL STUDENT DOSSIER", 340, 44, { align: "right", width: 205 });
     const formattedDate = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
     const formattedTime = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text(`Generated: ${formattedDate} ${formattedTime}`, 340, 64, { align: "right", width: 205 });
-    doc.fillColor("#A7F3D0").fontSize(7).font("Helvetica").text(`Institution: Madrasa Amanah (Atmakur)`, 340, 76, { align: "right", width: 205 });
+    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text(`Generated: ${formattedDate} ${formattedTime}`, 340, 60, { align: "right", width: 205 });
+    doc.fillColor("#A7F3D0").fontSize(7).font("Helvetica").text(`Location: Atmakur`, 340, 72, { align: "right", width: 205 });
   };
 
   drawHeaderBanner();
@@ -560,7 +571,7 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
 
     // Footer Text
     doc.fillColor(textMuted).fontSize(7).font("Helvetica")
-      .text("Madrasa Amanah Smart Attendance System • Official Confidential Academic & Attendance Record", 36, footY + 7);
+      .text("Darul Uloom Ashraful Ahad, Atmakur • Madrasa Amanah Attendance Management System", 36, footY + 7);
     doc.text(`Student Database Record: ${student._id}  •  Page ${i + 1} of ${range.count}`, 36, footY + 17);
 
     // Official Seal and Signature Line

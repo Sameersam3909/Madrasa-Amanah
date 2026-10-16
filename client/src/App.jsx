@@ -16,6 +16,7 @@ import {
   Edit3,
   Eye,
   FileSpreadsheet,
+  FileText,
   Filter,
   FlipHorizontal,
   GraduationCap,
@@ -2303,7 +2304,11 @@ export default function App() {
   }
 
   async function downloadWeeklyReport() {
-    await triggerFileDownload("/reports/weekly-excel", {}, `Madrasa-Amanah-Weekly-Attendance-${today()}.xlsx`);
+    await triggerFileDownload("/reports/weekly-excel", {}, `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${today()}.xlsx`);
+  }
+
+  async function downloadWeeklyPdfReport() {
+    await triggerFileDownload("/reports/weekly-pdf", {}, `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${today()}.pdf`);
   }
 
   async function downloadStudentsRoster(format = "csv") {
@@ -2356,23 +2361,16 @@ export default function App() {
       <div className="login-screen">
         <form className="login-card" onSubmit={signIn}>
           <div style={{ textAlign: "center", marginBottom: 16 }}>
-            <div
-              style={{
-                width: 52,
-                height: 52,
-                borderRadius: 14,
-                background: "var(--primary)",
-                color: "#fff",
-                display: "grid",
-                placeItems: "center",
-                margin: "0 auto 10px"
-              }}
-            >
-              <BookOpen size={28} />
+            <div style={{ marginBottom: 14, display: "flex", justifyContent: "center" }}>
+              <img
+                src="/logo.png"
+                alt="Darul Uloom Ashraful Ahad Logo"
+                style={{ width: 84, height: 84, objectFit: "contain", borderRadius: "50%", background: "#fff", padding: 2, boxShadow: "0 4px 14px rgba(0,0,0,0.12)" }}
+              />
             </div>
-            <p className="eyebrow">مَدْرَسَة • MADRASA AMANAH</p>
-            <h1>{t.brand}</h1>
-            <p className="muted">Offline-first mobile attendance register</p>
+            <p className="eyebrow" style={{ letterSpacing: 0.5, fontWeight: 700, color: "var(--accent)", marginBottom: 4 }}>دار العلوم اشرفیہ اتماکور</p>
+            <h1 style={{ fontSize: 20, margin: "2px 0 6px" }}>{t.brand}</h1>
+            <p className="muted" style={{ fontSize: 13 }}>Madrasa Amanah Attendance Management System</p>
           </div>
 
           {error && (
@@ -2439,23 +2437,24 @@ export default function App() {
     <div className="app-shell">
       {/* DESKTOP SIDEBAR */}
       <aside className="desktop-sidebar">
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
-          <div
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+          <img
+            src="/logo.png"
+            alt="Darul Uloom Logo"
             style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              background: "var(--primary)",
-              color: "#fff",
-              display: "grid",
-              placeItems: "center"
+              width: 44,
+              height: 44,
+              objectFit: "contain",
+              borderRadius: "50%",
+              flexShrink: 0,
+              background: "#fff",
+              padding: 2,
+              border: "1px solid var(--border)"
             }}
-          >
-            <BookOpen size={20} />
-          </div>
+          />
           <div>
-            <strong style={{ display: "block", fontSize: 15, color: "var(--primary)" }}>{t.brand}</strong>
-            <small style={{ color: "var(--accent)", fontWeight: 700 }}>{t.tagline}</small>
+            <strong style={{ display: "block", fontSize: 14, lineHeight: 1.25, color: "var(--primary)" }}>{t.brand}</strong>
+            <small style={{ color: "var(--accent)", fontWeight: 700, fontSize: 11 }}>دار العلوم اشرفیہ اتماکور</small>
           </div>
         </div>
 
@@ -2555,13 +2554,23 @@ export default function App() {
 
       {/* MOBILE TOPBAR */}
       <header className="mobile-header">
-        <div className="mobile-brand">
-          <div className="mobile-brand-icon">
-            <BookOpen size={20} />
-          </div>
+        <div className="mobile-brand" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <img
+            src="/logo.png"
+            alt="Logo"
+            style={{
+              width: 34,
+              height: 34,
+              objectFit: "contain",
+              borderRadius: "50%",
+              background: "#fff",
+              padding: 1,
+              flexShrink: 0
+            }}
+          />
           <div className="mobile-brand-title">
-            <strong>{t.brand}</strong>
-            <small>مَدْرَسَة أَمَانَة</small>
+            <strong style={{ fontSize: 13, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 190 }}>{t.brand}</strong>
+            <small style={{ fontSize: 11, color: "var(--accent)", fontWeight: 600 }}>دار العلوم اشرفیہ اتماکور</small>
           </div>
         </div>
 
@@ -4711,12 +4720,20 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="responsive-grid-2">
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginTop: 12 }}>
+                  <button
+                    className="btn secondary"
+                    onClick={downloadWeeklyPdfReport}
+                    disabled={loading}
+                    style={{ minHeight: 44, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                  >
+                    <FileText size={16} /> {t("reports.downloadWeeklyPdf", "Download Weekly PDF")}
+                  </button>
                   <button
                     className="btn secondary"
                     onClick={downloadWeeklyReport}
                     disabled={loading}
-                    style={{ minHeight: 44, fontSize: 13 }}
+                    style={{ minHeight: 44, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
                   >
                     <FileSpreadsheet size={16} /> {t("reports.downloadWeeklyXlsx", "Download Weekly .xlsx")}
                   </button>
@@ -4724,9 +4741,9 @@ export default function App() {
                     className="btn primary"
                     onClick={sendWeeklyEmail}
                     disabled={loading}
-                    style={{ minHeight: 44, fontSize: 13 }}
+                    style={{ minHeight: 44, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
                   >
-                    <Bell size={16} /> {t("reports.sendEmailReport", "Send Email Report")}
+                    <Bell size={16} /> {t("reports.sendAttendanceReport", "Send Attendance Report")}
                   </button>
                 </div>
               </div>

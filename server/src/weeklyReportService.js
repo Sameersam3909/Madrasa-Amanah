@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import nodemailer from "nodemailer";
 import { Attendance, Class, Student, User, AuditLog, SystemSetting } from "./models.js";
 import { compareRollNumbers } from "./utils/studentSort.js";
+import { generateWeeklyAttendancePdfBuffer } from "./weeklyAttendancePdfService.js";
 
 /**
  * Calculates previous Monday through Sunday in YYYY-MM-DD format
@@ -28,7 +29,7 @@ export function getPreviousReportingWeek(baseDate = new Date()) {
  */
 export async function generateWeeklyExcelWorkbook({ from, to, recipientEmail }) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Madrasa Amanah Smart Attendance System";
+  wb.creator = "Darul Uloom Ashraful Ahad, Atmakur";
   wb.lastModifiedBy = "Automated Weekly Report";
   wb.created = new Date();
 
@@ -67,10 +68,12 @@ export async function generateWeeklyExcelWorkbook({ from, to, recipientEmail }) 
   ];
 
   // Header banner
-  wsSummary.addRow(["مَدْرَسَة  •  MADRASA AMANAH", "Weekly Attendance Report"]);
+  wsSummary.addRow(["دار العلوم اشرفیہ اتماکور • DARUL ULOOM ASHRAFUL AHAD, ATMAKUR", "Weekly Attendance Report"]);
+  wsSummary.addRow(["Location", "Atmakur"]);
+  wsSummary.addRow(["Project", "Madrasa Amanah Attendance Management System"]);
   wsSummary.addRow(["Reporting Period", `${from} to ${to}`]);
   wsSummary.addRow(["Report Generated At", new Date().toISOString()]);
-  wsSummary.addRow(["Target Recipient", recipientEmail || process.env.REPORT_RECIPIENT_EMAIL || process.env.ADMIN_EMAIL || "2300030621cseh1@gmail.com"]);
+  wsSummary.addRow(["Target Recipient(s)", recipientEmail || process.env.ATTENDANCE_REPORT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL || "mdrafiq12118@gmail.com"]);
   wsSummary.addRow([]);
 
   // High-level KPIs
@@ -242,17 +245,18 @@ export function resolveRecipientEmail(explicitRecipient, settings) {
   if (explicitRecipient && typeof explicitRecipient === "string" && explicitRecipient.trim()) {
     return explicitRecipient.trim();
   }
-  if (process.env.REPORT_RECIPIENT_EMAIL && process.env.REPORT_RECIPIENT_EMAIL.trim()) {
-    return process.env.REPORT_RECIPIENT_EMAIL.trim();
+  const envEmail = (process.env.ATTENDANCE_REPORT_EMAIL || process.env.REPORT_RECIPIENT_EMAIL || "").trim();
+  if (envEmail) {
+    return envEmail;
   }
   const dbRecipient = settings?.reportRecipientEmail?.trim();
   if (dbRecipient && dbRecipient !== "2300030621cseh1@gmail.com") {
     return dbRecipient;
   }
-  if (process.env.ADMIN_EMAIL && process.env.ADMIN_EMAIL.trim() && process.env.ADMIN_EMAIL.trim() !== "2300030621cseh1@gmail.com") {
+  if (process.env.ADMIN_EMAIL && process.env.ADMIN_EMAIL.trim() && process.env.ADMIN_EMAIL.trim() !== "admin@example.com" && process.env.ADMIN_EMAIL.trim() !== "2300030621cseh1@gmail.com") {
     return process.env.ADMIN_EMAIL.trim();
   }
-  return dbRecipient || process.env.ADMIN_EMAIL?.trim() || "2300030621cseh1@gmail.com";
+  return dbRecipient || "mdrafiq12118@gmail.com";
 }
 
 /**
@@ -273,7 +277,7 @@ export function parseRecipientEmails(targetRecipient) {
 }
 
 /**
- * Sends weekly attendance report via email attachment
+ * Sends weekly attendance report via email attachment (both PDF & Excel)
  */
 export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger = "manual", actorId = null }) {
   let settings = null;
@@ -284,16 +288,31 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
   const targetRecipient = resolveRecipientEmail(recipientEmail, settings);
   const recipients = parseRecipientEmails(targetRecipient);
   if (recipients.length === 0) {
-    recipients.push("shaiksameer3909sam@gmail.com");
+    recipients.push("mdrafiq12118@gmail.com");
   }
   const displayRecipients = recipients.join(", ");
-  const safeFilename = `Madrasa-Amanah-Weekly-Attendance-${from}-to-${to}.xlsx`;
+  const excelFilename = `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${from}-to-${to}.xlsx`;
+  const pdfFilename = `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${from}-to-${to}.pdf`;
 
-  // 1. Generate workbook
+  // 1. Generate Excel workbook
   const wb = await generateWeeklyExcelWorkbook({ from, to, recipientEmail: displayRecipients });
-  const buffer = await wb.xlsx.writeBuffer();
+  const excelBuffer = await wb.xlsx.writeBuffer();
 
-  const attendances = await Attendance.find({ dateKey: { $gte: from, $lte: to } });
+  // 2. Generate PDF Report with logo & official styling
+  let pdfBuffer = null;
+  try {
+    pdfBuffer = await generateWeeklyAttendancePdfBuffer({ from, to });
+  } catch (pdfErr) {
+    console.warn("[PDF WARNING] Failed to generate weekly PDF report:", pdfErr.message);
+  }
+
+  const [attendances, classes, students] = await Promise.all([
+    Attendance.find({ dateKey: { $gte: from, $lte: to } }),
+    Class.find({ active: true }),
+    Student.find({ active: true })
+  ]);
+
+  const totalEnrolled = students.length;
   const presentTotal = attendances.filter(a => a.status === "present").length;
   const absentTotal = attendances.filter(a => a.status === "absent").length;
   const lateTotal = attendances.filter(a => a.status === "late").length;
@@ -308,31 +327,44 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
   const smtpHost = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const smtpPort = Number(process.env.SMTP_PORT || 587);
   const isSecure = process.env.SMTP_SECURE === "true" || smtpPort === 465;
-  const smtpFrom = process.env.SMTP_FROM || `"Madrasa Amanah Reports" <${smtpUser || "reports@madrasa-amanah.com"}>`;
+  const smtpFrom = process.env.SMTP_FROM || `"Darul Uloom Ashraful Ahad" <${smtpUser || "reports@madrasa-amanah.com"}>`;
 
   const emailConfigured = Boolean(resendApiKey || brevoApiKey || (smtpUser && smtpPass));
 
-  const mailText = `Assalamu Alaikum,\n\nPlease find attached the Madrasa Amanah Smart Attendance System weekly attendance report for the period ${from} to ${to}.\n\nWeekly Summary:\n- Total Records: ${total}\n- Present: ${presentTotal}\n- Absent: ${absentTotal}\n- Late: ${lateTotal}\n- Excused: ${excusedTotal}\n- Attendance Rate: ${rate}%\n\nGenerated automatically on ${new Date().toUTCString()}.\n\nMadrasa Amanah Administration`;
+  const emailSubject = `Darul Uloom Ashraful Ahad, Atmakur — Weekly Attendance Report (${from} to ${to})`;
+
+  const mailText = `Assalamu Alaikum,\n\nPlease find attached the official Weekly Attendance Report for Darul Uloom Ashraful Ahad, Atmakur (دار العلوم اشرفیہ اتماکور) for the period ${from} to ${to}.\n\nExecutive Attendance Summary:\n- Total Registered Students: ${totalEnrolled}\n- Total Active Classes: ${classes.length}\n- Total Attendance Marks: ${total}\n- Present: ${presentTotal}\n- Absent: ${absentTotal}\n- Late: ${lateTotal}\n- Excused: ${excusedTotal}\n- Attendance Rate: ${rate}%\n\nAttached Documents:\n1. Official Printable PDF Attendance Dossier (${pdfFilename})\n2. Detailed Multi-Sheet Excel Spreadsheet (${excelFilename})\n\nMadrasa Amanah Attendance Management System\nLocation: Atmakur`;
 
   const mailHtml = `
-    <div style="font-family: Arial, sans-serif; color: #23342A; max-width: 600px; border: 1px solid #DFE5E0; border-radius: 8px; padding: 24px; background: #F7F6F0;">
-      <div style="text-align: center; margin-bottom: 20px;">
-        <h2 style="color: #174B36; margin: 0;">مَدْرَسَة • MADRASA AMANAH</h2>
-        <p style="color: #68776D; margin: 4px 0 0 0; font-size: 13px;">Smart Attendance System · Weekly Executive Report</p>
+    <div style="font-family: Arial, sans-serif; color: #1E293B; max-width: 600px; border: 1px solid #DFE5E0; border-radius: 8px; padding: 24px; background: #F8FAFC;">
+      <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #D97706; padding-bottom: 16px;">
+        <h2 style="color: #174B36; margin: 0; font-size: 18px; letter-spacing: 0.5px;">دار العلوم اشرفیہ اتماکور</h2>
+        <h3 style="color: #0E3324; margin: 4px 0 0 0; font-size: 16px;">DARUL ULOOM ASHRAFUL AHAD, ATMAKUR</h3>
+        <p style="color: #64748B; margin: 4px 0 0 0; font-size: 12px;">Madrasa Amanah Attendance Management System · Location: Atmakur</p>
       </div>
-      <div style="background: #FFFFFF; border-radius: 8px; padding: 18px; border: 1px solid #DFE5E0;">
-        <p style="margin: 0 0 12px 0;"><strong>Reporting Period:</strong> ${from} to ${to}</p>
+      <div style="background: #FFFFFF; border-radius: 8px; padding: 18px; border: 1px solid #E2E8F0; margin-bottom: 16px;">
+        <p style="margin: 0 0 12px 0; font-size: 14px; font-weight: bold; color: #174B36;">
+          Weekly Attendance Summary: ${from} to ${to}
+        </p>
         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Total Records Logged:</td><td style="text-align: right; font-weight: bold;">${total}</td></tr>
-          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Present:</td><td style="text-align: right; color: #237547; font-weight: bold;">${presentTotal}</td></tr>
-          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Absent:</td><td style="text-align: right; color: #B23A3A; font-weight: bold;">${absentTotal}</td></tr>
-          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Late:</td><td style="text-align: right; color: #94620C; font-weight: bold;">${lateTotal}</td></tr>
-          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0;">Excused:</td><td style="text-align: right; color: #285A84; font-weight: bold;">${excusedTotal}</td></tr>
-          <tr><td style="padding: 8px 0; font-size: 14px; font-weight: bold;">Overall Attendance Rate:</td><td style="text-align: right; font-size: 15px; font-weight: bold; color: #174B36;">${rate}%</td></tr>
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0; color: #64748B;">Total Registered Students:</td><td style="text-align: right; font-weight: bold;">${totalEnrolled}</td></tr>
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0; color: #64748B;">Total Records Logged:</td><td style="text-align: right; font-weight: bold;">${total}</td></tr>
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0; color: #64748B;">Present:</td><td style="text-align: right; color: #059669; font-weight: bold;">${presentTotal}</td></tr>
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0; color: #64748B;">Absent:</td><td style="text-align: right; color: #DC2626; font-weight: bold;">${absentTotal}</td></tr>
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0; color: #64748B;">Late:</td><td style="text-align: right; color: #D97706; font-weight: bold;">${lateTotal}</td></tr>
+          <tr style="border-bottom: 1px solid #EEE;"><td style="padding: 6px 0; color: #64748B;">Excused:</td><td style="text-align: right; color: #2563EB; font-weight: bold;">${excusedTotal}</td></tr>
+          <tr><td style="padding: 8px 0; font-size: 14px; font-weight: bold; color: #0E3324;">Overall Attendance Rate:</td><td style="text-align: right; font-size: 15px; font-weight: bold; color: #059669;">${rate}%</td></tr>
         </table>
       </div>
-      <p style="font-size: 12px; color: #68776D; margin-top: 16px;">
-        The full Excel report with Detailed Attendance and Class Summaries is attached to this email.
+      <div style="background: #F1F5F9; border-radius: 6px; padding: 12px 16px; font-size: 12px; color: #475569;">
+        <strong>📎 Attached Official Reports:</strong>
+        <ul style="margin: 6px 0 0 0; padding-left: 20px;">
+          <li><strong>${pdfFilename}</strong> (Printable Official PDF Report with Madrasa Logo)</li>
+          <li><strong>${excelFilename}</strong> (Executive Multi-Sheet Excel Spreadsheet)</li>
+        </ul>
+      </div>
+      <p style="font-size: 11px; color: #94A3B8; margin-top: 16px; text-align: center;">
+        Darul Uloom Ashraful Ahad, Atmakur • Confidential Official Report
       </p>
     </div>
   `;
@@ -341,96 +373,151 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
     try {
       let messageId = null;
 
-      // 1. Brevo HTTPS API (Port 443 — Preferred, allows sending to ANY recipient and multiple emails)
-      if (brevoApiKey) {
-        const brevoSenderEmail = (process.env.BREVO_FROM || process.env.SMTP_USER || recipients[0]).trim();
-        const res = await fetch("https://api.brevo.com/v3/smtp/email", {
-          method: "POST",
-          headers: {
-            "api-key": brevoApiKey,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            sender: { name: "Madrasa Amanah", email: brevoSenderEmail },
-            to: recipients.map(email => ({ email })),
-            subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
-            textContent: mailText,
-            htmlContent: mailHtml,
-            attachment: [
-              {
-                name: safeFilename,
-                content: buffer.toString("base64")
-              }
-            ]
-          })
-        });
-        const resData = await res.json();
-        if (!res.ok) {
-          throw new Error(resData?.message || `Brevo error: ${res.statusText}`);
+      let dispatchError = null;
+      let sentSuccess = false;
+
+      // 1. Brevo HTTPS API (Port 443 — Preferred for external & multiple recipients)
+      if (brevoApiKey && !sentSuccess) {
+        try {
+          const brevoSenderEmail = (process.env.BREVO_FROM || process.env.SMTP_USER || recipients[0]).trim();
+          const brevoAttachments = [];
+          if (pdfBuffer) {
+            brevoAttachments.push({
+              name: pdfFilename,
+              content: pdfBuffer.toString("base64")
+            });
+          }
+          brevoAttachments.push({
+            name: excelFilename,
+            content: excelBuffer.toString("base64")
+          });
+
+          const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+            method: "POST",
+            headers: {
+              "api-key": brevoApiKey,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              sender: { name: "Darul Uloom Ashraful Ahad, Atmakur", email: brevoSenderEmail },
+              to: recipients.map(email => ({ email })),
+              subject: emailSubject,
+              textContent: mailText,
+              htmlContent: mailHtml,
+              attachment: brevoAttachments
+            })
+          });
+          const resData = await res.json();
+          if (res.ok) {
+            messageId = resData.messageId || "brevo-dispatched";
+            sentSuccess = true;
+          } else {
+            console.warn("[MAIL] Brevo send error:", resData);
+            dispatchError = new Error(resData?.message || `Brevo HTTP ${res.status}`);
+          }
+        } catch (err) {
+          console.warn("[MAIL] Brevo exception, trying fallback:", err.message);
+          dispatchError = err;
         }
-        messageId = resData.messageId || "brevo-dispatched";
       }
-      // 2. Resend HTTPS API (Port 443 — Fallback)
-      else if (resendApiKey) {
-        const resendFrom = process.env.RESEND_FROM || "Madrasa Amanah <onboarding@resend.dev>";
-        const res = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${resendApiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            from: resendFrom,
-            to: recipients,
-            subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
+
+      // 2. Direct Nodemailer SMTP (fallback if Brevo fails or has IP restrictions)
+      if (!sentSuccess && smtpUser && smtpPass) {
+        try {
+          const transporter = nodemailer.createTransport({
+            host: smtpHost,
+            port: smtpPort,
+            secure: isSecure,
+            auth: {
+              user: smtpUser,
+              pass: smtpPass
+            },
+            connectionTimeout: 15000,
+            greetingTimeout: 15000,
+            socketTimeout: 20000
+          });
+
+          const smtpAttachments = [];
+          if (pdfBuffer) {
+            smtpAttachments.push({
+              filename: pdfFilename,
+              content: pdfBuffer,
+              contentType: "application/pdf"
+            });
+          }
+          smtpAttachments.push({
+            filename: excelFilename,
+            content: excelBuffer,
+            contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          });
+
+          const mailOptions = {
+            from: smtpFrom,
+            to: displayRecipients,
+            subject: emailSubject,
             text: mailText,
             html: mailHtml,
-            attachments: [
-              {
-                filename: safeFilename,
-                content: buffer.toString("base64")
-              }
-            ]
-          })
-        });
-        const resData = await res.json();
-        if (!res.ok) {
-          throw new Error(resData?.message || resData?.error?.message || `Resend error: ${res.statusText}`);
+            attachments: smtpAttachments
+          };
+
+          const info = await transporter.sendMail(mailOptions);
+          messageId = info.messageId || "smtp-dispatched";
+          sentSuccess = true;
+          dispatchError = null;
+        } catch (err) {
+          console.warn("[MAIL] SMTP fallback failed:", err.message);
+          if (!dispatchError) dispatchError = err;
         }
-        messageId = resData.id || "resend-dispatched";
       }
-      // 3. Direct Nodemailer SMTP (standard ports 587 / 465)
-      else {
-        const transporter = nodemailer.createTransport({
-          host: smtpHost,
-          port: smtpPort,
-          secure: isSecure,
-          auth: {
-            user: smtpUser,
-            pass: smtpPass
-          },
-          connectionTimeout: 15000,
-          greetingTimeout: 15000,
-          socketTimeout: 20000
-        });
 
-        const mailOptions = {
-          from: smtpFrom,
-          to: displayRecipients,
-          subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
-          text: mailText,
-          html: mailHtml,
-          attachments: [
-            {
-              filename: safeFilename,
-              content: buffer,
-              contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            }
-          ]
-        };
+      // 3. Resend HTTPS API (Port 443 — Fallback)
+      if (!sentSuccess && resendApiKey) {
+        try {
+          const resendFrom = process.env.RESEND_FROM || "Darul Uloom Ashraful Ahad <onboarding@resend.dev>";
+          const resendAttachments = [];
+          if (pdfBuffer) {
+            resendAttachments.push({
+              filename: pdfFilename,
+              content: pdfBuffer.toString("base64")
+            });
+          }
+          resendAttachments.push({
+            filename: excelFilename,
+            content: excelBuffer.toString("base64")
+          });
 
-        const info = await transporter.sendMail(mailOptions);
-        messageId = info.messageId;
+          const res = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${resendApiKey}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              from: resendFrom,
+              to: recipients,
+              subject: emailSubject,
+              text: mailText,
+              html: mailHtml,
+              attachments: resendAttachments
+            })
+          });
+          const resData = await res.json();
+          if (res.ok) {
+            messageId = resData.id || "resend-dispatched";
+            sentSuccess = true;
+            dispatchError = null;
+          } else {
+            console.warn("[MAIL] Resend send error:", resData);
+            if (!dispatchError) dispatchError = new Error(resData?.message || resData?.error?.message || `Resend HTTP ${res.status}`);
+          }
+        } catch (err) {
+          console.warn("[MAIL] Resend exception:", err.message);
+          if (!dispatchError) dispatchError = err;
+        }
+      }
+
+      if (!sentSuccess) {
+        throw (dispatchError || new Error("All configured email dispatch methods (Brevo, SMTP, Resend) failed."));
       }
 
       if (actorId) {
@@ -450,7 +537,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
           recipient: displayRecipients,
           period: `${from} to ${to}`,
           messageId,
-          bytes: buffer.byteLength
+          bytes: excelBuffer.byteLength + (pdfBuffer ? pdfBuffer.byteLength : 0)
         };
         settings.lastReportFailure = null;
         await settings.save();
@@ -462,8 +549,9 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
         messageId,
         recipient: displayRecipients,
         recipientsCount: recipients.length,
-        filename: safeFilename,
-        bytes: buffer.byteLength,
+        filename: pdfFilename,
+        excelFilename,
+        bytes: excelBuffer.byteLength + (pdfBuffer ? pdfBuffer.byteLength : 0),
         from,
         to,
         summary: { total, present: presentTotal, absent: absentTotal, late: lateTotal, excused: excusedTotal, rate }
