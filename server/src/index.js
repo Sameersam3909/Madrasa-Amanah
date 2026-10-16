@@ -1945,10 +1945,12 @@ app.get("/api/reports/weekly/status", requireAdmin, async (_req, res) => {
 
 // --- SEND TEST EMAIL (Admin Only) ---
 app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  const smtpHost = process.env.SMTP_HOST || "smtp.gmail.com";
+  const smtpUser = (process.env.SMTP_USER || "").trim();
+  const smtpPass = (process.env.SMTP_PASS || "").replace(/\s+/g, "");
+  const smtpHost = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const isSecure = process.env.SMTP_SECURE === "true" || smtpPort === 465;
+  const smtpFrom = process.env.SMTP_FROM || `"Madrasa Amanah" <${smtpUser}>`;
 
   if (!smtpUser || !smtpPass) {
     return res.status(400).json({
@@ -1972,27 +1974,18 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
 
   const startTime = Date.now();
   try {
-    const transportConfig = (smtpHost.includes("gmail") || smtpHost === "smtp.gmail.com")
-      ? {
-          service: "gmail",
-          auth: { user: smtpUser, pass: smtpPass },
-          connectionTimeout: 15000,
-          greetingTimeout: 15000,
-          socketTimeout: 20000
-        }
-      : {
-          host: smtpHost,
-          port: smtpPort,
-          secure: smtpPort === 465,
-          auth: { user: smtpUser, pass: smtpPass },
-          connectionTimeout: 15000,
-          greetingTimeout: 15000,
-          socketTimeout: 20000
-        };
-    const transporter = nodemailer.createTransport(transportConfig);
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: isSecure,
+      auth: { user: smtpUser, pass: smtpPass },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000
+    });
 
     const info = await transporter.sendMail({
-      from: `"Madrasa Amanah" <${smtpUser}>`,
+      from: smtpFrom,
       to: recipientEmail,
       subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
       text: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System.\n\nIf you received this message the SMTP provider accepted the request.\nNote: Provider acceptance does not guarantee inbox delivery — check your spam folder if the message is not visible.\n\nSent: ${new Date().toUTCString()}\nRecipient: ${recipientEmail}\nProvider: ${smtpHost}:${smtpPort}\n\nMadrasa Amanah Administration`,

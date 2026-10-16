@@ -253,41 +253,31 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
   const total = attendances.length;
   const rate = total > 0 ? (((presentTotal + lateTotal) / total) * 100).toFixed(1) : "0.0";
 
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  const smtpHost = process.env.SMTP_HOST || "smtp.gmail.com";
+  const smtpUser = (process.env.SMTP_USER || "").trim();
+  const smtpPass = (process.env.SMTP_PASS || "").replace(/\s+/g, "");
+  const smtpHost = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const isSecure = process.env.SMTP_SECURE === "true" || smtpPort === 465;
+  const smtpFrom = process.env.SMTP_FROM || `"Madrasa Amanah Reports" <${smtpUser}>`;
 
   // If SMTP is configured, attempt real email delivery
   if (smtpUser && smtpPass) {
     try {
-      const transportConfig = (smtpHost.includes("gmail") || smtpHost === "smtp.gmail.com")
-        ? {
-            service: "gmail",
-            auth: {
-              user: smtpUser,
-              pass: smtpPass
-            },
-            connectionTimeout: 15000,
-            greetingTimeout: 15000,
-            socketTimeout: 20000
-          }
-        : {
-            host: smtpHost,
-            port: smtpPort,
-            secure: smtpPort === 465,
-            auth: {
-              user: smtpUser,
-              pass: smtpPass
-            },
-            connectionTimeout: 15000,
-            greetingTimeout: 15000,
-            socketTimeout: 20000
-          };
-      const transporter = nodemailer.createTransport(transportConfig);
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: isSecure,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass
+        },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 20000
+      });
 
       const mailOptions = {
-        from: `"Madrasa Amanah Reports" <${smtpUser}>`,
+        from: smtpFrom,
         to: targetRecipient,
         subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
         text: `Assalamu Alaikum,\n\nPlease find attached the Madrasa Amanah Smart Attendance System weekly attendance report for the period ${from} to ${to}.\n\nWeekly Summary:\n- Total Records: ${total}\n- Present: ${presentTotal}\n- Absent: ${absentTotal}\n- Late: ${lateTotal}\n- Excused: ${excusedTotal}\n- Attendance Rate: ${rate}%\n\nGenerated automatically on ${new Date().toUTCString()}.\n\nMadrasa Amanah Administration`,
@@ -377,6 +367,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
         success: false,
         delivered: false,
         error: err.message,
+        message: err.message,
         recipient: targetRecipient,
         filename: safeFilename,
         bytes: buffer.byteLength,

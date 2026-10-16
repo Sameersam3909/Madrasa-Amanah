@@ -2332,11 +2332,12 @@ export default function App() {
           type: "success"
         });
       } else {
-        setNotice(`Weekly report generated (${res.data?.bytes || 0} bytes). ${res.data?.message || ""}`);
+        const failureReason = res.data?.error || res.data?.message || "Pending SMTP configuration.";
+        setError(`Email delivery failed: ${failureReason}`);
         addNotification({
-          title: "Weekly Report Generated",
-          message: `Workbook created for ${res.data?.recipient || "admin"}. Delivery status: ${res.data?.message || "Pending SMTP configuration."}`,
-          type: "info"
+          title: "Weekly Report Email Failed",
+          message: `Workbook created (${res.data?.bytes || 0} bytes), but email delivery failed: ${failureReason}`,
+          type: "warning"
         });
       }
       fetchEmailStatus();
