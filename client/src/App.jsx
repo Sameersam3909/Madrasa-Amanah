@@ -2304,11 +2304,11 @@ export default function App() {
   }
 
   async function downloadWeeklyReport() {
-    await triggerFileDownload("/reports/weekly-excel", {}, `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${today()}.xlsx`);
+    await triggerFileDownload("/reports/weekly-excel", {}, `Darul-Uloom-Ashrafia-Weekly-Attendance-${today()}.xlsx`);
   }
 
   async function downloadWeeklyPdfReport() {
-    await triggerFileDownload("/reports/weekly-pdf", {}, `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${today()}.pdf`);
+    await triggerFileDownload("/reports/weekly-pdf", {}, `Darul-Uloom-Ashrafia-Weekly-Attendance-${today()}.pdf`);
   }
 
   async function downloadStudentsRoster(format = "csv") {
@@ -2364,11 +2364,11 @@ export default function App() {
             <div style={{ marginBottom: 14, display: "flex", justifyContent: "center" }}>
               <img
                 src="/logo.png"
-                alt="Darul Uloom Ashraful Ahad Logo"
+                alt="Darul Uloom Ashrafia Logo"
                 style={{ width: 84, height: 84, objectFit: "contain", borderRadius: "50%", background: "#fff", padding: 2, boxShadow: "0 4px 14px rgba(0,0,0,0.12)" }}
               />
             </div>
-            <p className="eyebrow" style={{ letterSpacing: 0.5, fontWeight: 700, color: "var(--accent)", marginBottom: 4 }}>دار العلوم اشرفیہ اتماکور</p>
+            <p className="eyebrow" style={{ letterSpacing: 0.5, fontWeight: 700, color: "var(--accent)", marginBottom: 4 }}>دارالعلوم اشرفیہ</p>
             <h1 style={{ fontSize: 20, margin: "2px 0 6px" }}>{t.brand}</h1>
             <p className="muted" style={{ fontSize: 13 }}>Madrasa Amanah Attendance Management System</p>
           </div>
@@ -2454,7 +2454,7 @@ export default function App() {
           />
           <div>
             <strong style={{ display: "block", fontSize: 14, lineHeight: 1.25, color: "var(--primary)" }}>{t.brand}</strong>
-            <small style={{ color: "var(--accent)", fontWeight: 700, fontSize: 11 }}>دار العلوم اشرفیہ اتماکور</small>
+            <small style={{ color: "var(--accent)", fontWeight: 700, fontSize: 11 }}>دارالعلوم اشرفیہ</small>
           </div>
         </div>
 
@@ -2570,7 +2570,7 @@ export default function App() {
           />
           <div className="mobile-brand-title">
             <strong style={{ fontSize: 13, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 190 }}>{t.brand}</strong>
-            <small style={{ fontSize: 11, color: "var(--accent)", fontWeight: 600 }}>دار العلوم اشرفیہ اتماکور</small>
+            <small style={{ fontSize: 11, color: "var(--accent)", fontWeight: 600 }}>دارالعلوم اشرفیہ</small>
           </div>
         </div>
 

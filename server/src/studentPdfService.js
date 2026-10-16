@@ -235,9 +235,9 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     }
 
     // Madrasa Title & Arabic Subtitle
-    doc.fillColor("#FFFFFF").fontSize(12).font("Helvetica-Bold").text("DARUL ULOOM ASHRAFUL AHAD, ATMAKUR", 82, 44, { width: 260 });
+    doc.fillColor("#FFFFFF").fontSize(12).font("Helvetica-Bold").text("DARUL ULOOM ASHRAFIA, ATMAKUR", 82, 44, { width: 260 });
     if (hasArabicFont) {
-      doc.fillColor(accentGold).fontSize(10.5).font("NotoArabic").text("دار العلوم اشرفیہ اتماکور", 82, 59, { width: 260 });
+      doc.fillColor(accentGold).fontSize(10.5).font("NotoArabic").text("دارالعلوم اشرفیہ اتماکور", 82, 59, { width: 260 });
     }
     doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text("Madrasa Amanah Attendance Management System", 82, 73);
 
@@ -571,7 +571,7 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
 
     // Footer Text
     doc.fillColor(textMuted).fontSize(7).font("Helvetica")
-      .text("Darul Uloom Ashraful Ahad, Atmakur • Madrasa Amanah Attendance Management System", 36, footY + 7);
+      .text("Darul Uloom Ashrafia, Atmakur • Madrasa Amanah Attendance Management System", 36, footY + 7);
     doc.text(`Student Database Record: ${student._id}  •  Page ${i + 1} of ${range.count}`, 36, footY + 17);
 
     // Official Seal and Signature Line

@@ -1877,7 +1877,7 @@ app.get("/api/reports/weekly-excel", requireAdmin, exportRateLimiter, requireExp
   const prevWeek = getPreviousReportingWeek();
   const from = req.query.from || req.query.startDate || prevWeek.from;
   const to = req.query.to || req.query.endDate || prevWeek.to;
-  const safeFilename = `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${from}-to-${to}.xlsx`;
+  const safeFilename = `Darul-Uloom-Ashrafia-Weekly-Attendance-${from}-to-${to}.xlsx`;
 
   const wb = await generateWeeklyExcelWorkbook({ from, to });
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -1890,7 +1890,7 @@ app.get("/api/reports/weekly-pdf", requireAdmin, exportRateLimiter, requireExpor
   const prevWeek = getPreviousReportingWeek();
   const from = req.query.from || req.query.startDate || prevWeek.from;
   const to = req.query.to || req.query.endDate || prevWeek.to;
-  const safeFilename = `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${from}-to-${to}.pdf`;
+  const safeFilename = `Darul-Uloom-Ashrafia-Weekly-Attendance-${from}-to-${to}.pdf`;
 
   const pdfBuffer = await generateWeeklyAttendancePdfBuffer({ from, to });
   res.setHeader("Content-Type", "application/pdf");
@@ -2076,13 +2076,13 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            sender: { name: "Darul Uloom Ashraful Ahad, Atmakur", email: brevoSenderEmail },
+            sender: { name: "Darul Uloom Ashrafia, Atmakur", email: brevoSenderEmail },
             to: recipients.map(email => ({ email })),
-            subject: `[Test] Darul Uloom Ashraful Ahad — Email Test — ${new Date().toUTCString()}`,
-            textContent: `Assalamu Alaikum,\n\nThis is a configuration test email from Darul Uloom Ashraful Ahad, Atmakur (Madrasa Amanah Smart Attendance System).\n\nRecipients: ${recipients.join(", ")}`,
+            subject: `[Test] Darul Uloom Ashrafia — Email Test — ${new Date().toUTCString()}`,
+            textContent: `Assalamu Alaikum,\n\nThis is a configuration test email from Darul Uloom Ashrafia, Atmakur (Madrasa Amanah Smart Attendance System).\n\nRecipients: ${recipients.join(", ")}`,
             htmlContent: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
-              <h2 style="color:#174B36">دار العلوم اشرفیہ اتماکور</h2>
-              <p style="font-weight:bold;color:#174B36">Darul Uloom Ashraful Ahad, Atmakur</p>
+              <h2 style="color:#174B36">دارالعلوم اشرفیہ</h2>
+              <p style="font-weight:bold;color:#174B36">Darul Uloom Ashrafia, Atmakur</p>
               <p>✅ Email configuration is verified and working via Brevo HTTPS.</p>
               <p style="font-size:12px;color:#68776D">Delivered to: ${recipients.join(", ")}</p>
             </div>`
@@ -2116,11 +2116,11 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
         const info = await transporter.sendMail({
           from: smtpFrom,
           to: recipients.join(", "),
-          subject: `[Test] Darul Uloom Ashraful Ahad — Email Test — ${new Date().toUTCString()}`,
-          text: `Assalamu Alaikum,\n\nThis is a configuration test email from Darul Uloom Ashraful Ahad, Atmakur.\n\nRecipients: ${recipients.join(", ")}`,
+          subject: `[Test] Darul Uloom Ashrafia — Email Test — ${new Date().toUTCString()}`,
+          text: `Assalamu Alaikum,\n\nThis is a configuration test email from Darul Uloom Ashrafia, Atmakur.\n\nRecipients: ${recipients.join(", ")}`,
           html: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
-            <h2 style="color:#174B36">دار العلوم اشرفیہ اتماکور</h2>
-            <p style="font-weight:bold;color:#174B36">Darul Uloom Ashraful Ahad, Atmakur</p>
+            <h2 style="color:#174B36">دارالعلوم اشرفیہ</h2>
+            <p style="font-weight:bold;color:#174B36">Darul Uloom Ashrafia, Atmakur</p>
             <p>✅ Email configuration is verified and working via SMTP.</p>
             <p style="font-size:12px;color:#68776D">Delivered to: ${recipients.join(", ")}</p>
           </div>`
@@ -2136,7 +2136,7 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
     if (!testSuccess && resendApiKey) {
       try {
         providerInfo = "Resend HTTPS API (Port 443)";
-        const resendFrom = process.env.RESEND_FROM || "Darul Uloom Ashraful Ahad <onboarding@resend.dev>";
+        const resendFrom = process.env.RESEND_FROM || "Darul Uloom Ashrafia <onboarding@resend.dev>";
         const response = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: {
@@ -2146,11 +2146,11 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
           body: JSON.stringify({
             from: resendFrom,
             to: recipients,
-            subject: `[Test] Darul Uloom Ashraful Ahad — Email Test — ${new Date().toUTCString()}`,
-            text: `Assalamu Alaikum,\n\nThis is a configuration test email from Darul Uloom Ashraful Ahad, Atmakur.\n\nSent: ${new Date().toUTCString()}\nRecipients: ${recipients.join(", ")}`,
+            subject: `[Test] Darul Uloom Ashrafia — Email Test — ${new Date().toUTCString()}`,
+            text: `Assalamu Alaikum,\n\nThis is a configuration test email from Darul Uloom Ashrafia, Atmakur.\n\nSent: ${new Date().toUTCString()}\nRecipients: ${recipients.join(", ")}`,
             html: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
-              <h2 style="color:#174B36">دار العلوم اشرفیہ اتماکور</h2>
-              <p style="font-weight:bold;color:#174B36">Darul Uloom Ashraful Ahad, Atmakur</p>
+              <h2 style="color:#174B36">دارالعلوم اشرفیہ</h2>
+              <p style="font-weight:bold;color:#174B36">Darul Uloom Ashrafia, Atmakur</p>
               <p>✅ Email configuration is working via Resend HTTPS.</p>
               <p style="font-size:12px;color:#68776D">Delivered to: ${recipients.join(", ")}</p>
             </div>`

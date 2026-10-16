@@ -29,7 +29,7 @@ export function getPreviousReportingWeek(baseDate = new Date()) {
  */
 export async function generateWeeklyExcelWorkbook({ from, to, recipientEmail }) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Darul Uloom Ashraful Ahad, Atmakur";
+  wb.creator = "Darul Uloom Ashrafia, Atmakur";
   wb.lastModifiedBy = "Automated Weekly Report";
   wb.created = new Date();
 
@@ -68,7 +68,7 @@ export async function generateWeeklyExcelWorkbook({ from, to, recipientEmail }) 
   ];
 
   // Header banner
-  wsSummary.addRow(["دار العلوم اشرفیہ اتماکور • DARUL ULOOM ASHRAFUL AHAD, ATMAKUR", "Weekly Attendance Report"]);
+  wsSummary.addRow(["دارالعلوم اشرفیہ اتماکور • DARUL ULOOM ASHRAFIA, ATMAKUR", "Weekly Attendance Report"]);
   wsSummary.addRow(["Location", "Atmakur"]);
   wsSummary.addRow(["Project", "Madrasa Amanah Attendance Management System"]);
   wsSummary.addRow(["Reporting Period", `${from} to ${to}`]);
@@ -292,8 +292,8 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
     recipients.push("mdrafiq12118@gmail.com");
   }
   const displayRecipients = recipients.join(", ");
-  const excelFilename = `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${from}-to-${to}.xlsx`;
-  const pdfFilename = `Darul-Uloom-Ashraful-Ahad-Weekly-Attendance-${from}-to-${to}.pdf`;
+  const excelFilename = `Darul-Uloom-Ashrafia-Weekly-Attendance-${from}-to-${to}.xlsx`;
+  const pdfFilename = `Darul-Uloom-Ashrafia-Weekly-Attendance-${from}-to-${to}.pdf`;
 
   // 1. Generate Excel workbook
   const wb = await generateWeeklyExcelWorkbook({ from, to, recipientEmail: displayRecipients });
@@ -328,19 +328,19 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
   const smtpHost = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const smtpPort = Number(process.env.SMTP_PORT || 587);
   const isSecure = process.env.SMTP_SECURE === "true" || smtpPort === 465;
-  const smtpFrom = process.env.SMTP_FROM || `"Darul Uloom Ashraful Ahad" <${smtpUser || "reports@madrasa-amanah.com"}>`;
+  const smtpFrom = process.env.SMTP_FROM || `"Darul Uloom Ashrafia" <${smtpUser || "reports@madrasa-amanah.com"}>`;
 
   const emailConfigured = Boolean(resendApiKey || brevoApiKey || (smtpUser && smtpPass));
 
-  const emailSubject = `Darul Uloom Ashraful Ahad, Atmakur — Weekly Attendance Report (${from} to ${to})`;
+  const emailSubject = `Darul Uloom Ashrafia, Atmakur — Weekly Attendance Report (${from} to ${to})`;
 
-  const mailText = `Assalamu Alaikum,\n\nPlease find attached the official Weekly Attendance Report for Darul Uloom Ashraful Ahad, Atmakur (دار العلوم اشرفیہ اتماکور) for the period ${from} to ${to}.\n\nExecutive Attendance Summary:\n- Total Registered Students: ${totalEnrolled}\n- Total Active Classes: ${classes.length}\n- Total Attendance Marks: ${total}\n- Present: ${presentTotal}\n- Absent: ${absentTotal}\n- Late: ${lateTotal}\n- Excused: ${excusedTotal}\n- Attendance Rate: ${rate}%\n\nAttached Documents:\n1. Official Printable PDF Attendance Dossier (${pdfFilename})\n2. Detailed Multi-Sheet Excel Spreadsheet (${excelFilename})\n\nMadrasa Amanah Attendance Management System\nLocation: Atmakur`;
+  const mailText = `Assalamu Alaikum,\n\nPlease find attached the official Weekly Attendance Report for Darul Uloom Ashrafia, Atmakur (دارالعلوم اشرفیہ) for the period ${from} to ${to}.\n\nExecutive Attendance Summary:\n- Total Registered Students: ${totalEnrolled}\n- Total Active Classes: ${classes.length}\n- Total Attendance Marks: ${total}\n- Present: ${presentTotal}\n- Absent: ${absentTotal}\n- Late: ${lateTotal}\n- Excused: ${excusedTotal}\n- Attendance Rate: ${rate}%\n\nAttached Documents:\n1. Official Printable PDF Attendance Dossier (${pdfFilename})\n2. Detailed Multi-Sheet Excel Spreadsheet (${excelFilename})\n\nMadrasa Amanah Attendance Management System\nLocation: Atmakur`;
 
   const mailHtml = `
     <div style="font-family: Arial, sans-serif; color: #1E293B; max-width: 600px; border: 1px solid #DFE5E0; border-radius: 8px; padding: 24px; background: #F8FAFC;">
       <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #D97706; padding-bottom: 16px;">
-        <h2 style="color: #174B36; margin: 0; font-size: 18px; letter-spacing: 0.5px;">دار العلوم اشرفیہ اتماکور</h2>
-        <h3 style="color: #0E3324; margin: 4px 0 0 0; font-size: 16px;">DARUL ULOOM ASHRAFUL AHAD, ATMAKUR</h3>
+        <h2 style="color: #174B36; margin: 0; font-size: 18px; letter-spacing: 0.5px;">دارالعلوم اشرفیہ</h2>
+        <h3 style="color: #0E3324; margin: 4px 0 0 0; font-size: 16px;">DARUL ULOOM ASHRAFIA, ATMAKUR</h3>
         <p style="color: #64748B; margin: 4px 0 0 0; font-size: 12px;">Madrasa Amanah Attendance Management System · Location: Atmakur</p>
       </div>
       <div style="background: #FFFFFF; border-radius: 8px; padding: 18px; border: 1px solid #E2E8F0; margin-bottom: 16px;">
@@ -365,7 +365,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
         </ul>
       </div>
       <p style="font-size: 11px; color: #94A3B8; margin-top: 16px; text-align: center;">
-        Darul Uloom Ashraful Ahad, Atmakur • Confidential Official Report
+        Darul Uloom Ashrafia, Atmakur • Confidential Official Report
       </p>
     </div>
   `;
@@ -400,7 +400,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
               "Content-Type": "application/json"
             },
             body: JSON.stringify({
-              sender: { name: "Darul Uloom Ashraful Ahad, Atmakur", email: brevoSenderEmail },
+              sender: { name: "Darul Uloom Ashrafia, Atmakur", email: brevoSenderEmail },
               to: recipients.map(email => ({ email })),
               subject: emailSubject,
               textContent: mailText,
@@ -474,7 +474,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
       // 3. Resend HTTPS API (Port 443 — Fallback)
       if (!sentSuccess && resendApiKey) {
         try {
-          const resendFrom = process.env.RESEND_FROM || "Darul Uloom Ashraful Ahad <onboarding@resend.dev>";
+          const resendFrom = process.env.RESEND_FROM || "Darul Uloom Ashrafia <onboarding@resend.dev>";
           const resendAttachments = [];
           if (pdfBuffer) {
             resendAttachments.push({

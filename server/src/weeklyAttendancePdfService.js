@@ -56,7 +56,7 @@ export async function generateWeeklyAttendancePdfBuffer({ from, to }) {
     bufferPages: true,
     info: {
       Title: `Weekly Attendance Report: ${from} to ${to}`,
-      Author: "Darul Uloom Ashraful Ahad, Atmakur",
+      Author: "Darul Uloom Ashrafia, Atmakur",
       Subject: "Madrasa Amanah Attendance Management System"
     }
   });
@@ -100,10 +100,10 @@ export async function generateWeeklyAttendancePdfBuffer({ from, to }) {
 
     // Title
     doc.fillColor("#FFFFFF").fontSize(12).font("Helvetica-Bold")
-      .text("DARUL ULOOM ASHRAFUL AHAD, ATMAKUR", 88, 44, { width: 280 });
+      .text("DARUL ULOOM ASHRAFIA, ATMAKUR", 88, 44, { width: 280 });
     if (hasArabicFont) {
       doc.fillColor(accentGold).fontSize(10).font("NotoArabic")
-        .text("دار العلوم اشرفیہ اتماکور", 88, 59, { width: 280 });
+        .text("دارالعلوم اشرفیہ اتماکور", 88, 59, { width: 280 });
     }
     doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica")
       .text("Madrasa Amanah Attendance Management System", 88, 73);
@@ -216,7 +216,7 @@ export async function generateWeeklyAttendancePdfBuffer({ from, to }) {
   doc.fillColor(primaryDark).fontSize(8.5).font("Helvetica-Bold")
     .text("INSTITUTIONAL VERIFICATION & COMPLIANCE STATEMENT", 46, curY + 8);
   doc.fillColor(textMuted).fontSize(7.5).font("Helvetica")
-    .text(`This attendance dossier was automatically generated from official database transaction records of Darul Uloom Ashraful Ahad, Atmakur. All marks were recorded by authorized class instructors and verified through system audit logs.`, 46, curY + 22, { width: 503 });
+    .text(`This attendance dossier was automatically generated from official database transaction records of Darul Uloom Ashrafia, Atmakur. All marks were recorded by authorized class instructors and verified through system audit logs.`, 46, curY + 22, { width: 503 });
 
   // PAGE 2+: Detailed Student Attendance Log
   if (attendances.length > 0) {
@@ -298,7 +298,7 @@ export async function generateWeeklyAttendancePdfBuffer({ from, to }) {
 
     doc.moveTo(36, footY).lineTo(559, footY).strokeColor(borderGray).stroke();
     doc.fillColor(textMuted).fontSize(7).font("Helvetica")
-      .text("Darul Uloom Ashraful Ahad, Atmakur • Official Weekly Attendance Register", 36, footY + 6);
+      .text("Darul Uloom Ashrafia, Atmakur • Official Weekly Attendance Register", 36, footY + 6);
     doc.text(`Official Document • Page ${i + 1} of ${range.count}`, 36, footY + 16);
 
     doc.moveTo(420, footY + 36).lineTo(540, footY + 36).strokeColor("#94A3B8").stroke();
