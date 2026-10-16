@@ -4677,10 +4677,10 @@ export default function App() {
                     </label>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <input
-                        type="email"
+                        type="text"
                         value={settingsForm.reportRecipientEmail}
                         onChange={(e) => setSettingsForm({ ...settingsForm, reportRecipientEmail: e.target.value })}
-                        placeholder="e.g. client@example.com"
+                        placeholder="e.g. shaiksameer3909sam@gmail.com, client@example.com"
                         style={{ flex: 1, minHeight: 38, fontSize: 13 }}
                       />
                       <button
@@ -4688,12 +4688,15 @@ export default function App() {
                         className="btn secondary"
                         onClick={handleSaveSettings}
                         disabled={loading}
-                        title="Save recipient email address"
+                        title="Save recipient email addresses"
                         style={{ minHeight: 38, fontSize: 12, padding: "0 12px", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}
                       >
                         <Save size={14} /> {t("common.save", "Save")}
                       </button>
                     </div>
+                    <small style={{ color: "var(--muted)", fontSize: 11, display: "block", marginTop: 4 }}>
+                      💡 Tip: You can enter multiple emails separated by commas to deliver reports to both you and your client!
+                    </small>
                   </div>
                   <div style={{ color: "var(--muted)", fontSize: 12 }}>{settingsForm.reportSchedule || "Mondays at 06:00 AM"} ({settingsForm.reportTimezone || "Asia/Kolkata"})</div>
                   {emailStatus?.lastSent && (
@@ -5272,13 +5275,16 @@ export default function App() {
 
                   <form onSubmit={handleSaveSettings} style={{ display: "grid", gap: 12 }}>
                     <label>
-                      {t("settings.reportRecipientEmail", "Weekly Report Recipient Email")}
+                      {t("settings.reportRecipientEmail", "Weekly Report Recipient Email(s)")}
                       <input
-                        type="email"
+                        type="text"
                         value={settingsForm.reportRecipientEmail}
                         onChange={(e) => setSettingsForm({ ...settingsForm, reportRecipientEmail: e.target.value })}
-                        placeholder="e.g. 2300030621cseh1@gmail.com"
+                        placeholder="e.g. shaiksameer3909sam@gmail.com, client@example.com"
                       />
+                      <small style={{ color: "var(--muted)", fontSize: 11, marginTop: 4, display: "block" }}>
+                        Enter multiple emails separated by commas (e.g. your email, client email).
+                      </small>
                     </label>
 
                     <div className="responsive-grid-2">

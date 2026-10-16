@@ -14,7 +14,7 @@ import { User, Class, Student, Attendance, AttendanceArchive, SyncMutation, Audi
 import { requireAuth, requireAdmin, canAccessClass, requireExportPin, exportRateLimiter, securityHeaders } from "./auth.js";
 import { uploadImageDataUrl } from "./cloudinary.js";
 import { connectDB, getDatabaseInfo } from "./db.js";
-import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport, getNextScheduledReportRun, resolveRecipientEmail } from "./weeklyReportService.js";
+import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport, getNextScheduledReportRun, resolveRecipientEmail, parseRecipientEmails } from "./weeklyReportService.js";
 import {
   getStorageHealthReport,
   verifySecondaryDatabase,
@@ -1967,9 +1967,9 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
   let settings = null;
   try { settings = await SystemSetting.findOne({ key: "global" }); } catch {}
   const recipientEmail = resolveRecipientEmail(req.body.recipientEmail, settings);
+  const recipients = parseRecipientEmails(recipientEmail);
 
-  // Basic email format validation
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+  if (recipients.length === 0) {
     return res.status(400).json({ success: false, message: `Invalid recipient address: ${recipientEmail}` });
   }
 
@@ -1977,7 +1977,30 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
   try {
     let providerInfo = `${smtpHost}:${smtpPort}`;
 
-    if (resendApiKey) {
+    if (brevoApiKey) {
+      providerInfo = "Brevo HTTPS API (Port 443)";
+      const brevoSenderEmail = (process.env.BREVO_FROM || process.env.SMTP_USER || recipients[0]).trim();
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": brevoApiKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          sender: { name: "Madrasa Amanah", email: brevoSenderEmail },
+          to: recipients.map(email => ({ email })),
+          subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
+          textContent: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System via Brevo HTTPS API.\n\nRecipients: ${recipients.join(", ")}`,
+          htmlContent: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
+            <h2 style="color:#174B36">مَدْرَسَة • MADRASA AMANAH</h2>
+            <p>✅ Email configuration is working via Brevo HTTPS.</p>
+            <p style="font-size:12px;color:#68776D">Delivered to: ${recipients.join(", ")}</p>
+          </div>`
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.message || "Brevo error");
+    } else if (resendApiKey) {
       providerInfo = "Resend HTTPS API (Port 443)";
       const resendFrom = process.env.RESEND_FROM || "Madrasa Amanah <onboarding@resend.dev>";
       const response = await fetch("https://api.resend.com/emails", {
@@ -1988,40 +2011,20 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
         },
         body: JSON.stringify({
           from: resendFrom,
-          to: [recipientEmail],
+          to: recipients,
           subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
-          text: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System via Resend HTTPS API.\n\nSent: ${new Date().toUTCString()}\nRecipient: ${recipientEmail}\n\nMadrasa Amanah Administration`,
+          text: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System via Resend HTTPS API.\n\nSent: ${new Date().toUTCString()}\nRecipient: ${recipients.join(", ")}\n\nMadrasa Amanah Administration`,
           html: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
             <h2 style="color:#174B36">مَدْرَسَة • MADRASA AMANAH</h2>
             <p style="color:#68776D;font-size:13px">Email Configuration Test (Resend HTTPS)</p>
             <hr style="border:none;border-top:1px solid #DFE5E0;margin:16px 0">
             <p>✅ Your email configuration is working via HTTPS Port 443.</p>
+            <p style="font-size:12px;color:#68776D">Delivered to: ${recipients.join(", ")}</p>
           </div>`
         })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.message || data?.error?.message || "Resend error");
-    } else if (brevoApiKey) {
-      providerInfo = "Brevo HTTPS API (Port 443)";
-      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
-        method: "POST",
-        headers: {
-          "api-key": brevoApiKey,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          sender: { name: "Madrasa Amanah", email: process.env.BREVO_FROM || smtpUser || "admin@example.com" },
-          to: [{ email: recipientEmail }],
-          subject: `[Test] Madrasa Amanah — Email Configuration Test — ${new Date().toUTCString()}`,
-          textContent: `Assalamu Alaikum,\n\nThis is a configuration test email from Madrasa Amanah Smart Attendance System via Brevo HTTPS API.`,
-          htmlContent: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
-            <h2 style="color:#174B36">مَدْرَسَة • MADRASA AMANAH</h2>
-            <p>✅ Email configuration is working via Brevo HTTPS.</p>
-          </div>`
-        })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.message || "Brevo error");
     } else {
       const transporter = nodemailer.createTransport({
         host: smtpHost,

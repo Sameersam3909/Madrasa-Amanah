@@ -256,6 +256,23 @@ export function resolveRecipientEmail(explicitRecipient, settings) {
 }
 
 /**
+ * Splits comma, semicolon, or whitespace separated recipient emails
+ * and returns unique, trimmed, valid email strings.
+ */
+export function parseRecipientEmails(targetRecipient) {
+  if (Array.isArray(targetRecipient)) {
+    return targetRecipient
+      .map(e => String(e).trim())
+      .filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+  }
+  const list = String(targetRecipient || "")
+    .split(/[,;\s]+/)
+    .map(e => e.trim())
+    .filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+  return [...new Set(list)];
+}
+
+/**
  * Sends weekly attendance report via email attachment
  */
 export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger = "manual", actorId = null }) {
@@ -265,10 +282,15 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
   } catch {}
 
   const targetRecipient = resolveRecipientEmail(recipientEmail, settings);
+  const recipients = parseRecipientEmails(targetRecipient);
+  if (recipients.length === 0) {
+    recipients.push("shaiksameer3909sam@gmail.com");
+  }
+  const displayRecipients = recipients.join(", ");
   const safeFilename = `Madrasa-Amanah-Weekly-Attendance-${from}-to-${to}.xlsx`;
 
   // 1. Generate workbook
-  const wb = await generateWeeklyExcelWorkbook({ from, to, recipientEmail: targetRecipient });
+  const wb = await generateWeeklyExcelWorkbook({ from, to, recipientEmail: displayRecipients });
   const buffer = await wb.xlsx.writeBuffer();
 
   const attendances = await Attendance.find({ dateKey: { $gte: from, $lte: to } });
@@ -319,37 +341,9 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
     try {
       let messageId = null;
 
-      // 1. Resend HTTPS API (Port 443 — Bypasses Render Firewall)
-      if (resendApiKey) {
-        const resendFrom = process.env.RESEND_FROM || "Madrasa Amanah <onboarding@resend.dev>";
-        const res = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${resendApiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            from: resendFrom,
-            to: [targetRecipient],
-            subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
-            text: mailText,
-            html: mailHtml,
-            attachments: [
-              {
-                filename: safeFilename,
-                content: buffer.toString("base64")
-              }
-            ]
-          })
-        });
-        const resData = await res.json();
-        if (!res.ok) {
-          throw new Error(resData?.message || resData?.error?.message || `Resend error: ${res.statusText}`);
-        }
-        messageId = resData.id || "resend-dispatched";
-      }
-      // 2. Brevo HTTPS API (Port 443 — Bypasses Render Firewall)
-      else if (brevoApiKey) {
+      // 1. Brevo HTTPS API (Port 443 — Preferred, allows sending to ANY recipient and multiple emails)
+      if (brevoApiKey) {
+        const brevoSenderEmail = (process.env.BREVO_FROM || process.env.SMTP_USER || recipients[0]).trim();
         const res = await fetch("https://api.brevo.com/v3/smtp/email", {
           method: "POST",
           headers: {
@@ -357,8 +351,8 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            sender: { name: "Madrasa Amanah", email: process.env.BREVO_FROM || smtpUser || "admin@example.com" },
-            to: [{ email: targetRecipient }],
+            sender: { name: "Madrasa Amanah", email: brevoSenderEmail },
+            to: recipients.map(email => ({ email })),
             subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
             textContent: mailText,
             htmlContent: mailHtml,
@@ -375,6 +369,35 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
           throw new Error(resData?.message || `Brevo error: ${res.statusText}`);
         }
         messageId = resData.messageId || "brevo-dispatched";
+      }
+      // 2. Resend HTTPS API (Port 443 — Fallback)
+      else if (resendApiKey) {
+        const resendFrom = process.env.RESEND_FROM || "Madrasa Amanah <onboarding@resend.dev>";
+        const res = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${resendApiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            from: resendFrom,
+            to: recipients,
+            subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
+            text: mailText,
+            html: mailHtml,
+            attachments: [
+              {
+                filename: safeFilename,
+                content: buffer.toString("base64")
+              }
+            ]
+          })
+        });
+        const resData = await res.json();
+        if (!res.ok) {
+          throw new Error(resData?.message || resData?.error?.message || `Resend error: ${res.statusText}`);
+        }
+        messageId = resData.id || "resend-dispatched";
       }
       // 3. Direct Nodemailer SMTP (standard ports 587 / 465)
       else {
@@ -393,7 +416,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
 
         const mailOptions = {
           from: smtpFrom,
-          to: targetRecipient,
+          to: displayRecipients,
           subject: `Madrasa Amanah — Weekly Attendance Report — ${from} to ${to}`,
           text: mailText,
           html: mailHtml,
@@ -415,7 +438,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
           actorId,
           action: "report.weekly_email_sent",
           entityType: "Report",
-          details: { recipient: targetRecipient, from, to, weekKey: `${from}_${to}`, messageId, trigger }
+          details: { recipient: displayRecipients, recipientsCount: recipients.length, from, to, weekKey: `${from}_${to}`, messageId, trigger }
         });
       }
 
@@ -424,7 +447,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
         if (!settings) settings = new SystemSetting({ key: "global" });
         settings.lastReportSuccess = {
           sentAt: new Date(),
-          recipient: targetRecipient,
+          recipient: displayRecipients,
           period: `${from} to ${to}`,
           messageId,
           bytes: buffer.byteLength
@@ -437,7 +460,8 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
         success: true,
         delivered: true,
         messageId,
-        recipient: targetRecipient,
+        recipient: displayRecipients,
+        recipientsCount: recipients.length,
         filename: safeFilename,
         bytes: buffer.byteLength,
         from,
