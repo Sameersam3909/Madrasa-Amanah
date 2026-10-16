@@ -236,6 +236,7 @@ export default function App() {
     }
   });
   const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
+  const [downloadingStudentId, setDownloadingStudentId] = useState(null);
 
   // Sync & Storage State
   const [pendingCount, setPendingCount] = useState(0);
@@ -709,9 +710,10 @@ export default function App() {
 
   async function downloadSingleStudentData(student, format = "pdf") {
     if (!student) return;
+    const sId = student._id || student.id;
+    setDownloadingStudentId(sId);
     setLoading(true);
     try {
-      const sId = student._id || student.id;
       const cleanName = (student.name || "Student").replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
       const filename = `Madrasa-Amanah-Student-${student.admissionNo || "Data"}-${cleanName}-${today()}.${format}`;
       await triggerFileDownload(`/students/${sId}/export`, { format }, filename);
@@ -720,6 +722,7 @@ export default function App() {
       setError(errText(err));
     } finally {
       setLoading(false);
+      setDownloadingStudentId(null);
     }
   }
 
@@ -4002,12 +4005,13 @@ export default function App() {
                         <button
                           type="button"
                           className="btn secondary"
-                          onClick={() => downloadSingleStudentData(s)}
-                          title={t("students.downloadData", "Download Student Record")}
-                          aria-label={`Download ${localizeStudentName(s.name, lang)} data`}
+                          onClick={() => downloadSingleStudentData(s, "pdf")}
+                          title={t("students.downloadPdfTooltip", "Generate and download official student profile PDF")}
+                          aria-label={`Download ${localizeStudentName(s.name, lang)} PDF`}
+                          disabled={downloadingStudentId === sId}
                           style={{ minHeight: 34, padding: "5px 9px", fontSize: 12 }}
                         >
-                          <Download size={15} />
+                          {downloadingStudentId === sId ? <RefreshCw size={15} className="spin" /> : <Download size={15} />}
                         </button>
 
                         <div style={{ position: "relative" }}>
@@ -4123,13 +4127,30 @@ export default function App() {
                                   <button
                                     type="button"
                                     className="student-action-item"
+                                    disabled={downloadingStudentId === sId}
                                     onClick={() => {
                                       setActiveMenuStudentId(null);
-                                      downloadSingleStudentData(s);
+                                      downloadSingleStudentData(s, "pdf");
                                     }}
                                   >
-                                    <Download size={15} color="var(--primary)" />
-                                    <span>{t("students.downloadData", "Download Student Record")}</span>
+                                    {downloadingStudentId === sId ? (
+                                      <RefreshCw size={15} className="spin" color="var(--primary)" />
+                                    ) : (
+                                      <Download size={15} color="var(--primary)" />
+                                    )}
+                                    <span>{t("students.downloadPdf", "Download Student PDF")}</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="student-action-item"
+                                    onClick={() => {
+                                      setActiveMenuStudentId(null);
+                                      downloadSingleStudentData(s, "json");
+                                    }}
+                                  >
+                                    <Download size={15} color="var(--text-muted)" />
+                                    <span>{t("students.downloadJsonBackup", "Download JSON Backup")}</span>
                                   </button>
 
                                   {user?.role === "admin" && (
@@ -5947,11 +5968,25 @@ export default function App() {
                 <History size={16} /> {t.attendanceHistory || "Attendance History"}
               </button>
               <button
-                className="btn secondary"
-                onClick={() => downloadSingleStudentData(viewingStudentProfile)}
+                className="btn primary"
+                onClick={() => downloadSingleStudentData(viewingStudentProfile, "pdf")}
+                disabled={loading || downloadingStudentId === (viewingStudentProfile?._id || viewingStudentProfile?.id)}
                 style={{ minHeight: 40 }}
               >
-                <Download size={16} /> {t("students.downloadData", "Download Student Record")}
+                {downloadingStudentId === (viewingStudentProfile?._id || viewingStudentProfile?.id) ? (
+                  <RefreshCw size={16} className="spin" />
+                ) : (
+                  <Download size={16} />
+                )}{" "}
+                {t("students.downloadPdf", "Download Student PDF")}
+              </button>
+              <button
+                className="btn secondary"
+                onClick={() => downloadSingleStudentData(viewingStudentProfile, "json")}
+                style={{ minHeight: 40 }}
+                title={t("students.downloadJsonBackup", "Download JSON Backup")}
+              >
+                <Download size={16} /> {t("students.downloadJsonBackup", "JSON Backup")}
               </button>
             </div>
           </div>
