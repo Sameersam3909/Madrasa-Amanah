@@ -16,6 +16,7 @@ import { uploadImageDataUrl } from "./cloudinary.js";
 import { connectDB, getDatabaseInfo } from "./db.js";
 import { getPreviousReportingWeek, generateWeeklyExcelWorkbook, sendWeeklyEmailReport, getNextScheduledReportRun, resolveRecipientEmail, parseRecipientEmails } from "./weeklyReportService.js";
 import { generateWeeklyAttendancePdfBuffer } from "./weeklyAttendancePdfService.js";
+import { generateClassAttendancePdfBuffer } from "./classAttendancePdfService.js";
 import {
   getStorageHealthReport,
   verifySecondaryDatabase,
@@ -1795,16 +1796,21 @@ app.get("/api/reports/export", exportRateLimiter, requireExportPin, async (req, 
   if (!classId || !from || !to) return res.status(400).json({ message: "classId, from and to are required." });
   if (!(await canAccessClass(req.user, classId))) return res.status(403).json({ message: "Class access denied." });
 
-  const targetClass = await Class.findById(classId);
+  const [targetClass, classStudents, records] = await Promise.all([
+    Class.findById(classId).populate("teacherIds", "name email"),
+    Student.find({ classId, active: true }).collation({ locale: "en", numericOrdering: true }).sort({ admissionNo: 1, name: 1 }),
+    Attendance.find({ classId, dateKey: { $gte: from, $lte: to } })
+      .populate("studentId", "name nameEn nameUr nameTe admissionNo guardianName guardianPhone")
+      .populate("markedBy", "name email")
+      .sort({ dateKey: 1, sessionKey: 1 })
+  ]);
+
   const cleanClassName = (targetClass ? `${targetClass.name}${targetClass.section ? `-${targetClass.section}` : ""}` : "Class")
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
   const safeFilename = `Madrasa-Amanah-Attendance-${cleanClassName}-${from}${from !== to ? `-to-${to}` : ""}`;
 
-  const records = await Attendance.find({ classId, dateKey: { $gte: from, $lte: to } })
-    .populate("studentId", "name nameEn nameUr nameTe admissionNo")
-    .sort({ dateKey: 1 });
   const rows = records.map(r => {
     const s = r.studentId;
     let resolvedName = s?.name || "";
@@ -1831,26 +1837,17 @@ app.get("/api/reports/export", exportRateLimiter, requireExportPin, async (req, 
   }
 
   if (format === "pdf") {
+    const pdfBuffer = await generateClassAttendancePdfBuffer({
+      targetClass,
+      students: classStudents,
+      attendances: records,
+      from,
+      to,
+      lang
+    });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.pdf"`);
-    const doc = new PDFDocument({ margin: 36, size: "A4", layout: "landscape" });
-    doc.pipe(res);
-    doc.fontSize(16).text(`مَدْرَسَة  •  Madrasa Amanah - ${targetClass?.name || "Class"} Attendance Register`, { align: "center" });
-    doc.moveDown(0.5).fontSize(9).text(`Period: ${from} to ${to} | Total Records: ${rows.length}`, { align: "center" });
-    doc.moveDown();
-    const cols = [36, 130, 240, 440, 550, 800];
-    const heads = ["Date", "Admission No", "Student", "Status", "Note"];
-    let y = doc.y;
-    heads.forEach((h, i) => doc.text(h, cols[i], y, { width: cols[i + 1] - cols[i] - 5 }));
-    y += 18;
-    doc.moveTo(36, y).lineTo(805, y).stroke();
-    for (const r of rows) {
-      if (y > 530) { doc.addPage(); y = 40; }
-      const vals = [r.Date, r["Admission No"], r.Student, r.Status, r.Note];
-      vals.forEach((v, i) => doc.text(String(v).slice(0, 80), cols[i], y, { width: cols[i + 1] - cols[i] - 5, height: 26, ellipsis: true }));
-      y += 18;
-    }
-    return doc.end();
+    return res.send(pdfBuffer);
   }
 
   const wb = new ExcelJS.Workbook();
