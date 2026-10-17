@@ -113,9 +113,18 @@ export async function fetchStudentPhotoBuffer(photoUrl) {
  * @param {NodeJS.WritableStream} options.outputStream - Stream to pipe PDF into
  * @returns {Promise<PDFKit.PDFDocument>}
  */
+/**
+ * Generates the official Madrasa Amanah Student Profile PDF
+ * 
+ * @param {Object} options
+ * @param {Object} options.student - Student document (populated with classId and teacherIds)
+ * @param {Array} options.attendance - Array of attendance records
+ * @param {NodeJS.WritableStream} options.outputStream - Stream to pipe PDF into
+ * @returns {Promise<PDFKit.PDFDocument>}
+ */
 export async function generateStudentProfilePdf({ student, attendance = [], outputStream }) {
   const doc = new PDFDocument({
-    margin: 36,
+    margins: { top: 36, left: 36, right: 36, bottom: 24 },
     size: "A4",
     bufferPages: true,
     info: {
@@ -161,47 +170,86 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   const candidatePhoto = student.photoUrl || student.referencePhotoUrl || student.photoDataUrl || "";
   const imageBuffer = await fetchStudentPhotoBuffer(candidatePhoto);
 
-  // Helper for drawing localized text
+  // Helper for drawing localized text supporting mixed Latin/Arabic/Telugu runs
   const drawLocalizedText = (text, x, y, options = {}) => {
     const str = String(text || "");
     const size = options.fontSize || 9;
     const color = options.color || textColor;
-
     doc.fillColor(color).fontSize(size);
 
-    if (containsArabic(str) && hasArabicFont) {
-      doc.font("NotoArabic");
-    } else if (containsTelugu(str) && hasTeluguFont) {
-      doc.font("NotoTelugu");
-    } else if (options.bold) {
-      doc.font("Helvetica-Bold");
-    } else if (options.oblique) {
-      doc.font("Helvetica-Oblique");
-    } else {
-      doc.font("Helvetica");
+    // Segment mixed strings so Latin glyphs use Helvetica and Arabic uses NotoArabic
+    const segments = [];
+    let currentType = null;
+    let currentChunk = "";
+
+    for (let i = 0; i < str.length; i++) {
+      const char = str[i];
+      let type = "latin";
+      if (ARABIC_REGEX.test(char)) type = "arabic";
+      else if (TELUGU_REGEX.test(char)) type = "telugu";
+      else if (/[\s\(\)\[\]\{\}\-\–\—\:\,\.\/\\]/.test(char)) type = currentType || "latin";
+
+      if (type !== currentType && currentChunk.length > 0) {
+        segments.push({ text: currentChunk, type: currentType });
+        currentChunk = "";
+      }
+      currentType = type;
+      currentChunk += char;
+    }
+    if (currentChunk.length > 0) {
+      segments.push({ text: currentChunk, type: currentType });
     }
 
-    const textOpts = { ...options };
-    delete textOpts.fontSize;
-    delete textOpts.color;
-    delete textOpts.bold;
-    delete textOpts.oblique;
+    if (segments.length <= 1) {
+      if (containsArabic(str) && hasArabicFont) {
+        doc.font("NotoArabic");
+      } else if (containsTelugu(str) && hasTeluguFont) {
+        doc.font("NotoTelugu");
+      } else if (options.bold) {
+        doc.font("Helvetica-Bold");
+      } else if (options.oblique) {
+        doc.font("Helvetica-Oblique");
+      } else {
+        doc.font("Helvetica");
+      }
 
-    doc.text(str, x, y, textOpts);
+      const textOpts = { ...options, lineBreak: false };
+      delete textOpts.fontSize;
+      delete textOpts.color;
+      delete textOpts.bold;
+      delete textOpts.oblique;
+
+      doc.text(str, x, y, textOpts);
+    } else {
+      let curX = x;
+      segments.forEach((seg) => {
+        if (seg.type === "arabic" && hasArabicFont) {
+          doc.font("NotoArabic");
+        } else if (seg.type === "telugu" && hasTeluguFont) {
+          doc.font("NotoTelugu");
+        } else if (options.bold) {
+          doc.font("Helvetica-Bold");
+        } else {
+          doc.font("Helvetica");
+        }
+        doc.text(seg.text, curX, y, { lineBreak: false });
+        curX += doc.widthOfString(seg.text);
+      });
+    }
   };
 
   // Helper for drawing field key-value pairs
   const drawField = (label, value, x, y, labelW = 80, valW = 160) => {
-    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text(label.toUpperCase(), x, y);
+    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text(label.toUpperCase(), x, y, { lineBreak: false });
     const valY = y + 9.5;
     const displayVal = value !== undefined && value !== null && String(value).trim() !== "" ? String(value) : "—";
     drawLocalizedText(displayVal, x, valY, { fontSize: 8.5, color: textColor, width: valW, ellipsis: true });
   };
 
   // =========================================================================
-  // TOP HEADER BANNER
+  // TOP HEADER BANNER (Consistent 523pt width: X=36 to X=559)
   // =========================================================================
-  const drawHeaderBanner = () => {
+  const drawHeaderBanner = (isContinued = false) => {
     // Top Banner Background
     doc.roundedRect(36, 36, 523, 62, 5).fill(primaryColor);
 
@@ -235,18 +283,19 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     }
 
     // Madrasa Title & Arabic Subtitle
-    doc.fillColor("#FFFFFF").fontSize(12).font("Helvetica-Bold").text("DARUL ULOOM ASHRAFIA, ATMAKUR", 82, 44, { width: 260 });
+    doc.fillColor("#FFFFFF").fontSize(12).font("Helvetica-Bold").text("DARUL ULOOM ASHRAFIA, ATMAKUR", 82, 44, { width: 260, lineBreak: false });
     if (hasArabicFont) {
-      doc.fillColor(accentGold).fontSize(10.5).font("NotoArabic").text("دارالعلوم اشرفیہ اتماکور", 82, 59, { width: 260 });
+      doc.fillColor(accentGold).fontSize(10.5).font("NotoArabic").text("دارالعلوم اشرفیہ اتماکور", 82, 59, { width: 260, lineBreak: false });
     }
-    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text("Madrasa Amanah Attendance Management System", 82, 73);
+    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text("Madrasa Amanah Attendance Management System", 82, 73, { lineBreak: false });
 
     // Right side dossier metadata
-    doc.fillColor("#FFFFFF").fontSize(9.5).font("Helvetica-Bold").text("OFFICIAL STUDENT DOSSIER", 340, 44, { align: "right", width: 205 });
+    const headerTitle = isContinued ? "OFFICIAL STUDENT DOSSIER (CONTINUED)" : "OFFICIAL STUDENT DOSSIER";
+    doc.fillColor("#FFFFFF").fontSize(9).font("Helvetica-Bold").text(headerTitle, 340, 44, { align: "right", width: 205, lineBreak: false });
     const formattedDate = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
     const formattedTime = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text(`Generated: ${formattedDate} ${formattedTime}`, 340, 60, { align: "right", width: 205 });
-    doc.fillColor("#A7F3D0").fontSize(7).font("Helvetica").text(`Location: Atmakur`, 340, 72, { align: "right", width: 205 });
+    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text(`Generated: ${formattedDate} ${formattedTime}`, 340, 60, { align: "right", width: 205, lineBreak: false });
+    doc.fillColor("#A7F3D0").fontSize(7).font("Helvetica").text("Location: Atmakur", 340, 72, { align: "right", width: 205, lineBreak: false });
   };
 
   drawHeaderBanner();
@@ -254,14 +303,14 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   // =========================================================================
   // SECTION A: STUDENT PROFILE & PHOTOGRAPH
   // =========================================================================
-  const profileY = 106;
-  const profileH = 142;
+  const profileY = 104;
+  const profileH = 140;
   doc.roundedRect(36, profileY, 523, profileH, 5).fillAndStroke(lightBg, borderGray);
 
   // Photo Frame
   const photoX = 48;
-  const photoY = profileY + 12;
-  const photoW = 90;
+  const photoY = profileY + 11;
+  const photoW = 92;
   const photoH = 118;
 
   // Frame Outer Background & Shadow border
@@ -271,7 +320,6 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   if (imageBuffer) {
     try {
       doc.save();
-      // Clip to rounded rect
       doc.roundedRect(photoX + 2, photoY + 2, photoW - 4, photoH - 4, 3).clip();
       doc.image(imageBuffer, photoX + 2, photoY + 2, {
         fit: [photoW - 4, photoH - 4],
@@ -289,25 +337,21 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   // Graceful Professional Vector Photo Placeholder if image is missing or invalid
   if (!photoRendered) {
     doc.roundedRect(photoX + 2, photoY + 2, photoW - 4, photoH - 4, 3).fill("#F1F5F9");
-
-    // Stylized user avatar silhouette
     const avX = photoX + photoW / 2;
     const avY = photoY + 46;
     doc.save();
     doc.fillColor("#CBD5E1");
-    // Head circle
     doc.circle(avX, avY, 17).fill();
-    // Shoulders arc
     doc.path(`M ${avX - 28} ${avY + 40} C ${avX - 28} ${avY + 22}, ${avX + 28} ${avY + 22}, ${avX + 28} ${avY + 40} Z`).fill();
     doc.restore();
 
-    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text("STUDENT PHOTO", photoX, photoY + 92, { align: "center", width: photoW });
-    doc.fillColor("#94A3B8").fontSize(6.5).font("Helvetica").text(imageBuffer ? "Format Unsupported" : "No Photo on Record", photoX, photoY + 103, { align: "center", width: photoW });
+    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text("STUDENT PHOTO", photoX, photoY + 92, { align: "center", width: photoW, lineBreak: false });
+    doc.fillColor("#94A3B8").fontSize(6.5).font("Helvetica").text(imageBuffer ? "Format Unsupported" : "No Photo on Record", photoX, photoY + 103, { align: "center", width: photoW, lineBreak: false });
   }
 
   // Student Identity Info (Right of Photo)
-  const infoX = 150;
-  let curY = profileY + 12;
+  const infoX = 152;
+  let curY = profileY + 11;
 
   // Student Primary Display Name
   const canonicalName = normalizeStudentName(student.name || "Student");
@@ -316,8 +360,8 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   const nameTe = (student.nameTe || "").trim();
 
   // Primary English / Canonical Name
-  drawLocalizedText(nameEn || canonicalName, infoX, curY, { fontSize: 15, bold: true, color: textColor, width: 330 });
-  curY += 19;
+  drawLocalizedText(nameEn || canonicalName, infoX, curY, { fontSize: 14, bold: true, color: textColor, width: 330 });
+  curY += 18;
 
   // Multilingual Secondary Names (Urdu & Telugu) if present
   const altNames = [];
@@ -328,91 +372,86 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     let altX = infoX;
     altNames.forEach((item) => {
       if (item.lang === "ur" && hasArabicFont) {
-        doc.fillColor(primaryColor).fontSize(10.5).font("NotoArabic").text(item.text, altX, curY - 2);
+        doc.fillColor(primaryColor).fontSize(10.5).font("NotoArabic").text(item.text, altX, curY - 2, { lineBreak: false });
         altX += doc.widthOfString(item.text) + 14;
       } else if (item.lang === "te" && hasTeluguFont) {
-        doc.fillColor(primaryColor).fontSize(9.5).font("NotoTelugu").text(item.text, altX, curY);
+        doc.fillColor(primaryColor).fontSize(9.5).font("NotoTelugu").text(item.text, altX, curY, { lineBreak: false });
         altX += doc.widthOfString(item.text) + 14;
       }
     });
-    curY += 16;
+    curY += 15;
   }
 
   // Identity Badges (Admission No, Active Status, Class)
   const badgeY = curY;
-  // Admission badge
   const admText = `ROLL / ADM #${student.admissionNo || "—"}`;
-  doc.roundedRect(infoX, badgeY, 110, 16, 3).fill("#E0E7FF");
-  doc.fillColor("#3730A3").fontSize(8).font("Helvetica-Bold").text(admText, infoX + 6, badgeY + 4);
+  doc.roundedRect(infoX, badgeY, 108, 16, 3).fill("#E0E7FF");
+  doc.fillColor("#3730A3").fontSize(8).font("Helvetica-Bold").text(admText, infoX + 6, badgeY + 4, { lineBreak: false });
 
-  // Status badge
   const isActive = student.active !== false;
   const statusBg = isActive ? "#D1FAE5" : "#FEE2E2";
   const statusColor = isActive ? "#065F46" : "#991B1B";
   const statusLabel = isActive ? "ACTIVE ENROLLMENT" : "ARCHIVED / INACTIVE";
-  doc.roundedRect(infoX + 116, badgeY, 115, 16, 3).fill(statusBg);
-  doc.fillColor(statusColor).fontSize(8).font("Helvetica-Bold").text(statusLabel, infoX + 122, badgeY + 4);
+  doc.roundedRect(infoX + 114, badgeY, 114, 16, 3).fill(statusBg);
+  doc.fillColor(statusColor).fontSize(8).font("Helvetica-Bold").text(statusLabel, infoX + 120, badgeY + 4, { lineBreak: false });
 
-  // Class Badge
   const classDisplayName = `${student.classId?.name || "Unassigned"}${student.classId?.section ? ` - ${student.classId.section}` : ""}`;
-  doc.roundedRect(infoX + 237, badgeY, 162, 16, 3).fill("#FEF3C7");
-  doc.fillColor("#92400E").fontSize(8).font("Helvetica-Bold").text(classDisplayName.toUpperCase(), infoX + 243, badgeY + 4, { width: 152, ellipsis: true });
+  doc.roundedRect(infoX + 234, badgeY, 163, 16, 3).fill("#FEF3C7");
+  doc.fillColor("#92400E").fontSize(8).font("Helvetica-Bold").text(classDisplayName.toUpperCase(), infoX + 240, badgeY + 4, { width: 151, ellipsis: true, lineBreak: false });
 
   curY += 23;
 
   // Multi-column Profile Details Grid
   const pCol1 = infoX;
-  const pCol2 = infoX + 130;
-  const pCol3 = infoX + 260;
+  const pCol2 = infoX + 126;
+  const pCol3 = infoX + 252;
 
-  drawField("Assigned Class", classDisplayName, pCol1, curY, 70, 120);
-  drawField("Academic Year", student.classId?.academicYear || "2026-2027", pCol2, curY, 70, 120);
+  drawField("Assigned Class", classDisplayName, pCol1, curY, 70, 116);
+  drawField("Academic Year", student.classId?.academicYear || "1447-1448 / 2026", pCol2, curY, 70, 116);
   const formattedEnroll = student.enrollmentDate ? String(student.enrollmentDate).slice(0, 10) : "Not Recorded";
-  drawField("Enrollment Date", formattedEnroll, pCol3, curY, 70, 130);
-  curY += 25;
+  drawField("Enrollment Date", formattedEnroll, pCol3, curY, 70, 135);
+  curY += 24;
 
-  drawField("Gender", student.gender || "Not Specified", pCol1, curY, 70, 120);
+  drawField("Gender", student.gender || "Not Specified", pCol1, curY, 70, 116);
   const formattedDob = student.dob ? String(student.dob).slice(0, 10) : "Not Recorded";
   const age = calculateAge(student.dob);
   const dobDisplay = age !== null ? `${formattedDob} (${age} yrs)` : formattedDob;
-  drawField("Date of Birth", dobDisplay, pCol2, curY, 70, 120);
+  drawField("Date of Birth", dobDisplay, pCol2, curY, 70, 116);
 
-  // Teachers assigned
   let teacherDisplay = "Madrasa Staff";
   if (Array.isArray(student.classId?.teacherIds) && student.classId.teacherIds.length > 0) {
     teacherDisplay = student.classId.teacherIds.map(t => t.name || t).filter(Boolean).join(", ") || "Madrasa Staff";
   }
-  drawField("Assigned Teacher", teacherDisplay, pCol3, curY, 70, 130);
-  curY += 25;
+  drawField("Assigned Teacher", teacherDisplay, pCol3, curY, 70, 135);
+  curY += 24;
 
-  drawField("Photo Consent", student.consentGiven ? "Recorded (Granted ✓)" : "Pending / Not Given", pCol1, curY, 70, 120);
+  drawField("Photo Consent", student.consentGiven ? "Recorded (Granted ✓)" : "Pending / Not Given", pCol1, curY, 70, 116);
   const hasBiometrics = Boolean(student.faceDescriptor && student.faceDescriptor.length > 0);
-  drawField("AI Biometrics", hasBiometrics ? "Enrolled (Face Model ✓)" : "Standard Registry", pCol2, curY, 70, 120);
-  drawField("Assigned Madrasa", "Madrasa Amanah (Atmakur)", pCol3, curY, 70, 130);
+  drawField("AI Biometrics", hasBiometrics ? "Enrolled (Face Model ✓)" : "Standard Registry", pCol2, curY, 70, 116);
+  drawField("Assigned Madrasa", "Madrasa Amanah (Atmakur)", pCol3, curY, 70, 135);
 
   // =========================================================================
-  // SECTION B: PERSONAL & GUARDIAN DETAILS
+  // SECTION B: PERSONAL & GUARDIAN DETAILS (3-column layout without internal DB ID)
   // =========================================================================
-  const guardY = profileY + profileH + 9;
-  const guardH = 68;
+  const guardY = profileY + profileH + 8;
+  const guardH = 66;
   doc.roundedRect(36, guardY, 523, guardH, 5).fillAndStroke(lightBg, borderGray);
 
-  // Card Header
-  doc.fillColor(primaryColor).fontSize(8.5).font("Helvetica-Bold").text("PERSONAL & GUARDIAN CONTACT INFORMATION", 48, guardY + 9);
-  doc.moveTo(48, guardY + 20).lineTo(547, guardY + 20).strokeColor(borderGray).stroke();
+  doc.fillColor(primaryColor).fontSize(8.5).font("Helvetica-Bold").text("PERSONAL & GUARDIAN CONTACT INFORMATION", 48, guardY + 8, { lineBreak: false });
+  doc.moveTo(48, guardY + 19).lineTo(547, guardY + 19).strokeColor(borderGray).stroke();
 
-  const gY = guardY + 26;
-  drawField("Father / Guardian", student.guardianName || "Not Recorded on file", 48, gY, 95, 145);
+  const gY = guardY + 24;
+  drawField("Father / Guardian", student.guardianName || "Not Recorded on file", 48, gY, 95, 140);
   drawField("Authorized Contact", student.guardianPhone || "Not Recorded on file", 215, gY, 90, 130);
-  drawField("Student Database ID", String(student._id || "—"), 365, gY, 90, 180);
+  drawField("Registration ID", `#${student.admissionNo || "—"} (${isActive ? "Active" : "Archived"})`, 370, gY, 90, 160);
 
-  drawField("Residential Address", student.address || "Not Recorded on file", 48, gY + 22, 95, 495);
+  drawField("Residential Address", student.address || "Not Recorded on file", 48, gY + 21, 95, 490);
 
   // =========================================================================
   // SECTION C: ATTENDANCE SUMMARY & KPIS
   // =========================================================================
-  const statsSectionY = guardY + guardH + 11;
-  doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold").text("ATTENDANCE PERFORMANCE METRICS & STANDING", 36, statsSectionY);
+  const statsSectionY = guardY + guardH + 10;
+  doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold").text("ATTENDANCE PERFORMANCE METRICS & STANDING", 36, statsSectionY, { lineBreak: false });
 
   // Sorting attendance: chronologically (oldest to newest)
   const sortedAttendance = [...attendance].sort((a, b) => {
@@ -428,21 +467,26 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   const excused = sortedAttendance.filter(a => a.status === "excused").length;
 
   // Attendance rate standard formula: ((Present + 0.75 * Late) / Total) * 100
+  // Excused absences are never counted as present
   const rate = total > 0 ? Math.round(((present + (late * 0.75)) / total) * 100) : 0;
   const purePresentRate = total > 0 ? Math.round((present / total) * 100) : 0;
 
-  // Academic Standing Badge
-  let standingLabel = "N/A (No Sessions)";
+  // Academic Standing Badge (separating English and Arabic to eliminate missing glyph boxes)
+  let standingEnglish = "N/A (No Sessions)";
+  let standingArabic = "";
   let standingColor = textMuted;
   if (total > 0) {
     if (rate >= 90) {
-      standingLabel = "Excellent (ممتاز) ★";
+      standingEnglish = "Excellent";
+      standingArabic = "(ممتاز)";
       standingColor = "#059669";
     } else if (rate >= 75) {
-      standingLabel = "Good / Satisfactory (جید) ✓";
+      standingEnglish = "Good / Satisfactory";
+      standingArabic = "(جید)";
       standingColor = "#0D9488";
     } else {
-      standingLabel = "Attendance Alert / Low (ضعیف) ⚠";
+      standingEnglish = "Attendance Alert / Low";
+      standingArabic = "(ضعیف)";
       standingColor = "#DC2626";
     }
   }
@@ -455,71 +499,86 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     reportingPeriod = firstDate === lastDate ? firstDate : `${firstDate} to ${lastDate}`;
   }
 
+  const periodPrefix = `Reporting Period: ${reportingPeriod}  •  Attendance Standing: `;
   doc.fillColor(textMuted).fontSize(7.5).font("Helvetica")
-    .text(`Reporting Period: ${reportingPeriod}  •  Attendance Standing: `, 36, statsSectionY + 11);
-  const standX = 36 + doc.widthOfString(`Reporting Period: ${reportingPeriod}  •  Attendance Standing: `);
-  drawLocalizedText(standingLabel, standX, statsSectionY + 11, { fontSize: 7.5, bold: true, color: standingColor });
+    .text(periodPrefix, 36, statsSectionY + 11, { lineBreak: false });
+  let standX = 36 + doc.widthOfString(periodPrefix);
 
-  // 5 KPI Cards
-  const kpiY = statsSectionY + 23;
+  // Render English part in Helvetica-Bold
+  doc.fillColor(standingColor).fontSize(7.5).font("Helvetica-Bold")
+    .text(standingEnglish, standX, statsSectionY + 11, { lineBreak: false });
+  standX += doc.widthOfString(standingEnglish) + 4;
+
+  // Render Arabic part in NotoArabic
+  if (standingArabic && hasArabicFont) {
+    doc.fillColor(standingColor).fontSize(8).font("NotoArabic")
+      .text(standingArabic, standX, statsSectionY + 10, { lineBreak: false });
+  }
+
+  // 5 KPI Cards (Equally sized and evenly spaced across 523pt total width)
+  // (523 - 4 * 8.25) / 5 = 98 pt each
+  const kpiY = statsSectionY + 22;
   const kpiW = 98;
-  const kpiH = 46;
-  const kpiGap = 8;
+  const kpiH = 45;
+  const kpiGap = 8.25;
 
   const drawKpiCard = (label, value, x, valColor = textColor, bg = lightBg, subtext = "") => {
     doc.roundedRect(x, kpiY, kpiW, kpiH, 4).fillAndStroke(bg, borderGray);
-    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text(label.toUpperCase(), x + 7, kpiY + 7);
-    doc.fillColor(valColor).fontSize(14).font("Helvetica-Bold").text(String(value), x + 7, kpiY + 19);
+    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text(label.toUpperCase(), x + 7, kpiY + 6, { lineBreak: false });
+    doc.fillColor(valColor).fontSize(14).font("Helvetica-Bold").text(String(value), x + 7, kpiY + 18, { lineBreak: false });
     if (subtext) {
-      doc.fillColor(textMuted).fontSize(6.5).font("Helvetica").text(subtext, x + 7, kpiY + 34);
+      doc.fillColor(textMuted).fontSize(6.5).font("Helvetica").text(subtext, x + 7, kpiY + 33, { width: kpiW - 12, ellipsis: true, lineBreak: false });
     }
   };
 
+  const absentSubtext = excused > 0 ? `${absent} unexcused (${excused} exc)` : `${absent} unexcused`;
   drawKpiCard("Total Sessions", total, 36, textColor, lightBg, `${total} records`);
   drawKpiCard("Present", present, 36 + kpiW + kpiGap, "#059669", "#ECFDF5", `${purePresentRate}% pure on-time`);
-  drawKpiCard("Absent", absent, 36 + (kpiW + kpiGap) * 2, "#DC2626", "#FEF2F2", `${absent} unexcused`);
+  drawKpiCard("Absent", absent, 36 + (kpiW + kpiGap) * 2, "#DC2626", "#FEF2F2", absentSubtext);
   drawKpiCard("Late / Tardy", late, 36 + (kpiW + kpiGap) * 3, "#D97706", "#FFFBEB", `${late} arrivals`);
   drawKpiCard("Attendance Rate", `${rate}%`, 36 + (kpiW + kpiGap) * 4, rate >= 75 ? "#059669" : "#DC2626", rate >= 75 ? "#ECFDF5" : "#FEF2F2", rate >= 75 ? "Qualified ✓" : "Review Required");
 
   // =========================================================================
   // SECTION D: ATTENDANCE HISTORY LOG TABLE (WITH AUTO PAGINATION)
   // =========================================================================
-  let tableStartY = kpiY + kpiH + 13;
-  doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold").text("CHRONOLOGICAL ATTENDANCE REGISTER", 36, tableStartY);
+  let tableStartY = kpiY + kpiH + 12;
+  doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold").text("CHRONOLOGICAL ATTENDANCE REGISTER", 36, tableStartY, { lineBreak: false });
 
-  const tCols = [44, 126, 206, 286, 366];
-  const tWidths = [78, 76, 76, 76, 185];
+  // Perfectly aligned columns summing to 523pt total width
+  // Date: 76, Session: 76, Status: 80, Record Mode: 95, Remarks: 196 -> Total = 523
+  const tCols = [44, 120, 196, 276, 371];
+  const tWidths = [72, 72, 76, 91, 178];
   const tHeads = ["DATE", "SESSION", "STATUS", "RECORD MODE", "REMARKS / NOTES"];
   const rowH = 17;
 
   const drawTableHeader = (y) => {
-    doc.rect(36, y, 523, 19).fill(primaryColor);
+    doc.rect(36, y, 523, 18).fill(primaryColor);
     doc.fillColor("#FFFFFF").fontSize(7.5).font("Helvetica-Bold");
     tHeads.forEach((h, i) => {
-      doc.text(h, tCols[i], y + 5);
+      doc.text(h, tCols[i], y + 4.5, { lineBreak: false });
     });
   };
 
-  drawTableHeader(tableStartY + 12);
-  let curRowY = tableStartY + 31;
+  drawTableHeader(tableStartY + 11);
+  let curRowY = tableStartY + 29;
 
-  // Max Y before triggering page break
-  const pageBottomLimit = 730;
+  // Max Y before triggering page break (conservatively set to keep 1-page reports intact)
+  const pageBottomLimit = 718;
 
   if (sortedAttendance.length === 0) {
     doc.rect(36, curRowY, 523, 24).fillAndStroke("#FFFFFF", borderGray);
-    doc.fillColor(textMuted).fontSize(8).font("Helvetica").text("No attendance records logged for this student yet.", 48, curRowY + 7);
+    doc.fillColor(textMuted).fontSize(8).font("Helvetica").text("No attendance records logged for this student yet.", 48, curRowY + 7, { lineBreak: false });
     curRowY += 24;
   } else {
     sortedAttendance.forEach((rec, idx) => {
       // Check if we need a page break
       if (curRowY + rowH > pageBottomLimit) {
         doc.addPage();
-        drawHeaderBanner();
-        curRowY = 114;
-        doc.fillColor(primaryColor).fontSize(8.5).font("Helvetica-Bold").text("CHRONOLOGICAL ATTENDANCE REGISTER (CONTINUED)", 36, curRowY);
-        drawTableHeader(curRowY + 12);
-        curRowY += 31;
+        drawHeaderBanner(true);
+        curRowY = 112;
+        doc.fillColor(primaryColor).fontSize(8.5).font("Helvetica-Bold").text("CHRONOLOGICAL ATTENDANCE REGISTER (CONTINUED)", 36, curRowY, { lineBreak: false });
+        drawTableHeader(curRowY + 11);
+        curRowY += 29;
       }
 
       const bg = idx % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
@@ -527,13 +586,13 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
 
       // Date
       doc.fillColor(textColor).fontSize(7.5).font("Helvetica");
-      doc.text(rec.dateKey || "—", tCols[0], curRowY + 4);
+      doc.text(rec.dateKey || "—", tCols[0], curRowY + 4, { lineBreak: false });
 
       // Session
       const sessionLabel = (rec.session || rec.sessionKey || "Morning").toUpperCase();
-      doc.fillColor(textMuted).fontSize(7.5).font("Helvetica").text(sessionLabel, tCols[1], curRowY + 4);
+      doc.fillColor(textMuted).fontSize(7.5).font("Helvetica").text(sessionLabel, tCols[1], curRowY + 4, { lineBreak: false });
 
-      // Status with color code
+      // Status with clean color code
       const st = String(rec.status || "unmarked").toLowerCase();
       let stColor = "#2563EB";
       if (st === "present") stColor = "#059669";
@@ -541,21 +600,21 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
       else if (st === "late") stColor = "#D97706";
       else if (st === "excused") stColor = "#4338CA";
 
-      doc.fillColor(stColor).font("Helvetica-Bold").fontSize(7.5).text(st.toUpperCase(), tCols[2], curRowY + 4);
+      doc.fillColor(stColor).font("Helvetica-Bold").fontSize(7.5).text(st.toUpperCase(), tCols[2], curRowY + 4, { lineBreak: false });
 
-      // Mode
+      // Record Mode
       const source = rec.source === "photo-assisted" ? "Photo-Assisted" : (rec.confirmed ? "Manual (Verified)" : "Standard");
-      doc.fillColor(textMuted).font("Helvetica").fontSize(7).text(source, tCols[3], curRowY + 4);
+      doc.fillColor(textMuted).font("Helvetica").fontSize(7).text(source, tCols[3], curRowY + 4, { lineBreak: false });
 
       // Notes
       const noteText = rec.notes || rec.note || "—";
-      drawLocalizedText(noteText, tCols[4], curRowY + 4, { fontSize: 7.5, color: textColor, width: tWidths[4] - 8, ellipsis: true });
+      drawLocalizedText(noteText, tCols[4], curRowY + 4, { fontSize: 7.5, color: textColor, width: tWidths[4], ellipsis: true });
 
       curRowY += rowH;
     });
 
     // Outer table border for the current page
-    doc.rect(36, tableStartY + 12, 523, Math.min(curRowY, pageBottomLimit) - (tableStartY + 12)).strokeColor(borderGray).stroke();
+    doc.rect(36, tableStartY + 11, 523, Math.min(curRowY, pageBottomLimit) - (tableStartY + 11)).strokeColor(borderGray).stroke();
   }
 
   // =========================================================================
@@ -564,19 +623,19 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
-    const footY = 760;
+    const footY = 744;
 
     // Top separator line
     doc.moveTo(36, footY).lineTo(559, footY).strokeColor(borderGray).stroke();
 
-    // Footer Text
+    // Footer Text (clean without exposing raw database IDs)
     doc.fillColor(textMuted).fontSize(7).font("Helvetica")
-      .text("Darul Uloom Ashrafia, Atmakur • Madrasa Amanah Attendance Management System", 36, footY + 7);
-    doc.text(`Student Database Record: ${student._id}  •  Page ${i + 1} of ${range.count}`, 36, footY + 17);
+      .text("Darul Uloom Ashrafia, Atmakur • Madrasa Amanah Attendance Management System", 36, footY + 6, { lineBreak: false });
+    doc.text(`Official Student Dossier • Roll/Adm #${student.admissionNo || "—"} • Page ${i + 1} of ${range.count}`, 36, footY + 16, { lineBreak: false });
 
     // Official Seal and Signature Line
-    doc.moveTo(420, footY + 40).lineTo(540, footY + 40).strokeColor("#94A3B8").stroke();
-    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text("Authorized Signature & Seal", 420, footY + 44, { align: "center", width: 120 });
+    doc.moveTo(420, footY + 28).lineTo(540, footY + 28).strokeColor("#94A3B8").stroke();
+    doc.fillColor(textMuted).fontSize(7).font("Helvetica-Bold").text("Authorized Signature & Seal", 420, footY + 32, { align: "center", width: 120, lineBreak: false });
   }
 
   doc.end();

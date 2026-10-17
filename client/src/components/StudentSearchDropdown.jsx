@@ -196,6 +196,8 @@ export default function StudentSearchDropdown({
           ) : selectedStudent ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
               <span
+                className="notranslate"
+                translate="no"
                 dir={selectedNameDir}
                 style={{
                   fontWeight: 600,
@@ -208,6 +210,8 @@ export default function StudentSearchDropdown({
                 {displaySelectedName}
               </span>
               <span
+                className="notranslate"
+                translate="no"
                 style={{
                   fontSize: 11,
                   color: "var(--muted)",
@@ -452,6 +456,8 @@ export default function StudentSearchDropdown({
                         }}
                       >
                         <span
+                          className="notranslate"
+                          translate="no"
                           dir={nameDir}
                           style={{
                             fontWeight: isSelected ? 700 : 500,
@@ -464,6 +470,8 @@ export default function StudentSearchDropdown({
                           {sDisplayName}
                         </span>
                         <span
+                          className="notranslate"
+                          translate="no"
                           style={{
                             fontSize: 11,
                             color: "var(--muted)"

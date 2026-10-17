@@ -47,7 +47,12 @@ import {
   Users,
   Wifi,
   WifiOff,
-  X
+  X,
+  ChevronDown,
+  ChevronUp,
+  Upload,
+  ZoomIn,
+  ZoomOut
 } from "lucide-react";
 import api from "./api";
 import {
@@ -88,12 +93,26 @@ import {
   clearUserCache
 } from "./offlineDb";
 import StudentSearchDropdown from "./components/StudentSearchDropdown.jsx";
+import GoogleTranslate from "./components/GoogleTranslate.jsx";
 import { getStudentDisplayName, getStudentNameDir, matchesStudentSearch } from "./utils/studentName.js";
 import { sortStudentsByRoll, compareStudentsByClassAndRoll } from "./utils/studentSort.js";
 import { checkImageQuality, evaluateFaceMatch } from "./utils/faceQuality.js";
 
 const today = () => new Date().toLocaleDateString("en-CA");
-const errText = (e) => e?.response?.data?.message || e?.message || "Something went wrong.";
+const errText = (e) => {
+  if (!e) return "Something went wrong.";
+  if (typeof e === "string") return e;
+  const msg = e.response?.data?.message || e.message;
+  if (typeof msg === "string") return msg;
+  if (msg && typeof msg === "object") {
+    try {
+      return JSON.stringify(msg);
+    } catch {
+      return "An unexpected error occurred.";
+    }
+  }
+  return "Something went wrong.";
+};
 const readDataUrl = (file) =>
   new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -334,6 +353,11 @@ export default function App() {
     consentGiven: true
   });
   const [classPhoto, setClassPhoto] = useState(null);
+  const [photoDims, setPhotoDims] = useState({ width: 0, height: 0 });
+  const [photoProcessingStage, setPhotoProcessingStage] = useState("");
+  const [activeInspectFace, setActiveInspectFace] = useState(null);
+  const [photoZoom, setPhotoZoom] = useState(1);
+  const [showUnmatchedEnrolled, setShowUnmatchedEnrolled] = useState(false);
   const [detected, setDetected] = useState([]);
   const [classForm, setClassForm] = useState({ name: "", section: "Morning", academicYear: "1447-1448 / 2026" });
   const [report, setReport] = useState([]);
@@ -1208,6 +1232,7 @@ export default function App() {
   }
 
   async function logout(msg = "") {
+    const errorMsg = typeof msg === "string" ? msg : (msg && typeof msg.message === "string" ? msg.message : "");
     try {
       const keysToRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
@@ -1231,8 +1256,10 @@ export default function App() {
     setSessionExpiryWarning(false);
     stopCamera();
     await clearUserCache();
-    if (msg) {
-      setError(msg);
+    if (errorMsg) {
+      setError(errorMsg);
+    } else {
+      setError("");
     }
   }
 
@@ -1240,8 +1267,8 @@ export default function App() {
   useEffect(() => {
     if (!token || !user) return;
     if (tab === "more" || tab === "reports" || tab === "settings") {
-      fetchEmailStatus();
       if (user.role === "admin") {
+        fetchEmailStatus();
         fetchTeachers();
         fetchStorageStatus();
         fetchSystemSettings();
@@ -1271,6 +1298,7 @@ export default function App() {
   }
 
   async function fetchEmailStatus() {
+    if (user?.role !== "admin") return;
     try {
       const res = await api.get("/reports/weekly/status");
       setEmailStatus(res.data);
@@ -1435,6 +1463,9 @@ export default function App() {
     if (!window.confirm(`Are you sure you want to remove class "${cls.name} (${cls.section || 'All'})"? Active students will need to be reassigned to another class.`)) {
       return;
     }
+    if (!window.confirm(`SECOND CONFIRMATION: Are you completely sure you want to permanently delete class "${cls.name}"? Please confirm a second time to proceed.`)) {
+      return;
+    }
     setError("");
     setNotice("");
     setLoading(true);
@@ -1479,6 +1510,9 @@ export default function App() {
   async function handleDeactivateTeacher(teacher) {
     const tId = teacher._id || teacher.id;
     if (!window.confirm(`Are you sure you want to remove teacher "${teacher.name}"? Historical attendance records will remain safely preserved in the archive.`)) {
+      return;
+    }
+    if (!window.confirm(`SECOND CONFIRMATION: Are you completely sure you want to permanently remove teacher "${teacher.name}"? Please confirm a second time to proceed.`)) {
       return;
     }
     setError("");
@@ -2081,47 +2115,56 @@ export default function App() {
 
   // Classroom Photo Recognition — supports File upload and direct camera dataUrl
   async function processClassPhoto(fileOrDataUrl) {
-    setClassPhoto(fileOrDataUrl);
+    if (!fileOrDataUrl) return;
     setDetected([]);
     setError("");
+    setPhotoProcessingStage("Initializing image for scanning...");
     setNotice("Scanning photo for student faces...");
-    if (!fileOrDataUrl) return;
 
     try {
-      if (typeof fileOrDataUrl !== "string" && fileOrDataUrl.size > 8 * 1024 * 1024) {
-        throw new Error("Please select a photo under 8 MB.");
+      if (typeof fileOrDataUrl !== "string" && fileOrDataUrl.size > 12 * 1024 * 1024) {
+        throw new Error("Please select a photo under 12 MB.");
       }
-      const faceapi = await loadFaceApi();
 
-      let img;
+      let photoUrl = "";
       if (typeof fileOrDataUrl === "string") {
-        img = document.createElement("img");
-        img.crossOrigin = "anonymous";
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = () => reject(new Error("Failed to decode camera snapshot."));
-          img.src = fileOrDataUrl;
-        });
+        photoUrl = fileOrDataUrl;
       } else {
-        const objectUrl = URL.createObjectURL(fileOrDataUrl);
-        try {
-          img = await faceapi.fetchImage(objectUrl);
-        } finally {
-          URL.revokeObjectURL(objectUrl);
-        }
+        photoUrl = URL.createObjectURL(fileOrDataUrl);
       }
+      setClassPhoto(photoUrl);
+      setPhotoZoom(1);
+      setActiveInspectFace(null);
+
+      const img = new window.Image();
+      img.crossOrigin = "anonymous";
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error("Failed to decode photo. Please ensure it is a valid JPEG/PNG image."));
+        img.src = photoUrl;
+      });
+
+      const width = img.naturalWidth || img.width || 800;
+      const height = img.naturalHeight || img.height || 600;
+      setPhotoDims({ width, height });
 
       // Pre-check image quality before running face detection
+      setPhotoProcessingStage("Checking photo brightness, blur & quality...");
       const qualityCheck = checkImageQuality(img);
       if (!qualityCheck.ok) {
-        setNotice(qualityCheck.message + " Face detection will still attempt, but results may be less accurate.");
+        setNotice(qualityCheck.message + " Face detection will still proceed, but low light/blur may reduce accuracy.");
       }
 
+      setPhotoProcessingStage("Loading neural face-detection models...");
+      const faceapi = await loadFaceApi();
+
+      setPhotoProcessingStage("Detecting all faces in group photo...");
       const found = await faceapi
         .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.38 }))
         .withFaceLandmarks()
         .withFaceDescriptors();
 
+      setPhotoProcessingStage("Matching detected faces against class roster...");
       let index = [];
       try {
         const indexRes = await api.get("/students/face-index", { params: { classId: selectedClass } });
@@ -2161,8 +2204,16 @@ export default function App() {
           assignedCandidateIds.add(assignedStudentId);
         }
 
+        const box = face.detection?.box ? {
+          x: Math.round(face.detection.box.x),
+          y: Math.round(face.detection.box.y),
+          width: Math.round(face.detection.box.width),
+          height: Math.round(face.detection.box.height)
+        } : null;
+
         return {
           faceNo: i + 1,
+          box,
           descriptor: d,
           studentId: assignedStudentId,
           matchName: assignedStudent ? (assignedStudent.name || "") : (best?.student?.name || ""),
@@ -2179,13 +2230,15 @@ export default function App() {
       });
 
       setDetected(matches);
+      setPhotoProcessingStage("Ready for review");
       if (!found.length) {
-        setNotice("No faces detected in this photo. You can mark attendance manually below.");
+        setNotice("No faces detected in this photo. You can mark attendance manually below or try another angle.");
       } else {
         const recognizedCount = matches.filter((m) => m.studentId).length;
-        setNotice(`Detected ${found.length} face(s) (${recognizedCount} recognized with high confidence). Review below.`);
+        setNotice(`Detected ${found.length} face(s) (${recognizedCount} recognized with high confidence). Please review and confirm.`);
       }
     } catch (e) {
+      setPhotoProcessingStage("");
       setError(`${errText(e)} Continue with manual attendance.`);
     }
   }
@@ -2453,7 +2506,7 @@ export default function App() {
           {error && (
             <div className="alert error" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <AlertCircle size={18} style={{ flexShrink: 0 }} />
-              <span>{error}</span>
+              <span>{typeof error === "string" ? error : error?.message || String(error || "")}</span>
             </div>
           )}
 
@@ -2611,7 +2664,7 @@ export default function App() {
             </div>
           </div>
           <button
-            onClick={logout}
+            onClick={() => logout()}
             style={{
               background: "transparent",
               border: "none",
@@ -2702,13 +2755,13 @@ export default function App() {
       <main className="mobile-main">
         {error && (
           <div className="alert error">
-            <span>{error}</span>
+            <span>{typeof error === "string" ? error : (error?.message || String(error || ""))}</span>
             <button onClick={() => setError("")}><X size={16} /></button>
           </div>
         )}
         {notice && (
           <div className="alert success">
-            <span>{notice}</span>
+            <span>{typeof notice === "string" ? notice : (notice?.message || String(notice || ""))}</span>
             <button onClick={() => setNotice("")}><X size={16} /></button>
           </div>
         )}
@@ -3039,8 +3092,8 @@ export default function App() {
                 />
               </div>
 
-              {/* Phase 3 Face Suggestions & Review */}
-              {detected.length > 0 && (() => {
+              {/* Group Photo Attendance — Interactive Inspection & Review Panel */}
+              {(classPhoto || detected.length > 0) && (() => {
                 const assignedFaceMap = {};
                 for (const f of detected) {
                   if (f.studentId) {
@@ -3048,146 +3101,385 @@ export default function App() {
                   }
                 }
 
+                const confidentCount = detected.filter((f) => f.confidencePct >= 70 && !f.isAmbiguous).length;
+                const uncertainCount = detected.filter((f) => ((f.confidencePct >= 40 && f.confidencePct < 70) || f.isAmbiguous)).length;
+                const unmatchedCount = detected.filter((f) => !f.studentId || f.confidencePct < 40).length;
+                const assignedStudentIds = new Set(detected.filter((f) => f.studentId).map((f) => String(f.studentId)));
+                const unmatchedStudents = students.filter((s) => !assignedStudentIds.has(String(s._id || s.id)));
+
                 return (
-                  <div className="face-suggestions-panel">
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-                      <div>
-                        <strong style={{ fontSize: 13, color: "var(--text)" }}>
-                          {t.faceSuggestions} ({formatNumber(detected.length, lang)})
-                        </strong>
-                        <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
-                          {t.faceSuggestionsSub}
-                        </p>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        {detected.some((f) => f.studentId && !f.confirmed) && (
-                          <button
-                            type="button"
-                            className="btn primary"
-                            style={{ minHeight: 32, fontSize: 11.5, padding: "4px 10px" }}
-                            onClick={confirmAllFaceMatches}
-                          >
-                            <Check size={13} /> {t.confirmAllPresent}
-                          </button>
+                  <div className="group-photo-panel">
+                    {/* Header: Title, Controls, Zoom, Retake */}
+                    <div className="group-photo-header">
+                      <div className="group-photo-title">
+                        <Camera size={18} color="var(--primary)" />
+                        <span>Classroom Group Photo ({formatNumber(detected.length, lang)} {detected.length === 1 ? "face" : "faces"} detected)</span>
+                        {photoProcessingStage && (
+                          <span style={{ fontSize: 11, fontWeight: 500, color: "var(--muted)", padding: "2px 8px", background: "var(--surface-secondary, #F1F5F9)", borderRadius: 12 }}>
+                            {photoProcessingStage}
+                          </span>
                         )}
+                      </div>
+
+                      <div className="group-photo-controls">
+                        {classPhoto && (
+                          <>
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              style={{ minHeight: 30, padding: "2px 8px", fontSize: 11 }}
+                              onClick={() => setPhotoZoom((z) => Math.max(0.6, Number((z - 0.25).toFixed(2))))}
+                              title="Zoom Out"
+                            >
+                              <ZoomOut size={13} />
+                            </button>
+                            <span style={{ fontSize: 11, fontWeight: 700, minWidth: 38, textAlign: "center" }}>
+                              {Math.round(photoZoom * 100)}%
+                            </span>
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              style={{ minHeight: 30, padding: "2px 8px", fontSize: 11 }}
+                              onClick={() => setPhotoZoom((z) => Math.min(2.5, Number((z + 0.25).toFixed(2))))}
+                              title="Zoom In"
+                            >
+                              <ZoomIn size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              style={{ minHeight: 30, padding: "2px 8px", fontSize: 11 }}
+                              onClick={() => setPhotoZoom(1)}
+                              title="Reset Zoom"
+                            >
+                              1x
+                            </button>
+                          </>
+                        )}
+
                         <button
                           type="button"
-                          onClick={() => setDetected([])}
+                          className="btn secondary"
+                          style={{ minHeight: 30, padding: "2px 10px", fontSize: 11 }}
+                          onClick={() => startCamera("environment", "class-attendance")}
+                        >
+                          <Camera size={13} /> Retake
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setClassPhoto(null);
+                            setDetected([]);
+                            setActiveInspectFace(null);
+                          }}
                           style={{ background: "none", border: "none", color: "var(--muted)", padding: 4, cursor: "pointer", display: "grid", placeItems: "center" }}
-                          title={t.clearSuggestions}
+                          title="Clear Photo & Suggestions"
                         >
                           <X size={16} />
                         </button>
                       </div>
                     </div>
 
-                    <div style={{ display: "grid", gap: 10 }}>
-                      {detected.map((f) => {
-                        const hasDuplicateConflict = Boolean(
-                          f.studentId &&
-                          detected.some((other) => other.faceNo !== f.faceNo && String(other.studentId) === String(f.studentId))
-                        );
+                    {/* Viewport: Group Photo with SVG Numbered Bounding Boxes */}
+                    {classPhoto && (
+                      <div className="group-photo-viewport">
+                        <div
+                          className="group-photo-canvas-wrap"
+                          style={{ transform: `scale(${photoZoom})` }}
+                        >
+                          <img
+                            src={classPhoto}
+                            alt="Classroom Group Capture"
+                            className="group-photo-img"
+                          />
 
-                        return (
-                          <div
-                            key={f.faceNo}
-                            className={`face-suggestion-card ${f.confirmed ? "confirmed" : hasDuplicateConflict ? "has-conflict" : ""}`}
-                            style={{ zIndex: 10 }}
-                          >
-                            <div className="face-suggestion-header">
-                              <div className="face-candidate-title">
-                                <strong>
-                                  {t.faceItem
-                                    ? t.faceItem.replace("{{number}}", formatNumber(f.faceNo, lang))
-                                    : `Face #${formatNumber(f.faceNo, lang)}`}
-                                </strong>
-                                {f.confidencePct > 0 ? (
+                          {detected.length > 0 && photoDims.width > 0 && (
+                            <svg
+                              className="group-photo-svg-overlay"
+                              viewBox={`0 0 ${photoDims.width} ${photoDims.height}`}
+                              preserveAspectRatio="none"
+                            >
+                              {detected.map((f) => {
+                                if (!f.box) return null;
+                                const isConf = f.confirmed || (f.confidencePct >= 70 && !f.isAmbiguous);
+                                const isUncert = (f.confidencePct >= 40 && f.confidencePct < 70) || f.isAmbiguous;
+                                const boxColor = isConf ? "#10B981" : isUncert ? "#F59E0B" : "#EF4444";
+                                const isSelected = activeInspectFace === f.faceNo;
+
+                                return (
+                                  <g key={f.faceNo} onClick={() => setActiveInspectFace(f.faceNo)} style={{ cursor: "pointer" }}>
+                                    <rect
+                                      x={f.box.x}
+                                      y={f.box.y}
+                                      width={f.box.width}
+                                      height={f.box.height}
+                                      fill={boxColor + "28"}
+                                      stroke={boxColor}
+                                      strokeWidth={isSelected ? 4 : 2}
+                                      rx={4}
+                                      className={`group-photo-box ${isSelected ? "active" : ""}`}
+                                    />
+                                    <rect
+                                      x={f.box.x}
+                                      y={Math.max(0, f.box.y - 18)}
+                                      width={30}
+                                      height={18}
+                                      rx={3}
+                                      fill={boxColor}
+                                    />
+                                    <text
+                                      x={f.box.x + 15}
+                                      y={Math.max(0, f.box.y - 5)}
+                                      fill="#FFF"
+                                      fontSize="11"
+                                      fontWeight="bold"
+                                      textAnchor="middle"
+                                    >
+                                      #{f.faceNo}
+                                    </text>
+                                  </g>
+                                );
+                              })}
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Match Summary Badges */}
+                    <div className="match-summary-grid">
+                      <div className="match-summary-card confident">
+                        <span className="match-summary-count">{formatNumber(confidentCount, lang)}</span>
+                        <span className="match-summary-label">High Confidence</span>
+                      </div>
+                      <div className="match-summary-card uncertain">
+                        <span className="match-summary-count">{formatNumber(uncertainCount, lang)}</span>
+                        <span className="match-summary-label">Uncertain / Ambiguous</span>
+                      </div>
+                      <div className="match-summary-card unmatched">
+                        <span className="match-summary-count">{formatNumber(unmatchedCount, lang)}</span>
+                        <span className="match-summary-label">Unidentified Faces</span>
+                      </div>
+                      <div className="match-summary-card not-detected">
+                        <span className="match-summary-count">{formatNumber(unmatchedStudents.length, lang)}</span>
+                        <span className="match-summary-label">Enrolled Not in Photo</span>
+                      </div>
+                    </div>
+
+                    {/* Face Suggestion Cards Section */}
+                    {detected.length > 0 && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                            Review Detected Face Matches ({formatNumber(detected.length, lang)})
+                          </span>
+                          {detected.some((f) => f.studentId && !f.confirmed) && (
+                            <button
+                              type="button"
+                              className="btn primary"
+                              style={{ minHeight: 32, fontSize: 11.5, padding: "4px 12px" }}
+                              onClick={confirmAllFaceMatches}
+                            >
+                              <Check size={13} /> {t.confirmAllPresent || "Confirm All High-Confidence Present"}
+                            </button>
+                          )}
+                        </div>
+
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {detected.map((f) => {
+                            const hasDuplicateConflict = Boolean(
+                              f.studentId &&
+                              detected.some((other) => other.faceNo !== f.faceNo && String(other.studentId) === String(f.studentId))
+                            );
+                            const isInspected = activeInspectFace === f.faceNo;
+
+                            return (
+                              <div
+                                key={f.faceNo}
+                                className={`face-suggestion-card ${f.confirmed ? "confirmed" : hasDuplicateConflict ? "has-conflict" : ""} ${isInspected ? "active-inspect" : ""}`}
+                                onClick={() => setActiveInspectFace(f.faceNo)}
+                                style={{ zIndex: 10 }}
+                              >
+                                <div className="face-suggestion-header">
+                                  <div className="face-candidate-title">
+                                    <strong>
+                                      {t.faceItem
+                                        ? t.faceItem.replace("{{number}}", formatNumber(f.faceNo, lang))
+                                        : `Face #${formatNumber(f.faceNo, lang)}`}
+                                    </strong>
+                                    {f.confidencePct > 0 ? (
+                                      <span
+                                        className={`face-confidence-tag ${
+                                          f.confidencePct >= 70 ? "high" : f.confidencePct >= 45 ? "medium" : "low"
+                                        }`}
+                                      >
+                                        {f.confidencePct}% {t.match || "match"}
+                                      </span>
+                                    ) : (
+                                      <span className="face-confidence-tag low">
+                                        {t.unmatched || "Unmatched"}
+                                      </span>
+                                    )}
+                                    {f.isAmbiguous && (
+                                      <span className="face-confidence-tag low" title="Similar distance to multiple students">
+                                        Ambiguous
+                                      </span>
+                                    )}
+                                  </div>
+
                                   <span
-                                    className={`face-confidence-tag ${
-                                      f.confidencePct >= 70 ? "high" : f.confidencePct >= 45 ? "medium" : "low"
+                                    className={`face-status-badge ${
+                                      f.confirmed ? "confirmed" : f.isManual ? "manual" : "suggested"
                                     }`}
                                   >
-                                    {f.confidencePct}% {t.match || "match"}
+                                    {f.confirmed
+                                      ? t.confirmed || "Confirmed"
+                                      : f.isManual
+                                      ? t.manuallySelected || "Manual"
+                                      : t.suggested || "Suggested"}
                                   </span>
-                                ) : (
-                                  <span className="face-confidence-tag low">
-                                    {t.unmatched || "Unmatched"}
-                                  </span>
+                                </div>
+
+                                {hasDuplicateConflict && (
+                                  <div
+                                    style={{
+                                      color: "var(--danger, #DC2626)",
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 5,
+                                      padding: "4px 8px",
+                                      background: "#FEE2E2",
+                                      borderRadius: 4
+                                    }}
+                                  >
+                                    <AlertCircle size={13} />
+                                    <span>{t.duplicateWarning || "Duplicate: This student is assigned to another face candidate."}</span>
+                                  </div>
                                 )}
-                                {f.isAmbiguous && (
-                                  <span className="face-confidence-tag low" title="Similar distance to multiple students">
-                                    Ambiguous
-                                  </span>
-                                )}
+
+                                {/* Searchable Student Combobox Dropdown */}
+                                <StudentSearchDropdown
+                                  students={students}
+                                  value={f.studentId}
+                                  onChange={(newId) => changeFaceStudent(f.faceNo, newId)}
+                                  currentFaceNo={f.faceNo}
+                                  assignedMap={assignedFaceMap}
+                                  placeholder={t.chooseStudent || "Choose student..."}
+                                  lang={lang}
+                                  t={t}
+                                />
+
+                                <div className="face-suggestion-actions">
+                                  <button
+                                    type="button"
+                                    className="btn primary"
+                                    style={{ minHeight: 36, fontSize: 12, padding: "6px 12px", flex: 1 }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      confirmFaceMatch(f.faceNo, "present");
+                                    }}
+                                    disabled={!f.studentId || hasDuplicateConflict || f.confirmed}
+                                  >
+                                    <Check size={14} /> {f.confirmed ? (t.confirmed || "Confirmed Present ✓") : (t.confirmPresent || "Confirm Present")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn secondary"
+                                    style={{ minHeight: 36, fontSize: 12, padding: "6px 12px" }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      dismissFaceMatch(f.faceNo);
+                                    }}
+                                  >
+                                    <X size={14} /> {t.dismiss || "Dismiss"}
+                                  </button>
+                                </div>
                               </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
-                              <span
-                                className={`face-status-badge ${
-                                  f.confirmed ? "confirmed" : f.isManual ? "manual" : "suggested"
-                                }`}
-                              >
-                                {f.confirmed
-                                  ? t.confirmed || "Confirmed"
-                                  : f.isManual
-                                  ? t.manuallySelected || "Manual"
-                                  : t.suggested || "Suggested"}
-                              </span>
-                            </div>
-
-                            {hasDuplicateConflict && (
-                              <div
-                                style={{
-                                  color: "var(--danger, #DC2626)",
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 5,
-                                  padding: "4px 8px",
-                                  background: "#FEE2E2",
-                                  borderRadius: 4
-                                }}
-                              >
-                                <AlertCircle size={13} />
-                                <span>{t.duplicateWarning || "Duplicate: This student is assigned to another face candidate."}</span>
-                              </div>
-                            )}
-
-                            {/* Searchable Student Combobox Dropdown */}
-                            <StudentSearchDropdown
-                              students={students}
-                              value={f.studentId}
-                              onChange={(newId) => changeFaceStudent(f.faceNo, newId)}
-                              currentFaceNo={f.faceNo}
-                              assignedMap={assignedFaceMap}
-                              placeholder={t.chooseStudent || "Choose student..."}
-                              lang={lang}
-                              t={t}
-                            />
-
-                            <div className="face-suggestion-actions">
-                              <button
-                                type="button"
-                                className="btn primary"
-                                style={{ minHeight: 36, fontSize: 12, padding: "6px 12px", flex: 1 }}
-                                onClick={() => confirmFaceMatch(f.faceNo, "present")}
-                                disabled={!f.studentId || hasDuplicateConflict || f.confirmed}
-                              >
-                                <Check size={14} /> {f.confirmed ? t.confirmed : t.confirmPresent}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn secondary"
-                                style={{ minHeight: 36, fontSize: 12, padding: "6px 12px" }}
-                                onClick={() => dismissFaceMatch(f.faceNo)}
-                              >
-                                <X size={14} /> {t.dismiss}
-                              </button>
-                            </div>
+                    {/* Unmatched Enrolled Students Section */}
+                    {unmatchedStudents.length > 0 && (
+                      <div className="unmatched-enrolled-section">
+                        <div
+                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
+                          onClick={() => setShowUnmatchedEnrolled((prev) => !prev)}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <strong style={{ fontSize: 13, color: "var(--text)" }}>
+                              Enrolled Students Not Detected in Photo ({formatNumber(unmatchedStudents.length, lang)})
+                            </strong>
+                            <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                              (Mark attendance manually)
+                            </span>
                           </div>
-                        );
-                      })}
-                    </div>
+                          {showUnmatchedEnrolled ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </div>
+
+                        {showUnmatchedEnrolled && (
+                          <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+                            {unmatchedStudents.map((s) => {
+                              const sid = s._id || s.id;
+                              const currentStatus = records[sid]?.status;
+                              const sName = getStudentDisplayName(s, lang) || localizeStudentName(s.name, lang);
+
+                              return (
+                                <div key={sid} className="unmatched-student-row">
+                                  <div className="unmatched-student-meta">
+                                    <div
+                                      style={{
+                                        width: 32,
+                                        height: 32,
+                                        borderRadius: "50%",
+                                        background: "var(--surface-secondary, #E2E8F0)",
+                                        display: "grid",
+                                        placeItems: "center",
+                                        fontWeight: 700,
+                                        fontSize: 12,
+                                        overflow: "hidden"
+                                      }}
+                                    >
+                                      {s.photoUrl ? (
+                                        <img src={s.photoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                      ) : (
+                                        (sName?.[0] || "#").toUpperCase()
+                                      )}
+                                    </div>
+                                    <div>
+                                      <strong className="notranslate" translate="no" style={{ fontSize: 12.5, color: "var(--text)", display: "block" }}>
+                                        {sName}
+                                      </strong>
+                                      <span className="notranslate" translate="no" style={{ fontSize: 11, color: "var(--muted)" }}>
+                                        #{s.admissionNo || s.admissionNumber || "—"}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="unmatched-student-quick-btns">
+                                    {["present", "absent", "late", "excused"].map((st) => (
+                                      <button
+                                        key={st}
+                                        type="button"
+                                        className={`unmatched-quick-btn ${st} ${currentStatus === st ? "active" : ""}`}
+                                        onClick={() => mark(sid, st)}
+                                      >
+                                        {st === "present" ? "Present" : st === "absent" ? "Absent" : st === "late" ? "Late" : "Excused"}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -3223,10 +3515,10 @@ export default function App() {
                         )}
                       </div>
                       <div className="student-card-identity">
-                        <strong className="student-card-name" dir="ltr" style={{ textAlign: "left", unicodeBidi: "plaintext" }}>
+                        <strong className="student-card-name notranslate" translate="no" dir="ltr" style={{ textAlign: "left", unicodeBidi: "plaintext" }}>
                           {displayName}
                         </strong>
-                        <span className="student-card-id-tag">
+                        <span className="student-card-id-tag notranslate" translate="no">
                           #{s.admissionNo || s.admissionNumber || "—"}
                         </span>
                       </div>
@@ -3305,11 +3597,13 @@ export default function App() {
 
             <div className="mobile-sticky-save">
               <div className="save-summary-col">
-                <strong>
+                <strong style={{ fontSize: 13 }}>
                   {formatNumber(presentCount, lang)} {t.present} · {formatNumber(absentCount, lang)} {t.absent}
+                  {lateCount > 0 ? ` · ${formatNumber(lateCount, lang)} ${t.late}` : ""}
+                  {excusedCount > 0 ? ` · ${formatNumber(excusedCount, lang)} ${t.excused}` : ""}
                 </strong>
-                <span style={{ color: notMarkedCount > 0 ? "var(--warning)" : "var(--success)" }}>
-                  {notMarkedCount > 0 ? `${formatNumber(notMarkedCount, lang)} ${t.notMarked}` : t.allMarked}
+                <span style={{ fontSize: 11.5, color: notMarkedCount > 0 ? "var(--warning)" : "var(--success)" }}>
+                  {notMarkedCount > 0 ? `⚠️ ${formatNumber(notMarkedCount, lang)} ${t.notMarked || "unreviewed / not marked"}` : `✓ ${t.allMarked || "All students reviewed"}`}
                 </span>
               </div>
               <button
@@ -3318,7 +3612,7 @@ export default function App() {
                 onClick={saveAttendance}
               >
                 <Check size={18} />
-                <span>{isOnline ? t.saveAttendance : t.saveOffline}</span>
+                <span>{isOnline ? (t.saveConfirmedAttendance || "Save Confirmed Attendance") : t.saveOffline}</span>
               </button>
             </div>
           </div>
@@ -4032,16 +4326,16 @@ export default function App() {
                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openStudentProfile(s); }}
                       >
                         <div className="student-card-name-row" dir="ltr" style={{ textAlign: "left" }}>
-                          <strong style={{ unicodeBidi: "plaintext" }}>{getStudentDisplayName(s, lang)}</strong>
+                          <strong className="notranslate" translate="no" style={{ unicodeBidi: "plaintext" }}>{getStudentDisplayName(s, lang)}</strong>
                           {(s.admissionNo || s.admissionNumber) && (
-                            <span className="student-card-admission-badge">
+                            <span className="student-card-admission-badge notranslate" translate="no">
                               #{s.admissionNo || s.admissionNumber}
                             </span>
                           )}
                         </div>
                         {/* Multilingual sub-names displayed in English, Urdu, Telugu order */}
                         {(s.nameUr || s.nameTe || (s.nameEn && s.nameEn !== s.name)) && (
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", fontSize: 11, color: "var(--muted)", marginTop: 2, textAlign: "left" }} dir="ltr">
+                          <div className="notranslate" translate="no" style={{ display: "flex", gap: 6, flexWrap: "wrap", fontSize: 11, color: "var(--muted)", marginTop: 2, textAlign: "left" }} dir="ltr">
                             {lang !== "en" && (s.nameEn || s.name) && <span>EN: {s.nameEn || s.name}</span>}
                             {lang !== "ur" && s.nameUr && <span dir="rtl" style={{ unicodeBidi: "plaintext" }}>اردو: {s.nameUr}</span>}
                             {lang !== "te" && s.nameTe && <span>తెలుగు: {s.nameTe}</span>}
@@ -4064,7 +4358,7 @@ export default function App() {
                       <div className="student-card-meta-line">
                         <span>{studentClass}</span>
                         {s.guardianPhone && (
-                          <span>· <a href={`tel:${s.guardianPhone}`} style={{ color: "var(--muted)", textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>{s.guardianPhone}</a></span>
+                          <span>· <a href={`tel:${s.guardianPhone}`} className="notranslate" translate="no" style={{ color: "var(--muted)", textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>{s.guardianPhone}</a></span>
                         )}
                       </div>
 
@@ -5612,7 +5906,7 @@ export default function App() {
             {/* Universal Sign Out */}
             <div className="card" style={{ textAlign: "center" }}>
               <button
-                onClick={logout}
+                onClick={() => logout()}
                 className="btn secondary full"
                 style={{ color: "var(--danger)", borderColor: "var(--danger)" }}
               >
@@ -5992,7 +6286,7 @@ export default function App() {
 
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <strong style={{ fontSize: 16 }}>{localizeStudentName(viewingStudentProfile.name, lang)}</strong>
+                  <strong className="notranslate" translate="no" style={{ fontSize: 16 }}>{localizeStudentName(viewingStudentProfile.name, lang)}</strong>
                   <span className={`status-pill ${viewingStudentProfile.active !== false ? "neutral" : "offline"}`}>
                     {viewingStudentProfile.active !== false ? (t.active || "Active") : (t.archived || "Archived")}
                   </span>
@@ -6032,11 +6326,11 @@ export default function App() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 14px", fontSize: 13 }}>
                 <div>
                   <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t("students.fullName", "Full Name")}</span>
-                  <strong>{localizeStudentName(viewingStudentProfile.name || viewingStudentProfile.fullName, lang)}</strong>
+                  <strong className="notranslate" translate="no">{localizeStudentName(viewingStudentProfile.name || viewingStudentProfile.fullName, lang)}</strong>
                 </div>
                 <div>
                   <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t.admissionNo}</span>
-                  <strong>{viewingStudentProfile.admissionNo || viewingStudentProfile.admissionNumber}</strong>
+                  <strong className="notranslate" translate="no">{viewingStudentProfile.admissionNo || viewingStudentProfile.admissionNumber}</strong>
                 </div>
                 <div>
                   <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t.gender || "Gender"}</span>
@@ -6684,6 +6978,15 @@ export default function App() {
 
             <div className="camera-viewfinder">
               <video ref={videoRef} playsInline autoPlay muted />
+              {cameraMode === "class-attendance" && (
+                <div className="camera-guidance-overlay">
+                  <div className="camera-guidance-frame">
+                    <span className="camera-guidance-text">
+                      👥 Align class within frame • Keep faces visible & well-lit
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="camera-snap-bar">
@@ -7196,16 +7499,20 @@ export default function App() {
 
 function LanguageSelect({ lang, setLang }) {
   return (
-    <select
-      className="language-select"
-      aria-label="Language selection"
-      value={lang}
-      onChange={(e) => setLang(e.target.value)}
-    >
-      <option value="en">English</option>
-      <option value="ur">اردو</option>
-      <option value="te">తెలుగు</option>
-    </select>
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+      <select
+        className="language-select notranslate"
+        translate="no"
+        aria-label="Language selection"
+        value={lang}
+        onChange={(e) => setLang(e.target.value)}
+      >
+        <option value="en">English</option>
+        <option value="ur">اردو</option>
+        <option value="te">తెలుగు</option>
+      </select>
+      <GoogleTranslate compact />
+    </div>
   );
 }
 

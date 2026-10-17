@@ -2039,7 +2039,7 @@ async function buildEmailStatusPayload() {
   const emailConfigured = Boolean(brevoApiKey || resendApiKey || (smtpUser && smtpPass));
   const recipient = resolveRecipientEmail(null, settings);
   const timezone = settings?.reportTimezone || process.env.REPORT_TIMEZONE || "Asia/Kolkata";
-  const schedule = settings?.reportSchedule || "Sundays at 07:00 PM (IST)";
+  const schedule = settings?.reportSchedule || "Mondays at 06:00 AM (IST)";
   const automationEnabled = Boolean(settings?.reportAutomationEnabled);
   const isAutomated = automationEnabled && emailConfigured;
   const nextRun = isAutomated ? getNextScheduledReportRun(schedule, timezone) : null;
@@ -2280,7 +2280,7 @@ app.get("/api/settings", requireAdmin, async (_req, res) => {
       key: "global",
       reportRecipientEmail: defaultEmail,
       reportTimezone: process.env.REPORT_TIMEZONE || "Asia/Kolkata",
-      reportSchedule: "Sundays at 07:00 PM (IST)",
+      reportSchedule: "Mondays at 06:00 AM (IST)",
       reportAutomationEnabled: false,
       attendanceCorrectionWindowDays: 7
     });
@@ -2292,13 +2292,13 @@ app.get("/api/settings", requireAdmin, async (_req, res) => {
   const smtpPass = (process.env.SMTP_PASS || "").trim();
   const emailConfigured = Boolean(brevoApiKey || resendApiKey || (smtpUser && smtpPass));
   const nextRun = settings.reportAutomationEnabled && emailConfigured
-    ? getNextScheduledReportRun(settings.reportSchedule || "Sundays at 07:00 PM (IST)", settings.reportTimezone || "Asia/Kolkata")
+    ? getNextScheduledReportRun(settings.reportSchedule || "Mondays at 06:00 AM (IST)", settings.reportTimezone || "Asia/Kolkata")
     : null;
 
   res.json({
     reportRecipientEmail: resolveRecipientEmail(null, settings),
     reportTimezone: settings.reportTimezone || "Asia/Kolkata",
-    reportSchedule: settings.reportSchedule || "Sundays at 07:00 PM (IST)",
+    reportSchedule: settings.reportSchedule || "Mondays at 06:00 AM (IST)",
     reportAutomationEnabled: settings.reportAutomationEnabled,
     isAutomated: settings.reportAutomationEnabled && emailConfigured,
     emailConfigured,
@@ -2981,7 +2981,7 @@ try {
       key: "global",
       reportRecipientEmail: configuredEmail,
       reportTimezone: process.env.REPORT_TIMEZONE || "Asia/Kolkata",
-      reportSchedule: "Sundays at 07:00 PM (IST)",
+      reportSchedule: "Mondays at 06:00 AM (IST)",
       reportAutomationEnabled: false,
       attendanceCorrectionWindowDays: 7
     });
@@ -2990,7 +2990,7 @@ try {
     // If DB still has the legacy developer email or is blank, auto-update it to the client email
     if (!globalSettings.reportRecipientEmail || globalSettings.reportRecipientEmail === "2300030621cseh1@gmail.com") {
       globalSettings.reportRecipientEmail = configuredEmail;
-      globalSettings.reportSchedule = "Sundays at 07:00 PM (IST)";
+      globalSettings.reportSchedule = "Mondays at 06:00 AM (IST)";
       await globalSettings.save();
       console.log("[BOOTSTRAP] SystemSetting recipient auto-synced from env to:", globalSettings.reportRecipientEmail);
     }
@@ -3000,16 +3000,15 @@ try {
 }
 
 // ──────────────────────────────────────────────────────────────
-// Weekly Report Cron Scheduler — Sunday 07:00 PM Asia/Kolkata
+// Weekly Report Cron Scheduler — Monday 06:00 AM Asia/Kolkata
 // ──────────────────────────────────────────────────────────────
-// Cron expression: Sunday 19:00 IST (UTC+05:30) = 13:30 UTC Sunday
-// Cron expression for 13:30 UTC on Sunday: "30 13 * * 0"
+// Cron expression for Monday at 06:00 AM Asia/Kolkata: "0 6 * * 1"
 //
 // Idempotency: We record the ISO week key (YYYY-W##) in the audit
 // log before sending. If a record for this week already exists
 // (e.g. from a duplicate instance or retry), we skip dispatch.
 // ──────────────────────────────────────────────────────────────
-const WEEKLY_REPORT_CRON = "30 13 * * 0"; // 13:30 UTC = 19:00 (7:00 PM) IST Sunday
+const WEEKLY_REPORT_CRON = "0 6 * * 1"; // 06:00 AM IST on Monday
 
 cron.schedule(WEEKLY_REPORT_CRON, async () => {
   console.log("[CRON] Weekly report scheduler triggered at", new Date().toISOString());
@@ -3081,10 +3080,10 @@ cron.schedule(WEEKLY_REPORT_CRON, async () => {
   }
 }, {
   scheduled: true,
-  timezone: "UTC"
+  timezone: "Asia/Kolkata"
 });
 
-console.log(`[CRON] Weekly report scheduler registered. Expression: "${WEEKLY_REPORT_CRON}" UTC (= Sunday 07:00 PM Asia/Kolkata)`);
+console.log(`[CRON] Weekly report scheduler registered. Expression: "${WEEKLY_REPORT_CRON}" Asia/Kolkata (= Monday 06:00 AM Asia/Kolkata)`);
 
 // ──────────────────────────────────────────────────────────────
 // Monthly Attendance Archival & Storage Retention Scheduler

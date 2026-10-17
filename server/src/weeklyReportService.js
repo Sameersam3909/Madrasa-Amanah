@@ -342,21 +342,20 @@ export async function generateWeeklyExcelWorkbook({ from, to, recipientEmail, mo
   return wb;
 }
 
-export function getNextScheduledReportRun(schedule = "Sundays at 07:00 PM (IST)", timezone = "Asia/Kolkata") {
-  // Computes the next scheduled Sunday at 07:00 PM (19:00 IST / 13:30 UTC)
+export function getNextScheduledReportRun(schedule = "Mondays at 06:00 AM (IST)", timezone = "Asia/Kolkata") {
+  // Computes the next scheduled Monday at 06:00 AM (06:00 IST / 00:30 UTC)
   const now = new Date();
   const next = new Date(now);
-  const day = now.getUTCDay(); // 0 is Sunday
-  let daysUntilSunday = (7 - day) % 7;
-  if (daysUntilSunday === 0) {
-    // If today is Sunday UTC, check if 13:30 UTC (19:00 IST) has passed
+  const day = now.getUTCDay(); // 0 is Sunday, 1 is Monday
+  let daysUntilMonday = (1 - day + 7) % 7;
+  if (daysUntilMonday === 0) {
     const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-    if (currentMinutes >= 13 * 60 + 30) {
-      daysUntilSunday = 7;
+    if (currentMinutes >= 30) {
+      daysUntilMonday = 7;
     }
   }
-  next.setUTCDate(now.getUTCDate() + daysUntilSunday);
-  next.setUTCHours(13, 30, 0, 0); // 13:30 UTC = 19:00 (7:00 PM) IST
+  next.setUTCDate(now.getUTCDate() + daysUntilMonday);
+  next.setUTCHours(0, 30, 0, 0); // 00:30 UTC = 06:00 AM IST
   return next.toISOString();
 }
 
