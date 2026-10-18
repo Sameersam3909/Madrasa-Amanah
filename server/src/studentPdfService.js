@@ -128,10 +128,10 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     size: "A4",
     bufferPages: true,
     info: {
-      Title: `Madrasa Amanah - Student Profile - ${student.admissionNo || ""}-${student.name || ""}`,
-      Author: "Madrasa Amanah Smart Attendance System",
+      Title: `Darul Uloom Ashrafia - Student Profile - ${student.admissionNo || ""}-${student.name || ""}`,
+      Author: "Darul Uloom Ashrafia Smart Attendance System",
       Subject: "Official Student Academic & Attendance Dossier",
-      Keywords: "Madrasa Amanah, Attendance, Student Profile, Report"
+      Keywords: "Darul Uloom Ashrafia, Atmakur, Attendance, Student Profile, Report"
     }
   });
 
@@ -283,11 +283,11 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
     }
 
     // Madrasa Title & Arabic Subtitle
-    doc.fillColor("#FFFFFF").fontSize(12).font("Helvetica-Bold").text("DARUL ULOOM ASHRAFIA, ATMAKUR", 82, 44, { width: 260, lineBreak: false });
+    doc.fillColor("#FFFFFF").fontSize(12).font("Helvetica-Bold").text("DARUL ULOOM ASHRAFIA, ATMAKUR", 82, 43, { width: 260, lineBreak: false });
     if (hasArabicFont) {
-      doc.fillColor(accentGold).fontSize(10.5).font("NotoArabic").text("دارالعلوم اشرفیہ اتماکور", 82, 59, { width: 260, lineBreak: false });
+      doc.fillColor(accentGold).fontSize(10.5).font("NotoArabic").text("دارالعلوم اشرفیہ", 82, 58, { width: 260, lineBreak: false });
     }
-    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text("Madrasa Amanah Attendance Management System", 82, 73, { lineBreak: false });
+    doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica").text("Regd. No. 243/2023 • Smart Attendance System", 82, 73, { lineBreak: false });
 
     // Right side dossier metadata
     const headerTitle = isContinued ? "OFFICIAL STUDENT DOSSIER (CONTINUED)" : "OFFICIAL STUDENT DOSSIER";
@@ -428,7 +428,7 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   drawField("Photo Consent", student.consentGiven ? "Recorded (Granted ✓)" : "Pending / Not Given", pCol1, curY, 70, 116);
   const hasBiometrics = Boolean(student.faceDescriptor && student.faceDescriptor.length > 0);
   drawField("AI Biometrics", hasBiometrics ? "Enrolled (Face Model ✓)" : "Standard Registry", pCol2, curY, 70, 116);
-  drawField("Assigned Madrasa", "Madrasa Amanah (Atmakur)", pCol3, curY, 70, 135);
+  drawField("Assigned Madrasa", "Darul Uloom Ashrafia (Atmakur)", pCol3, curY, 70, 135);
 
   // =========================================================================
   // SECTION B: PERSONAL & GUARDIAN DETAILS (3-column layout without internal DB ID)
@@ -630,7 +630,7 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
 
     // Footer Text (clean without exposing raw database IDs)
     doc.fillColor(textMuted).fontSize(7).font("Helvetica")
-      .text("Darul Uloom Ashrafia, Atmakur • Madrasa Amanah Attendance Management System", 36, footY + 6, { lineBreak: false });
+      .text("Darul Uloom Ashrafia, Atmakur • Regd. No. 243/2023 • Smart Attendance System", 36, footY + 6, { lineBreak: false });
     doc.text(`Official Student Dossier • Roll/Adm #${student.admissionNo || "—"} • Page ${i + 1} of ${range.count}`, 36, footY + 16, { lineBreak: false });
 
     // Official Seal and Signature Line

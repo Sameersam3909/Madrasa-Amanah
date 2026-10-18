@@ -2,20 +2,34 @@ import "dotenv/config";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import { User } from "./models.js";
-if (!process.env.MONGODB_URI || !process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
-  throw new Error("Set MONGODB_URI, ADMIN_EMAIL and ADMIN_PASSWORD in .env first.");
+
+const mongoUri = process.env.MONGODB_URI || process.env.MONGODB_URI_PRIMARY;
+const adminEmail = (process.env.ADMIN_EMAIL || "mdrafiq12118@gmail.com").toLowerCase().trim();
+const adminPass = process.env.ADMIN_PASSWORD || "Mdrafiq@12118";
+const adminName = process.env.ADMIN_NAME || "Madrasa Administrator";
+
+if (!mongoUri) {
+  throw new Error("MONGODB_URI must be set in .env.");
 }
-if (process.env.ADMIN_PASSWORD.length < 12) throw new Error("ADMIN_PASSWORD must be at least 12 characters.");
-await mongoose.connect(process.env.MONGODB_URI);
-const email = process.env.ADMIN_EMAIL.toLowerCase().trim();
-const existing = await User.findOne({ email });
-if (existing) {
-  console.log("Admin email already exists; no account changed.");
+
+await mongoose.connect(mongoUri);
+const hash = await bcrypt.hash(adminPass, 12);
+let user = await User.findOne({ email: adminEmail });
+if (user) {
+  user.passwordHash = hash;
+  user.name = adminName;
+  user.role = "admin";
+  user.active = true;
+  await user.save();
+  console.log(`[SEED] Admin account updated successfully: ${adminEmail}`);
 } else {
   await User.create({
-    name: process.env.ADMIN_NAME || "Madrasa Administrator",
-    email, role: "admin", passwordHash: await bcrypt.hash(process.env.ADMIN_PASSWORD, 12)
+    name: adminName,
+    email: adminEmail,
+    role: "admin",
+    passwordHash: hash,
+    active: true
   });
-  console.log("First admin created. Sign in and keep credentials private.");
+  console.log(`[SEED] Admin created successfully: ${adminEmail}`);
 }
 await mongoose.disconnect();

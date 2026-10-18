@@ -65,7 +65,7 @@ export async function generateWeeklyAttendancePdfBuffer({ from, to, mockData = n
 
   const institutionName = process.env.MADRASA_NAME || "Darul Uloom Ashrafia, Atmakur";
   const institutionNameUpper = institutionName.toUpperCase();
-  const arabicSubtitle = process.env.MADRASA_NAME_ARABIC || "دارالعلوم اشرفیہ اتماکور";
+  const arabicSubtitle = process.env.MADRASA_NAME_ARABIC || "دارالعلوم اشرفیہ";
 
   // Create PDF Document (A4: 595.28 x 841.89 points)
   const doc = new PDFDocument({
@@ -76,7 +76,7 @@ export async function generateWeeklyAttendancePdfBuffer({ from, to, mockData = n
     info: {
       Title: `Weekly Attendance Report: ${from} to ${to}`,
       Author: institutionName,
-      Subject: "Madrasa Amanah Attendance Management System"
+      Subject: "Darul Uloom Ashrafia Smart Attendance System"
     }
   });
 
@@ -127,15 +127,15 @@ export async function generateWeeklyAttendancePdfBuffer({ from, to, mockData = n
           .text(arabicSubtitle, 88, 59, { width: 280, ellipsis: true });
       } catch {
         doc.fillColor(accentGold).fontSize(8.5).font("Helvetica")
-          .text("Madrasa Amanah", 88, 59, { width: 280 });
+          .text("Darul Uloom Ashrafia", 88, 59, { width: 280 });
       }
     } else {
       doc.fillColor(accentGold).fontSize(8.5).font("Helvetica")
-        .text("Madrasa Amanah", 88, 59, { width: 280 });
+        .text("Darul Uloom Ashrafia", 88, 59, { width: 280 });
     }
 
     doc.fillColor("#D1FAE5").fontSize(7).font("Helvetica")
-      .text("Madrasa Amanah Attendance Management System", 88, 73, { width: 280 });
+      .text("Regd. No. 243/2023 • Smart Attendance System", 88, 73, { width: 280 });
 
     // Right-aligned report metadata
     doc.fillColor("#FFFFFF").fontSize(9.5).font("Helvetica-Bold")

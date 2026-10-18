@@ -41,7 +41,7 @@ export async function generateClassAttendancePdfBuffer({
 }) {
   const institutionName = process.env.MADRASA_NAME || "Darul Uloom Ashrafia, Atmakur";
   const institutionNameUpper = institutionName.toUpperCase();
-  const arabicSubtitle = process.env.MADRASA_NAME_ARABIC || "دارالعلوم اشرفیہ اتماکور";
+  const arabicSubtitle = process.env.MADRASA_NAME_ARABIC || "دارالعلوم اشرفیہ";
 
   const sortedStudents = [...students].sort(compareRollNumbers);
 
@@ -123,15 +123,15 @@ export async function generateClassAttendancePdfBuffer({
           .text(arabicSubtitle, 92, 57, { width: 400, ellipsis: true });
       } catch {
         doc.fillColor(accentGold).fontSize(9).font("Helvetica")
-          .text("Madrasa Amanah", 92, 57, { width: 400 });
+          .text("Darul Uloom Ashrafia", 92, 57, { width: 400 });
       }
     } else {
       doc.fillColor(accentGold).fontSize(9).font("Helvetica")
-        .text("Madrasa Amanah", 92, 57, { width: 400 });
+        .text("Darul Uloom Ashrafia", 92, 57, { width: 400 });
     }
 
     doc.fillColor("#D1FAE5").fontSize(7.5).font("Helvetica")
-      .text(`Official Attendance Register & Parent Progress Report • Academic Session ${targetClass?.academicYear || "2026-2027"}`, 92, 72, { width: 420 });
+      .text(`Official Attendance Register & Parent Progress Report • Regd. No. 243/2023 • Session ${targetClass?.academicYear || "2026-2027"}`, 92, 72, { width: 420 });
 
     // Right Details Block
     doc.fillColor("#FFFFFF").fontSize(11).font("Helvetica-Bold")
@@ -414,7 +414,7 @@ export async function generateClassAttendancePdfBuffer({
     doc.text(`Official Document • Page ${i + 1} of ${range.count}`, 32, footY + 15, { lineBreak: false });
 
     doc.fillColor(textMuted).fontSize(6.5).font("Helvetica")
-      .text("Confidential School Register • Madrasa Amanah Smart Attendance System", 520, footY + 5, { align: "right", width: 290, lineBreak: false });
+      .text("Confidential School Register • Darul Uloom Ashrafia Smart Attendance System", 520, footY + 5, { align: "right", width: 290, lineBreak: false });
 
     doc.page.margins.bottom = oldBottom;
   }

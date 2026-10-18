@@ -94,7 +94,7 @@ function getMonthMetadata(year, month) {
  */
 export async function generateMonthlyExcelWorkbook({ from, to, monthLabel, monthKey }) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Madrasa Amanah Smart Attendance System";
+  wb.creator = "Darul Uloom Ashrafia Smart Attendance System";
   wb.lastModifiedBy = "Automated Monthly Backup Service";
   wb.created = new Date();
 
@@ -148,14 +148,16 @@ export async function generateMonthlyExcelWorkbook({ from, to, monthLabel, month
   ];
 
   // Header banner
-  const titleRow = wsSummary.addRow(["مَدْرَسَة  •  MADRASA AMANAH", "Monthly Attendance Archive"]);
+  const titleRow = wsSummary.addRow(["دارالعلوم اشرفیہ  •  DARUL ULOOM ASHRAFIA, ATMAKUR", "Monthly Attendance Archive"]);
   titleRow.font = { bold: true, size: 14, color: { argb: "FF174B36" } };
 
+  wsSummary.addRow(["Registration", "Regd. No. 243/2023"]);
+  wsSummary.addRow(["Location", "Atmakur"]);
   wsSummary.addRow(["Reporting Month", `${monthLabel} (${monthKey})`]);
   wsSummary.addRow(["Reporting Period", `${from} to ${to}`]);
   wsSummary.addRow(["Generated Timestamp (UTC)", new Date().toISOString()]);
   wsSummary.addRow(["Generated Timestamp (IST)", new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) + " IST"]);
-  wsSummary.addRow(["System Version", "Madrasa Amanah 1.0.0 (Automated Backup)"]);
+  wsSummary.addRow(["System Version", "Darul Uloom Ashrafia 1.0.0 (Automated Backup)"]);
   wsSummary.addRow([]);
 
   // High-Level Monthly Metrics

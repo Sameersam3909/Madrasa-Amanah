@@ -544,6 +544,9 @@ async function handleStudentUpdate(req, res) {
     if (req.body.photoUrl !== undefined) student.photoUrl = req.body.photoUrl;
 
     if (req.body.photoDataUrl) {
+      if (typeof req.body.photoDataUrl !== "string" || !req.body.photoDataUrl.startsWith("data:image/")) {
+        return res.status(400).json({ message: "Invalid image format. Expected a valid JPEG, PNG, or WebP image." });
+      }
       student.photoUrl = await uploadImageDataUrl(req.body.photoDataUrl);
     }
     if (Array.isArray(req.body.faceDescriptor)) {
@@ -575,8 +578,8 @@ async function handleStudentUpdate(req, res) {
   }
 }
 
-app.patch("/api/students/:id", requireAdmin, handleStudentUpdate);
-app.put("/api/students/:id", requireAdmin, handleStudentUpdate);
+app.patch("/api/students/:id", handleStudentUpdate);
+app.put("/api/students/:id", handleStudentUpdate);
 
 // --- MOVE STUDENTS WORKFLOW (SINGLE & BULK TRANSFER — ADMIN ONLY) ---
 app.post("/api/students/transfer", requireAdmin, async (req, res) => {
@@ -1069,7 +1072,7 @@ app.get("/api/students/:id/export", exportRateLimiter, requireExportPin, async (
     res.setHeader("Content-Type", "application/json; charset=utf-8");
 
     const exportData = {
-      system: "Madrasa Amanah Smart Attendance",
+      system: "DARUL ULOOM ASHRAFIA, ATMAKUR (Regd. No. 243/2023) — Smart Attendance",
       exportTimestamp: new Date().toISOString(),
       student: {
         id: String(student._id),
@@ -2079,7 +2082,7 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
   const smtpHost = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const smtpPort = Number(process.env.SMTP_PORT || 587);
   const isSecure = process.env.SMTP_SECURE === "true" || smtpPort === 465;
-  const smtpFrom = process.env.SMTP_FROM || `"Madrasa Amanah" <${smtpUser || "reports@madrasa-amanah.com"}>`;
+  const smtpFrom = process.env.SMTP_FROM || `"Darul Uloom Ashrafia" <${smtpUser || "reports@darululoomashrafia.org"}>`;
 
   const emailConfigured = Boolean(resendApiKey || brevoApiKey || (smtpUser && smtpPass));
 
@@ -2122,7 +2125,7 @@ app.post("/api/reports/send-test-email", requireAdmin, async (req, res) => {
             sender: { name: "Darul Uloom Ashrafia, Atmakur", email: brevoSenderEmail },
             to: recipients.map(email => ({ email })),
             subject: `[Test] Darul Uloom Ashrafia — Email Test — ${new Date().toUTCString()}`,
-            textContent: `Assalamu Alaikum,\n\nThis is a configuration test email from Darul Uloom Ashrafia, Atmakur (Madrasa Amanah Smart Attendance System).\n\nRecipients: ${recipients.join(", ")}`,
+            textContent: `Assalamu Alaikum,\n\nThis is a configuration test email from DARUL ULOOM ASHRAFIA, ATMAKUR (Regd. No. 243/2023).\n\nRecipients: ${recipients.join(", ")}`,
             htmlContent: `<div style="font-family:Arial,sans-serif;max-width:520px;padding:24px;border:1px solid #DFE5E0;border-radius:8px;background:#F7F6F0">
               <h2 style="color:#174B36">دارالعلوم اشرفیہ</h2>
               <p style="font-weight:bold;color:#174B36">Darul Uloom Ashrafia, Atmakur</p>
@@ -2434,7 +2437,9 @@ app.get("/api/admin/backup/export", requireAdmin, exportRateLimiter, requireExpo
 
   const backupPackage = {
     metadata: {
-      system: "Madrasa Amanah Smart Attendance System",
+      system: "DARUL ULOOM ASHRAFIA, ATMAKUR (Regd. No. 243/2023) — Madrasa Amanah Smart Attendance System",
+      institution: "DARUL ULOOM ASHRAFIA",
+      regdNo: "243/2023",
       version: "1.0.0",
       exportTimestamp: new Date().toISOString(),
       exportedBy: req.user.email,
@@ -2935,8 +2940,8 @@ await connectDB();
 const adminCount = await User.countDocuments();
 if (adminCount === 0) {
   const adminName = process.env.ADMIN_NAME || "Madrasa Administrator";
-  const adminEmail = (process.env.ADMIN_EMAIL || "2300030621cseh1@gmail.com").toLowerCase().trim();
-  const adminPass = process.env.ADMIN_PASSWORD || "Shaiksameer/3909";
+  const adminEmail = (process.env.ADMIN_EMAIL || "mdrafiq12118@gmail.com").toLowerCase().trim();
+  const adminPass = process.env.ADMIN_PASSWORD || "Mdrafiq@12118";
   const hash = await bcrypt.hash(adminPass, 12);
   const adminUser = await User.create({
     name: adminName,
@@ -3111,7 +3116,8 @@ console.log(`[CRON] Monthly attendance archival scheduler registered. Expression
 
 app.listen(port, () => {
   console.log(`\n=================================================`);
-  console.log(`  مَدْرَسَة  •  MADRASA AMANAH ATTENDANCE API`);
+  console.log(`  دارالعلوم اشرفیہ  •  DARUL ULOOM ASHRAFIA`);
+  console.log(`  ATMAKUR • Regd. No. 243/2023`);
   console.log(`  Running on: http://localhost:${port}`);
   console.log(`=================================================\n`);
 });

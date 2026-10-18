@@ -53,9 +53,12 @@
     "guardianPhone": "Guardian Phone"
   },
   "navigation": {
-    "brand": "Darul Uloom Ashrafia, Atmakur",
+    "brand": "DARUL ULOOM ASHRAFIA, ATMAKUR",
+    "institutionName": "DARUL ULOOM ASHRAFIA",
+    "location": "ATMAKUR",
+    "regdNo": "Regd. No. 243/2023",
     "tagline": "Smart Attendance System",
-    "subbrand": "Madrasa Amanah Attendance Management System",
+    "subbrand": "Darul Uloom Ashrafia Attendance Management System",
     "arabicHeader": "دارالعلوم اشرفیہ",
     "dashboard": "Dashboard",
     "attendance": "Take Attendance",

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&family=Noto+Sans+Telugu:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&family=Noto+Nastaliq+Urdu:wght@400;500;600;700&family=Noto+Sans+Telugu:wght@400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -34,8 +34,19 @@
 }
 
 [dir="rtl"], [lang="ur"] {
-  font-family: "Noto Naskh Arabic", "Urdu Typesetting", "Jameel Noori Nastaleeq", "Noto Nastaliq Urdu", system-ui, sans-serif;
-  line-height: 1.6;
+  font-family: "Noto Nastaliq Urdu", "Noto Naskh Arabic", "Urdu Typesetting", "Jameel Noori Nastaleeq", system-ui, sans-serif;
+  line-height: 1.8;
+}
+
+[dir="rtl"] .reg-no,
+[dir="rtl"] .ltr-protect,
+[dir="rtl"] input[type="email"],
+[dir="rtl"] input[type="tel"],
+[dir="rtl"] input[type="date"],
+[dir="rtl"] input[type="time"] {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: right;
 }
 
 [lang="te"] {
@@ -1372,19 +1383,21 @@ body {
    Matches the requested UI screenshot
    ======================================================= */
 .photo-manager-card {
-  background: #0D1410;
-  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   padding: 24px 20px;
-  color: #FFFFFF;
+  color: var(--text);
   margin-bottom: 16px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 18px rgba(23, 75, 54, 0.06);
 }
 
 .photo-manager-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
-  color: #FFFFFF;
-  margin-bottom: 18px;
+  color: var(--primary);
+  margin-bottom: 16px;
+  text-align: center;
 }
 
 .photo-manager-avatar-wrap {
@@ -1392,19 +1405,20 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 24px 0 20px;
+  padding: 12px 0 20px;
 }
 
 .photo-manager-avatar {
-  width: 88px;
-  height: 88px;
+  width: 96px;
+  height: 96px;
   border-radius: 50%;
-  border: 2px dashed rgba(255, 255, 255, 0.25);
+  border: 3px solid var(--accent);
   display: grid;
   place-items: center;
-  margin-bottom: 12px;
-  background: rgba(255, 255, 255, 0.05);
+  margin-bottom: 10px;
+  background: var(--canvas);
   overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
 }
 
 .photo-manager-avatar img {
@@ -1414,51 +1428,65 @@ body {
 }
 
 .photo-manager-avatar svg {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--muted);
 }
 
 .photo-manager-avatar-label {
-  font-size: 14px;
-  color: #D8D2C2;
+  font-size: 13px;
+  color: var(--muted);
   font-weight: 500;
 }
 
-/* Pill Action Buttons */
+/* Pill Action Buttons - Consistent with Emerald Theme */
 .photo-pill-btn {
   width: 100%;
-  min-height: 52px;
-  border-radius: 26px;
-  font-size: 15px;
+  min-height: 46px;
+  border-radius: 12px;
+  font-size: 14px;
   font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 10px;
   transition: all 0.15s ease;
   cursor: pointer;
+  box-sizing: border-box;
 }
 
 .photo-pill-btn.take {
-  background: #FFFFFF;
-  color: #000000;
+  background: var(--primary);
+  color: #FFFFFF;
   border: none;
 }
 
+.photo-pill-btn.take:hover,
 .photo-pill-btn.take:active {
-  background: #E5E5E5;
-  transform: scale(0.98);
+  background: var(--primary-hover);
+  transform: translateY(-1px);
 }
 
 .photo-pill-btn.choose {
-  background: transparent;
-  color: #FFFFFF;
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: var(--surface);
+  color: var(--primary);
+  border: 1.5px solid var(--primary);
 }
 
+.photo-pill-btn.choose:hover,
 .photo-pill-btn.choose:active {
-  background: rgba(255, 255, 255, 0.08);
-  transform: scale(0.98);
+  background: var(--primary-subtle);
+  transform: translateY(-1px);
+}
+
+.photo-pill-btn.cancel {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.photo-pill-btn.cancel:hover {
+  background: var(--canvas);
+  color: var(--text);
 }
 
 .photo-pill-btn:disabled {

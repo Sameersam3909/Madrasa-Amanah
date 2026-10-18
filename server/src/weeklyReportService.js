@@ -48,7 +48,7 @@ export function getDatesInRange(startDate, endDate) {
  */
 export async function generateWeeklyExcelWorkbook({ from, to, recipientEmail, mockData = null }) {
   const institutionName = process.env.MADRASA_NAME || "Darul Uloom Ashrafia, Atmakur";
-  const arabicSubtitle = process.env.MADRASA_NAME_ARABIC || "دارالعلوم اشرفیہ اتماکور";
+  const arabicSubtitle = process.env.MADRASA_NAME_ARABIC || "دارالعلوم اشرفیہ";
 
   const wb = new ExcelJS.Workbook();
   wb.creator = institutionName;
@@ -112,7 +112,8 @@ export async function generateWeeklyExcelWorkbook({ from, to, recipientEmail, mo
   // Header banner
   wsSummary.addRow([`${arabicSubtitle} • ${institutionName.toUpperCase()}`, "Weekly Attendance Report"]);
   wsSummary.addRow(["Location", "Atmakur"]);
-  wsSummary.addRow(["Project", "Madrasa Amanah Attendance Management System"]);
+  wsSummary.addRow(["Registration", "Regd. No. 243/2023"]);
+  wsSummary.addRow(["System", "Darul Uloom Ashrafia Smart Attendance System"]);
   wsSummary.addRow(["Reporting Period", `${from} to ${to}`]);
   wsSummary.addRow(["Report Generated At", new Date().toISOString()]);
   wsSummary.addRow(["Target Recipient(s)", recipientEmail || "2300030621cseh1@gmail.com, mdrafiq12118@gmail.com"]);
@@ -421,7 +422,7 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
   }
   const displayRecipients = recipients.join(", ");
   const institutionName = process.env.MADRASA_NAME || "Darul Uloom Ashrafia, Atmakur";
-  const arabicSubtitle = process.env.MADRASA_NAME_ARABIC || "دارالعلوم اشرفیہ اتماکور";
+  const arabicSubtitle = process.env.MADRASA_NAME_ARABIC || "دارالعلوم اشرفیہ";
 
   const safeName = institutionName.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
   const excelFilename = `${safeName}-Weekly-Attendance-${from}-to-${to}.xlsx`;
@@ -460,20 +461,20 @@ export async function sendWeeklyEmailReport({ from, to, recipientEmail, trigger 
   const smtpHost = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const smtpPort = Number(process.env.SMTP_PORT || 587);
   const isSecure = process.env.SMTP_SECURE === "true" || smtpPort === 465;
-  const smtpFrom = process.env.SMTP_FROM || `"${institutionName}" <${smtpUser || "reports@madrasa-amanah.com"}>`;
+  const smtpFrom = process.env.SMTP_FROM || `"${institutionName}" <${smtpUser || "reports@darululoomashrafia.org"}>`;
 
   const emailConfigured = Boolean(resendApiKey || brevoApiKey || (smtpUser && smtpPass));
 
   const emailSubject = `${institutionName} — Weekly Attendance Report (${from} to ${to})`;
 
-  const mailText = `Assalamu Alaikum,\n\nPlease find attached the official Weekly Attendance Report for ${institutionName} (${arabicSubtitle}) for the period ${from} to ${to}.\n\nExecutive Attendance Summary:\n- Total Registered Students: ${totalEnrolled}\n- Total Active Classes: ${classes.length}\n- Total Attendance Marks: ${total}\n- Present: ${presentTotal}\n- Absent: ${absentTotal}\n- Late: ${lateTotal}\n- Excused: ${excusedTotal}\n- Attendance Rate: ${rate}%\n\nAttached Documents:\n1. Official Printable PDF Attendance Dossier (${pdfFilename})\n2. Detailed Multi-Sheet Excel Spreadsheet (${excelFilename})\n\nMadrasa Amanah Attendance Management System\nLocation: Atmakur`;
+  const mailText = `Assalamu Alaikum,\n\nPlease find attached the official Weekly Attendance Report for ${institutionName} (${arabicSubtitle}) for the period ${from} to ${to}.\n\nExecutive Attendance Summary:\n- Total Registered Students: ${totalEnrolled}\n- Total Active Classes: ${classes.length}\n- Total Attendance Marks: ${total}\n- Present: ${presentTotal}\n- Absent: ${absentTotal}\n- Late: ${lateTotal}\n- Excused: ${excusedTotal}\n- Attendance Rate: ${rate}%\n\nAttached Documents:\n1. Official Printable PDF Attendance Dossier (${pdfFilename})\n2. Detailed Multi-Sheet Excel Spreadsheet (${excelFilename})\n\nDARUL ULOOM ASHRAFIA, ATMAKUR\nRegd. No. 243/2023\nSmart Attendance System`;
 
   const mailHtml = `
     <div style="font-family: Arial, sans-serif; color: #1E293B; max-width: 600px; border: 1px solid #DFE5E0; border-radius: 8px; padding: 24px; background: #F8FAFC;">
       <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #D97706; padding-bottom: 16px;">
         <h2 style="color: #174B36; margin: 0; font-size: 18px; letter-spacing: 0.5px;">${arabicSubtitle}</h2>
         <h3 style="color: #0E3324; margin: 4px 0 0 0; font-size: 16px;">${institutionName.toUpperCase()}</h3>
-        <p style="color: #64748B; margin: 4px 0 0 0; font-size: 12px;">Madrasa Amanah Attendance Management System · Location: Atmakur</p>
+        <p style="color: #64748B; margin: 4px 0 0 0; font-size: 12px;">ATMAKUR · Regd. No. 243/2023 · Smart Attendance System</p>
       </div>
       <div style="background: #FFFFFF; border-radius: 8px; padding: 18px; border: 1px solid #E2E8F0; margin-bottom: 16px;">
         <p style="margin: 0 0 12px 0; font-size: 14px; font-weight: bold; color: #174B36;">

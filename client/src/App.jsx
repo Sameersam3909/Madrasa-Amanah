@@ -736,7 +736,7 @@ export default function App() {
       const className = studentClassFilter !== "all"
         ? (classes.find((c) => String(c._id || c.id) === String(studentClassFilter))?.name || "Class")
         : "All-Students";
-      const filename = `Madrasa-Amanah-${className}-${studentStatusFilter}-${today()}.${format}`;
+      const filename = `Darul-Uloom-Ashrafia-${className}-${studentStatusFilter}-${today()}.${format}`;
       await triggerFileDownload("/students/export", {
         classId: studentClassFilter !== "all" ? studentClassFilter : undefined,
         status: studentStatusFilter,
@@ -757,7 +757,7 @@ export default function App() {
     setLoading(true);
     try {
       const cleanName = (student.name || "Student").replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
-      const filename = `Madrasa-Amanah-Student-${student.admissionNo || "Data"}-${cleanName}-${today()}.${format}`;
+      const filename = `Darul-Uloom-Ashrafia-Student-${student.admissionNo || "Data"}-${cleanName}-${today()}.${format}`;
       await triggerFileDownload(`/students/${sId}/export`, { format }, filename);
       setNotice(`Student record for ${student.name} downloaded (${format.toUpperCase()}) ✓`);
     } catch (err) {
@@ -1523,7 +1523,7 @@ export default function App() {
       prevMonday.setDate(prevSunday.getDate() - 6);
       const from = prevMonday.toISOString().slice(0, 10);
       const to = prevSunday.toISOString().slice(0, 10);
-      await triggerFileDownload("/reports/weekly-excel", {}, `Madrasa-Amanah-Weekly-Attendance-${from}-to-${to}.xlsx`);
+      await triggerFileDownload("/reports/weekly-excel", {}, `Darul-Uloom-Ashrafia-Weekly-Attendance-${from}-to-${to}.xlsx`);
       setNotice("Weekly Excel report downloaded successfully ✓");
     } catch (err) {
       setError(errText(err));
@@ -1858,13 +1858,21 @@ export default function App() {
     }
   }
 
+  function openPhotoManager(student) {
+    if (!student) return;
+    setProfilePreviewPhoto(null);
+    setProfilePreviewDescriptor(null);
+    setFaceDetectStatus("");
+    setPhotoSaveError("");
+    setViewingStudent(student);
+  }
+
   // Save / Replace Reference Photo
   async function saveStudentPhoto() {
     if (!viewingStudent || !profilePreviewPhoto) return;
     setPhotoSaving(true);
     setPhotoSaveError("");
     const studentId = viewingStudent._id || viewingStudent.id;
-    const previousPhotoUrl = viewingStudent.photoUrl; // preserve old photo reference
 
     try {
       if (isOnline) {
@@ -1874,17 +1882,24 @@ export default function App() {
         });
         // Verify server returned a valid permanent photo URL (not a blob)
         if (data.photoUrl && !data.photoUrl.startsWith("blob:") && !data.photoUrl.startsWith("data:")) {
+          // Add timestamp query parameter to bust browser image cache
+          const freshPhotoUrl = `${data.photoUrl}${data.photoUrl.includes("?") ? "&" : "?"}t=${Date.now()}`;
+          const updatedStudentData = {
+            ...data,
+            photoUrl: freshPhotoUrl,
+            referencePhotoUrl: freshPhotoUrl
+          };
+
           setStudents((prev) =>
-            prev.map((s) => (String(s._id || s.id) === String(studentId) ? data : s))
+            prev.map((s) => (String(s._id || s.id) === String(studentId) ? { ...s, ...updatedStudentData } : s))
           );
           setDirectoryStudents((prev) =>
-            prev.map((s) => (String(s._id || s.id) === String(studentId) ? { ...s, photoUrl: data.photoUrl, referencePhotoUrl: data.photoUrl } : s))
+            prev.map((s) => (String(s._id || s.id) === String(studentId) ? { ...s, ...updatedStudentData } : s))
           );
           if (viewingStudentProfile && String(viewingStudentProfile._id || viewingStudentProfile.id) === String(studentId)) {
-            setViewingStudentProfile((prev) => ({ ...prev, photoUrl: data.photoUrl, referencePhotoUrl: data.photoUrl }));
+            setViewingStudentProfile((prev) => ({ ...prev, ...updatedStudentData }));
           }
-          setViewingStudent(data);
-          await updateStudentInCache(data);
+          await updateStudentInCache(updatedStudentData);
           addNotification({
             title: "Reference Photo Updated",
             message: `Photo for ${data.name} (${data.admissionNo}) saved to cloud storage.`,
@@ -1894,6 +1909,8 @@ export default function App() {
           setProfilePreviewPhoto(null);
           setProfilePreviewDescriptor(null);
           setFaceDetectStatus("");
+          // Close photo editor dialog so user returns to the updated profile
+          closeStudentModal();
         } else {
           // Server responded but URL looks like a temp reference
           setPhotoSaveError("Server saved the record but the photo URL may not be permanent. Please verify in the student list.");
@@ -1904,6 +1921,20 @@ export default function App() {
           photoDataUrl: profilePreviewPhoto,
           faceDescriptor: profilePreviewDescriptor
         });
+        const localUpdated = {
+          ...viewingStudent,
+          photoUrl: profilePreviewPhoto,
+          referencePhotoUrl: profilePreviewPhoto
+        };
+        setStudents((prev) =>
+          prev.map((s) => (String(s._id || s.id) === String(studentId) ? { ...s, ...localUpdated } : s))
+        );
+        setDirectoryStudents((prev) =>
+          prev.map((s) => (String(s._id || s.id) === String(studentId) ? { ...s, ...localUpdated } : s))
+        );
+        if (viewingStudentProfile && String(viewingStudentProfile._id || viewingStudentProfile.id) === String(studentId)) {
+          setViewingStudentProfile((prev) => ({ ...prev, ...localUpdated }));
+        }
         addNotification({
           title: "Photo Saved Locally (Offline)",
           message: `Photo for ${viewingStudent.name} queued for upload when online.`,
@@ -1914,6 +1945,7 @@ export default function App() {
         setProfilePreviewDescriptor(null);
         setFaceDetectStatus("");
         await refreshSyncStatus();
+        closeStudentModal();
       }
     } catch (e) {
       // Keep preview and old photo intact on failure — allow retry
@@ -2571,7 +2603,7 @@ export default function App() {
   async function downloadReport(format) {
     const className = activeClass ? `${activeClass.name}${activeClass.section ? `-${activeClass.section}` : ""}` : "Class";
     const cleanClassName = className.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
-    const generatedName = `Madrasa-Amanah-Attendance-${cleanClassName}-${reportRange.from}${reportRange.from !== reportRange.to ? `-to-${reportRange.to}` : ""}.${format === "xlsx" ? "xlsx" : format}`;
+    const generatedName = `Darul-Uloom-Ashrafia-Attendance-${cleanClassName}-${reportRange.from}${reportRange.from !== reportRange.to ? `-to-${reportRange.to}` : ""}.${format === "xlsx" ? "xlsx" : format}`;
     await triggerFileDownload("/reports/export", { classId: selectedClass, ...reportRange, format }, generatedName);
   }
 
@@ -2586,12 +2618,12 @@ export default function App() {
   async function downloadStudentsRoster(format = "csv") {
     const className = activeClass ? `${activeClass.name}${activeClass.section ? `-${activeClass.section}` : ""}` : "All-Classes";
     const cleanClassName = className.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
-    const generatedName = `Madrasa-Amanah-Students-${cleanClassName}-${today()}.${format}`;
+    const generatedName = `Darul-Uloom-Ashrafia-Students-${cleanClassName}-${today()}.${format}`;
     await triggerFileDownload("/students/export", { classId: selectedClass || undefined, format }, generatedName);
   }
 
   async function downloadSystemBackup() {
-    await triggerFileDownload("/admin/backup/export", {}, `Madrasa-Amanah-Backup-${today()}.json`);
+    await triggerFileDownload("/admin/backup/export", {}, `Darul-Uloom-Ashrafia-Backup-${today()}.json`);
   }
 
   async function sendWeeklyEmail() {
@@ -2632,17 +2664,32 @@ export default function App() {
     return (
       <div className="login-screen">
         <form className="login-card" onSubmit={signIn}>
-          <div style={{ textAlign: "center", marginBottom: 16 }}>
-            <div style={{ marginBottom: 14, display: "flex", justifyContent: "center" }}>
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <div style={{ marginBottom: 12, display: "flex", justifyContent: "center", padding: "4px 8px" }}>
               <img
-                src="/logo.png"
-                alt="Darul Uloom Ashrafia Logo"
-                style={{ width: 84, height: 84, objectFit: "contain", borderRadius: "50%", background: "#fff", padding: 2, boxShadow: "0 4px 14px rgba(0,0,0,0.12)" }}
+                src="/logo-transparent.png"
+                alt="DARUL ULOOM ASHRAFIA • ATMAKUR • Regd. No. 243/2023"
+                style={{
+                  width: "100%",
+                  maxWidth: 290,
+                  height: "auto",
+                  objectFit: "contain",
+                  display: "block"
+                }}
               />
             </div>
-            <p className="eyebrow" style={{ letterSpacing: 0.5, fontWeight: 700, color: "var(--accent)", marginBottom: 4 }}>دارالعلوم اشرفیہ</p>
-            <h1 style={{ fontSize: 20, margin: "2px 0 6px" }}>{t.brand}</h1>
-            <p className="muted" style={{ fontSize: 13 }}>Madrasa Amanah Attendance Management System</p>
+            <div style={{
+              display: "inline-block",
+              padding: "4px 14px",
+              background: "var(--primary-subtle)",
+              borderRadius: "9999px",
+              color: "var(--primary)",
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: 0.3
+            }}>
+              {t.tagline || "Smart Attendance System"}
+            </div>
           </div>
 
           {error && (
@@ -2709,24 +2756,29 @@ export default function App() {
     <div className="app-shell">
       {/* DESKTOP SIDEBAR */}
       <aside className="desktop-sidebar">
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+        <div style={{ marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid var(--border)", textAlign: "center" }}>
           <img
-            src="/logo.png"
-            alt="Darul Uloom Logo"
+            src="/logo-transparent.png"
+            alt="DARUL ULOOM ASHRAFIA, ATMAKUR • Regd. No. 243/2023"
             style={{
-              width: 44,
-              height: 44,
+              width: "100%",
+              maxWidth: 215,
+              height: "auto",
               objectFit: "contain",
-              borderRadius: "50%",
-              flexShrink: 0,
-              background: "#fff",
-              padding: 2,
-              border: "1px solid var(--border)"
+              display: "block",
+              margin: "0 auto 8px"
             }}
           />
-          <div>
-            <strong style={{ display: "block", fontSize: 14, lineHeight: 1.25, color: "var(--primary)" }}>{t.brand}</strong>
-            <small style={{ color: "var(--accent)", fontWeight: 700, fontSize: 11 }}>دارالعلوم اشرفیہ</small>
+          <div style={{
+            display: "inline-block",
+            background: "var(--primary-subtle)",
+            color: "var(--primary)",
+            padding: "3px 10px",
+            borderRadius: 8,
+            fontSize: 11,
+            fontWeight: 600
+          }}>
+            {t.tagline || "Smart Attendance System"}
           </div>
         </div>
 
@@ -2826,23 +2878,25 @@ export default function App() {
 
       {/* MOBILE TOPBAR */}
       <header className="mobile-header">
-        <div className="mobile-brand" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="mobile-brand" style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
           <img
-            src="/logo.png"
-            alt="Logo"
+            src="/logo-transparent.png"
+            alt="DARUL ULOOM ASHRAFIA Logo"
             style={{
-              width: 34,
-              height: 34,
+              height: 36,
+              maxWidth: 95,
+              width: "auto",
               objectFit: "contain",
-              borderRadius: "50%",
-              background: "#fff",
-              padding: 1,
               flexShrink: 0
             }}
           />
-          <div className="mobile-brand-title">
-            <strong style={{ fontSize: 13, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 190 }}>{t.brand}</strong>
-            <small style={{ fontSize: 11, color: "var(--accent)", fontWeight: 600 }}>دارالعلوم اشرفیہ</small>
+          <div className="mobile-brand-title" style={{ minWidth: 0, overflow: "hidden" }}>
+            <strong style={{ fontSize: 12.5, lineHeight: 1.2, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "var(--primary)" }}>
+              DARUL ULOOM ASHRAFIA
+            </strong>
+            <small style={{ fontSize: 10, color: "var(--muted)", display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              ATMAKUR • Regd. No. 243/2023
+            </small>
           </div>
         </div>
 
@@ -3784,7 +3838,7 @@ export default function App() {
                     {/* ROW 1: AVATAR, NAME & ADMISSION NUMBER */}
                     <div
                       className="student-card-top-row"
-                      onClick={() => setViewingStudent(s)}
+                      onClick={() => openPhotoManager(s)}
                     >
                       <div className="student-card-avatar">
                         {s.photoUrl ? (
@@ -4753,7 +4807,7 @@ export default function App() {
                                         className="student-action-item"
                                         onClick={() => {
                                           setActiveMenuStudentId(null);
-                                          setViewingStudent(s);
+                                          openPhotoManager(s);
                                         }}
                                       >
                                         <Camera size={15} color="var(--primary)" />
@@ -6364,12 +6418,14 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div>
                 <p className="eyebrow">{t.studentProfile || "STUDENT PROFILE"}</p>
-                <h2 style={{ marginBottom: 0 }}>{localizeStudentName(viewingStudent.name, lang)}</h2>
-                <small className="muted">{t.admissionNo}: {viewingStudent.admissionNo}</small>
+                <h2 style={{ marginBottom: 0 }} className="notranslate" translate="no">{localizeStudentName(viewingStudent.name, lang)}</h2>
+                <small className="muted">{t.admissionNo}: <strong className="notranslate" translate="no">{viewingStudent.admissionNo || viewingStudent.admissionNumber}</strong></small>
               </div>
               <button
+                type="button"
                 onClick={closeStudentModal}
                 style={{ background: "transparent", border: "none", color: "var(--muted)", padding: 6, cursor: "pointer" }}
+                aria-label="Close"
               >
                 <X size={22} />
               </button>
@@ -6382,14 +6438,14 @@ export default function App() {
               </div>
             )}
 
-            {/* EXACT MOCKUP CARD FROM USER IMAGE */}
+            {/* Photo Manager Card */}
             <div className="photo-manager-card">
               <div className="photo-manager-title">{t("faceMatching.studentPhoto", "Student photo")}</div>
 
               <div className="photo-manager-avatar-wrap">
                 <div className="photo-manager-avatar">
-                  {viewingStudent.photoUrl ? (
-                    <img src={viewingStudent.photoUrl} alt={localizeStudentName(viewingStudent.name, lang)} />
+                  {viewingStudent.photoUrl || viewingStudent.referencePhotoUrl ? (
+                    <img src={viewingStudent.photoUrl || viewingStudent.referencePhotoUrl} alt={localizeStudentName(viewingStudent.name, lang)} />
                   ) : (
                     <User size={38} />
                   )}
@@ -6400,8 +6456,9 @@ export default function App() {
               {!profilePreviewPhoto && !cameraActive && (
                 <div>
                   <button
+                    type="button"
                     className="photo-pill-btn take"
-                    onClick={() => startCamera(cameraFacing)}
+                    onClick={() => startCamera(cameraFacing, "student-profile")}
                   >
                     <Camera size={20} />
                     <span>{t("faceMatching.takePhoto", "Take a photo")}</span>
@@ -6417,13 +6474,28 @@ export default function App() {
                   <input
                     id="profile-gallery-file-input"
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/webp"
                     style={{ display: "none" }}
                     onChange={async (e) => {
                       const f = e.target.files?.[0];
                       if (f) {
-                        const url = await readDataUrl(f);
-                        handleNewPhoto(url);
+                        if (!f.type.startsWith("image/")) {
+                          setPhotoSaveError("Invalid file type. Please select a JPEG, PNG, or WebP photo.");
+                          e.target.value = "";
+                          return;
+                        }
+                        if (f.size > 10 * 1024 * 1024) {
+                          setPhotoSaveError("Selected photo is too large (maximum 10 MB).");
+                          e.target.value = "";
+                          return;
+                        }
+                        try {
+                          const url = await readDataUrl(f);
+                          handleNewPhoto(url);
+                        } catch (err) {
+                          setPhotoSaveError("Could not read image file. Please choose another.");
+                        }
+                        e.target.value = "";
                       }
                     }}
                   />
@@ -6437,17 +6509,37 @@ export default function App() {
                     onChange={async (e) => {
                       const f = e.target.files?.[0];
                       if (f) {
-                        const url = await readDataUrl(f);
-                        handleNewPhoto(url);
+                        if (f.size > 10 * 1024 * 1024) {
+                          setPhotoSaveError("Captured photo is too large (maximum 10 MB).");
+                          e.target.value = "";
+                          return;
+                        }
+                        try {
+                          const url = await readDataUrl(f);
+                          handleNewPhoto(url);
+                        } catch (err) {
+                          setPhotoSaveError("Could not process camera photo.");
+                        }
+                        e.target.value = "";
                       }
                     }}
                   />
+
+                  <button
+                    type="button"
+                    className="photo-pill-btn cancel"
+                    onClick={closeStudentModal}
+                    style={{ marginTop: 6 }}
+                  >
+                    <X size={16} />
+                    <span>{t("common.cancel", "Cancel")}</span>
+                  </button>
                 </div>
               )}
 
               {profilePreviewPhoto && (
                 <div className="photo-preview-wrap">
-                  <div style={{ fontSize: 13, color: "#D8D2C2", marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, color: "var(--muted)", fontWeight: 500, marginBottom: 8 }}>
                     {t("faceMatching.newImagePreview", "New image preview:")}
                   </div>
                   <img src={profilePreviewPhoto} alt="Preview" className="photo-preview-img" />
@@ -6459,8 +6551,9 @@ export default function App() {
                     padding: "6px 12px",
                     borderRadius: 8,
                     display: "inline-block",
-                    background: faceDetectStatus === "detected" ? "rgba(46, 125, 50, 0.25)" : "rgba(230, 81, 0, 0.25)",
-                    color: faceDetectStatus === "detected" ? "#4ADE80" : "#FDBA74"
+                    background: faceDetectStatus === "detected" ? "rgba(46, 125, 50, 0.12)" : "rgba(230, 81, 0, 0.12)",
+                    color: faceDetectStatus === "detected" ? "#166534" : "#C2410C",
+                    border: faceDetectStatus === "detected" ? "1px solid #86EFAC" : "1px solid #FDBA74"
                   }}>
                     {faceDetectStatus === "loading" && t("faceMatching.analyzingPhoto", "Analyzing photo for face detection...")}
                     {faceDetectStatus === "detected" && t("faceMatching.faceDetectedReady", "Face detected & descriptor ready ✓")}
@@ -6472,6 +6565,7 @@ export default function App() {
 
                   <div className="photo-preview-actions">
                     <button
+                      type="button"
                       className="photo-pill-btn choose"
                       style={{ marginBottom: 0 }}
                       disabled={photoSaving}
@@ -6485,6 +6579,7 @@ export default function App() {
                       <RefreshCw size={16} /> {t("faceMatching.retake", "Retake")}
                     </button>
                     <button
+                      type="button"
                       className="photo-pill-btn take"
                       style={{ marginBottom: 0 }}
                       disabled={photoSaving}
@@ -6493,6 +6588,17 @@ export default function App() {
                       <Check size={18} /> {photoSaving ? t("common.saving", "Saving...") : t("faceMatching.savePhoto", "Save photo")}
                     </button>
                   </div>
+
+                  <button
+                    type="button"
+                    className="photo-pill-btn cancel"
+                    disabled={photoSaving}
+                    onClick={closeStudentModal}
+                    style={{ marginTop: 10, marginBottom: 0 }}
+                  >
+                    <X size={16} />
+                    <span>{t("common.cancel", "Cancel")}</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -6500,8 +6606,8 @@ export default function App() {
             <div className="card" style={{ padding: "14px", marginTop: 12 }}>
               <strong style={{ display: "block", fontSize: 13, marginBottom: 8 }}>{t("students.studentDetails", "Profile Details")}</strong>
               <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
-                <div>{t.guardian}: <strong>{localizeGuardianName(viewingStudent.guardianName, lang) || t("common.notRecorded", "Not recorded")}</strong></div>
-                <div>{t.phone}: <strong>{viewingStudent.guardianPhone || t("common.notRecorded", "Not recorded")}</strong></div>
+                <div>{t.guardian}: <strong className="notranslate" translate="no">{localizeGuardianName(viewingStudent.guardianName, lang) || t("common.notRecorded", "Not recorded")}</strong></div>
+                <div>{t.phone}: <strong className="notranslate" translate="no">{viewingStudent.guardianPhone || t("common.notRecorded", "Not recorded")}</strong></div>
                 <div>{t("students.consent", "Photo Consent")}: <strong>{viewingStudent.consentGiven ? t("common.granted", "Granted ✓") : t("common.optedOut", "Opted out")}</strong></div>
                 <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>
                   {t("faceMatching.photoPreserveNotice", "* Updating reference photo preserves all historical attendance records safely.")}
@@ -6578,7 +6684,7 @@ export default function App() {
                   <button
                     className="btn secondary"
                     onClick={() => {
-                      setViewingStudent(viewingStudentProfile);
+                      openPhotoManager(viewingStudentProfile);
                     }}
                     style={{ minHeight: 30, padding: "4px 10px", fontSize: 11 }}
                   >

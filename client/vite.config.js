@@ -9,9 +9,9 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg"],
       manifest: {
-        name: "Madrasa Amanah - Smart Attendance",
-        short_name: "Madrasa Attendance",
-        description: "Offline-first smart attendance system for Madrasa Amanah",
+        name: "Darul Uloom Ashrafia - Smart Attendance",
+        short_name: "Darul Uloom",
+        description: "Offline-first smart attendance system for Darul Uloom Ashrafia, Atmakur (Regd. No. 243/2023)",
         theme_color: "#174B36",
         background_color: "#F7F6F0",
         display: "standalone",
