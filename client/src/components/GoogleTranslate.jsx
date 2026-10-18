@@ -14,32 +14,6 @@ export default function GoogleTranslate({ compact = false }) {
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    // If Google Translate is already available on window, mount it
-    if (window.google && window.google.translate && window.google.translate.TranslateElement) {
-      initGoogleTranslate();
-      return;
-    }
-
-    // Set callback on window
-    window.googleTranslateElementInit = () => {
-      initGoogleTranslate();
-    };
-
-    // If script already exists in document, do not re-add
-    const existingScript = document.getElementById("google-translate-script");
-    if (!existingScript) {
-      const script = document.createElement("script");
-      script.id = "google-translate-script";
-      script.type = "text/javascript";
-      script.src = "//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
-      script.async = true;
-      script.onerror = () => {
-        console.warn("Google Translate script failed to load (offline or blocked).");
-        setLoadError(true);
-      };
-      document.body.appendChild(script);
-    }
-
     function initGoogleTranslate() {
       try {
         const container = document.getElementById("google_translate_element");
@@ -58,6 +32,32 @@ export default function GoogleTranslate({ compact = false }) {
       } catch (e) {
         console.warn("Google Translate init warning:", e);
       }
+    }
+
+    // If Google Translate is already available on window, mount it
+    if (window.google && window.google.translate && window.google.translate.TranslateElement) {
+      initGoogleTranslate();
+      return;
+    }
+
+    // Set callback on window
+    window.googleTranslateElementInit = () => {
+      initGoogleTranslate();
+    };
+
+    // If script already exists in document, do not re-add
+    const existingScript = document.getElementById("google-translate-script");
+    if (!existingScript) {
+      const script = document.createElement("script");
+      script.id = "google-translate-script";
+      script.type = "text/javascript";
+      script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
+      script.async = true;
+      script.onerror = () => {
+        console.warn("Google Translate script failed to load (offline or blocked).");
+        setLoadError(true);
+      };
+      document.body.appendChild(script);
     }
   }, []);
 

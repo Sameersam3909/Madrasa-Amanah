@@ -7497,23 +7497,8 @@ export default function App() {
   );
 }
 
-function LanguageSelect({ lang, setLang }) {
-  return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-      <select
-        className="language-select notranslate"
-        translate="no"
-        aria-label="Language selection"
-        value={lang}
-        onChange={(e) => setLang(e.target.value)}
-      >
-        <option value="en">English</option>
-        <option value="ur">اردو</option>
-        <option value="te">తెలుగు</option>
-      </select>
-      <GoogleTranslate compact />
-    </div>
-  );
+function LanguageSelect() {
+  return <GoogleTranslate compact />;
 }
 
 function Empty({ title, subtitle }) {
