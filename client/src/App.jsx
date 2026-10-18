@@ -2665,18 +2665,28 @@ export default function App() {
       <div className="login-screen">
         <form className="login-card" onSubmit={signIn}>
           <div style={{ textAlign: "center", marginBottom: 20 }}>
-            <div style={{ marginBottom: 12, display: "flex", justifyContent: "center", padding: "4px 8px" }}>
+            <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", alignItems: "center" }}>
               <img
                 src="/logo-transparent.png"
                 alt="DARUL ULOOM ASHRAFIA • ATMAKUR • Regd. No. 243/2023"
                 style={{
-                  width: "100%",
-                  maxWidth: 290,
-                  height: "auto",
+                  width: 105,
+                  height: 105,
                   objectFit: "contain",
-                  display: "block"
+                  display: "block",
+                  marginBottom: 10,
+                  filter: "drop-shadow(0 4px 12px rgba(23, 75, 54, 0.12))"
                 }}
               />
+              <h1 className="arabic-brand-title notranslate" translate="no" style={{ fontSize: 24, margin: "0 0 2px", color: "var(--primary)" }}>
+                دارالعلوم اشرفیہ
+              </h1>
+              <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: 0.8, color: "var(--primary)", marginBottom: 2 }}>
+                DARUL ULOOM ASHRAFIA
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", letterSpacing: 0.5, marginBottom: 8 }}>
+                ATMAKUR · Regd. No. 243/2023
+              </div>
             </div>
             <div style={{
               display: "inline-block",
@@ -2759,23 +2769,32 @@ export default function App() {
         <div style={{ marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid var(--border)", textAlign: "center" }}>
           <img
             src="/logo-transparent.png"
-            alt="DARUL ULOOM ASHRAFIA, ATMAKUR • Regd. No. 243/2023"
+            alt="DARUL ULOOM ASHRAFIA • ATMAKUR"
             style={{
-              width: "100%",
-              maxWidth: 215,
-              height: "auto",
+              width: 70,
+              height: 70,
               objectFit: "contain",
               display: "block",
-              margin: "0 auto 8px"
+              margin: "0 auto 8px",
+              filter: "drop-shadow(0 2px 8px rgba(23, 75, 54, 0.1))"
             }}
           />
+          <div className="arabic-brand-title notranslate" translate="no" style={{ fontSize: 18, margin: "0 0 2px", color: "var(--primary)", lineHeight: 1.2 }}>
+            دارالعلوم اشرفیہ
+          </div>
+          <strong style={{ fontSize: 12.5, display: "block", color: "var(--primary)", letterSpacing: 0.5 }}>
+            DARUL ULOOM ASHRAFIA
+          </strong>
+          <small style={{ fontSize: 10, color: "var(--muted)", display: "block", marginBottom: 6 }}>
+            ATMAKUR · Regd. No. 243/2023
+          </small>
           <div style={{
             display: "inline-block",
             background: "var(--primary-subtle)",
             color: "var(--primary)",
-            padding: "3px 10px",
-            borderRadius: 8,
-            fontSize: 11,
+            padding: "2px 8px",
+            borderRadius: 6,
+            fontSize: 10.5,
             fontWeight: 600
           }}>
             {t.tagline || "Smart Attendance System"}
@@ -2883,9 +2902,8 @@ export default function App() {
             src="/logo-transparent.png"
             alt="DARUL ULOOM ASHRAFIA Logo"
             style={{
+              width: 36,
               height: 36,
-              maxWidth: 95,
-              width: "auto",
               objectFit: "contain",
               flexShrink: 0
             }}
