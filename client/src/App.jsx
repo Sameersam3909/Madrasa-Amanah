@@ -97,6 +97,7 @@ import GoogleTranslate from "./components/GoogleTranslate.jsx";
 import { getStudentDisplayName, getStudentNameDir, matchesStudentSearch } from "./utils/studentName.js";
 import { sortStudentsByRoll, compareStudentsByClassAndRoll } from "./utils/studentSort.js";
 import { checkImageQuality, evaluateFaceMatch } from "./utils/faceQuality.js";
+import { matchFacesToRoster, THRESHOLDS, getCalibratedMatchScore } from "./utils/faceMatching.js";
 
 const today = () => new Date().toLocaleDateString("en-CA");
 const errText = (e) => {
@@ -359,6 +360,9 @@ export default function App() {
   const [photoZoom, setPhotoZoom] = useState(1);
   const [showUnmatchedEnrolled, setShowUnmatchedEnrolled] = useState(false);
   const [detected, setDetected] = useState([]);
+  const [scanSessionMeta, setScanSessionMeta] = useState(null);
+  const [bulkConfirmModal, setBulkConfirmModal] = useState(null);
+  const [showClearPhotoConfirm, setShowClearPhotoConfirm] = useState(false);
   const [classForm, setClassForm] = useState({ name: "", section: "Morning", academicYear: "1447-1448 / 2026" });
   const [report, setReport] = useState([]);
   const [reportRange, setReportRange] = useState({
@@ -1056,6 +1060,27 @@ export default function App() {
     }
   }, [token, user, selectedClass, dateKey, sessionKey, tab]);
 
+  // Invalidate stale group photo scan if class, date, or session changes
+  useEffect(() => {
+    if (scanSessionMeta && classPhoto) {
+      if (
+        scanSessionMeta.classId !== selectedClass ||
+        scanSessionMeta.sessionKey !== sessionKey ||
+        scanSessionMeta.dateKey !== dateKey
+      ) {
+        if (classPhoto && classPhoto.startsWith("blob:")) {
+          try { URL.revokeObjectURL(classPhoto); } catch {}
+        }
+        setClassPhoto(null);
+        setDetected([]);
+        setActiveInspectFace(null);
+        setPhotoProcessingStage("");
+        setScanSessionMeta(null);
+        setNotice("Class or session changed. Group photo scan results cleared for the new session.");
+      }
+    }
+  }, [selectedClass, sessionKey, dateKey]);
+
   async function loadStudentsAndAttendanceOfflineFirst(classId, date, session) {
     if (!classId) {
       setStudents([]);
@@ -1690,31 +1715,42 @@ export default function App() {
     }
   }
 
-  // Camera Management (getUserMedia) — prevents black screen on laptops & mobiles
-  async function startCamera(facing = "user", mode = "student-profile") {
+  // Camera Management (getUserMedia) — landscape 16:9 for classroom group photos
+  async function startCamera(facing = "environment", mode = "class-attendance") {
+    if (mode === "class-attendance" && !selectedClass) {
+      setError("Please select a Class before opening the classroom attendance camera.");
+      return;
+    }
+
     setCameraFacing(facing);
     setCameraMode(mode);
     stopCamera();
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Direct camera access not supported on this browser.");
+        throw new Error("Direct camera access is not supported on this browser or requires HTTPS.");
       }
 
       let stream = null;
+      const isLandscapeGroup = mode === "class-attendance";
+
       try {
-        // 1. Try requested ideal facing mode
+        // 1. Request ideal 16:9 widescreen constraints for classroom group attendance
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: facing ? { ideal: facing } : undefined,
-            width: { ideal: 1280, min: 320 },
-            height: { ideal: 720, min: 240 }
+            facingMode: facing ? { ideal: facing } : { ideal: "environment" },
+            width: isLandscapeGroup ? { ideal: 1920, min: 640 } : { ideal: 1280, min: 320 },
+            height: isLandscapeGroup ? { ideal: 1080, min: 480 } : { ideal: 720, min: 240 },
+            aspectRatio: isLandscapeGroup ? { ideal: 1.7777777778 } : undefined
           },
           audio: false
         });
       } catch (e1) {
-        // 2. Resilient fallback for desktop webcams that don't support facingMode constraints
-        console.warn("Facing constraint failed, falling back to basic video:", e1.message);
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        // 2. Resilient fallback for desktop webcams that don't support advanced aspect ratio constraints
+        console.warn("Advanced camera constraint failed, falling back to basic video:", e1.message);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: facing ? { facingMode: facing } : true,
+          audio: false
+        });
       }
 
       if (!stream) throw new Error("Could not initialize camera stream.");
@@ -1750,7 +1786,9 @@ export default function App() {
 
   function stopCamera() {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach((track) => {
+        try { track.stop(); } catch {}
+      });
       streamRef.current = null;
     }
     if (videoRef.current) {
@@ -1771,8 +1809,9 @@ export default function App() {
     canvas.width = vw;
     canvas.height = vh;
     const ctx = canvas.getContext("2d");
+    // Preserve natural orientation and resolution for neural face detector
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
     const currentMode = cameraMode;
     stopCamera();
 
@@ -2116,14 +2155,25 @@ export default function App() {
   // Classroom Photo Recognition — supports File upload and direct camera dataUrl
   async function processClassPhoto(fileOrDataUrl) {
     if (!fileOrDataUrl) return;
+    if (!selectedClass) {
+      setError("Please select a Class before scanning classroom group photos.");
+      return;
+    }
+
+    // Revoke previous blob URL if exists
+    if (classPhoto && classPhoto.startsWith("blob:")) {
+      try { URL.revokeObjectURL(classPhoto); } catch {}
+    }
+
     setDetected([]);
     setError("");
     setPhotoProcessingStage("Initializing image for scanning...");
     setNotice("Scanning photo for student faces...");
+    setScanSessionMeta({ classId: selectedClass, sessionKey, dateKey });
 
     try {
-      if (typeof fileOrDataUrl !== "string" && fileOrDataUrl.size > 12 * 1024 * 1024) {
-        throw new Error("Please select a photo under 12 MB.");
+      if (typeof fileOrDataUrl !== "string" && fileOrDataUrl.size > 15 * 1024 * 1024) {
+        throw new Error("Please select a photo under 15 MB.");
       }
 
       let photoUrl = "";
@@ -2152,7 +2202,7 @@ export default function App() {
       setPhotoProcessingStage("Checking photo brightness, blur & quality...");
       const qualityCheck = checkImageQuality(img);
       if (!qualityCheck.ok) {
-        setNotice(qualityCheck.message + " Face detection will still proceed, but low light/blur may reduce accuracy.");
+        setNotice(qualityCheck.message + " Face detection will proceed, but low light or blur may reduce recognition accuracy.");
       }
 
       setPhotoProcessingStage("Loading neural face-detection models...");
@@ -2160,82 +2210,36 @@ export default function App() {
 
       setPhotoProcessingStage("Detecting all faces in group photo...");
       const found = await faceapi
-        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.38 }))
+        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: 0.35 }))
         .withFaceLandmarks()
         .withFaceDescriptors();
 
       setPhotoProcessingStage("Matching detected faces against class roster...");
-      let index = [];
+      let rosterWithDescriptors = [];
       try {
         const indexRes = await api.get("/students/face-index", { params: { classId: selectedClass } });
-        index = indexRes.data.filter((s) => Array.isArray(s.faceDescriptor) && s.faceDescriptor.length);
+        rosterWithDescriptors = indexRes.data.filter((s) => Array.isArray(s.faceDescriptor) && s.faceDescriptor.length === 128);
       } catch {
         const localStudents = await offlineDb.students.where("classId").equals(String(selectedClass)).toArray();
-        index = localStudents.filter((s) => Array.isArray(s.faceDescriptor) && s.faceDescriptor.length);
+        rosterWithDescriptors = localStudents.filter((s) => Array.isArray(s.faceDescriptor) && s.faceDescriptor.length === 128);
       }
 
-      // Assign candidates while strictly preventing duplicate automatic assignments across faces
-      const assignedCandidateIds = new Set();
-      const matches = found.map((face, i) => {
-        const d = Array.from(face.descriptor);
-        const ranked = index
-          .map((s) => ({ student: s, distance: distance(d, s.faceDescriptor) }))
-          .sort((a, b) => a.distance - b.distance);
-
-        // Best unassigned candidate for this face
-        const best = ranked.find((r) => !assignedCandidateIds.has(String(r.student.id || r.student._id)));
-        const secondBest = ranked.find((r) => r !== best);
-
-        const isAmbiguous = Boolean(
-          best &&
-          secondBest &&
-          (secondBest.distance - best.distance < 0.04) &&
-          best.distance > 0.42
-        );
-
-        // Use calibrated face quality scoring for confidence
-        const matchEval = best ? evaluateFaceMatch(best.distance, isAmbiguous) : { confidencePct: 0, isConfident: false };
-        const confident = Boolean(best && matchEval.isConfident);
-        const confidencePct = matchEval.confidencePct;
-
-        const assignedStudent = confident ? best.student : null;
-        const assignedStudentId = assignedStudent ? String(assignedStudent.id || assignedStudent._id) : "";
-        if (assignedStudentId) {
-          assignedCandidateIds.add(assignedStudentId);
-        }
-
-        const box = face.detection?.box ? {
-          x: Math.round(face.detection.box.x),
-          y: Math.round(face.detection.box.y),
-          width: Math.round(face.detection.box.width),
-          height: Math.round(face.detection.box.height)
-        } : null;
-
-        return {
-          faceNo: i + 1,
-          box,
-          descriptor: d,
-          studentId: assignedStudentId,
-          matchName: assignedStudent ? (assignedStudent.name || "") : (best?.student?.name || ""),
-          matchAdmissionNo: assignedStudent
-            ? (assignedStudent.admissionNo || assignedStudent.admissionNumber || "")
-            : (best?.student?.admissionNo || best?.student?.admissionNumber || ""),
-          photoUrl: assignedStudent?.photoUrl || best?.student?.photoUrl || null,
-          distance: best ? best.distance : null,
-          confidencePct,
-          isAmbiguous,
-          isManual: false,
-          confirmed: false
-        };
-      });
+      // Execute calibrated bipartite face-to-roster matching
+      const matches = matchFacesToRoster(found, rosterWithDescriptors);
 
       setDetected(matches);
       setPhotoProcessingStage("Ready for review");
+
       if (!found.length) {
-        setNotice("No faces detected in this photo. You can mark attendance manually below or try another angle.");
+        setNotice("No faces detected in this photo. You can mark attendance manually below or try capturing from a clearer angle.");
+      } else if (!rosterWithDescriptors.length) {
+        setNotice(`Detected ${found.length} face(s), but no registered student reference photos were found for this class. Please assign students manually.`);
       } else {
-        const recognizedCount = matches.filter((m) => m.studentId).length;
-        setNotice(`Detected ${found.length} face(s) (${recognizedCount} recognized with high confidence). Please review and confirm.`);
+        const confidentCount = matches.filter((m) => m.tier === "high" && !m.isAmbiguous).length;
+        const ambiguousCount = matches.filter((m) => m.isAmbiguous).length;
+        setNotice(
+          `Detected ${found.length} face(s): ${confidentCount} high-confidence, ${ambiguousCount} ambiguous. Please review each candidate before confirming.`
+        );
       }
     } catch (e) {
       setPhotoProcessingStage("");
@@ -2243,73 +2247,211 @@ export default function App() {
     }
   }
 
-  function confirmFaceMatch(faceNo, status = "present") {
+  async function confirmFaceMatch(faceNo, status = "present") {
     const item = detected.find((f) => f.faceNo === faceNo);
-    if (!item || !item.studentId) return;
+    if (!item || !item.studentId) {
+      setError(`Please select a student for Face #${faceNo} before confirming.`);
+      return;
+    }
+
+    const sid = String(item.studentId);
+
+    // Verify duplicate conflict
+    const isDuplicate = detected.some(
+      (other) => other.faceNo !== faceNo && String(other.studentId) === sid && !other.dismissed
+    );
+    if (isDuplicate) {
+      setError("Duplicate student assigned to multiple faces. Each student can only be confirmed once.");
+      return;
+    }
 
     setDetected((prev) =>
-      prev.map((f) => (f.faceNo === faceNo ? { ...f, confirmed: true } : f))
+      prev.map((f) => (f.faceNo === faceNo ? { ...f, confirmed: true, dismissed: false } : f))
     );
 
     setRecords((prev) => ({
       ...prev,
-      [item.studentId]: { ...(prev[item.studentId] || {}), status }
+      [sid]: { ...(prev[sid] || {}), status }
     }));
+
+    try {
+      await saveAttendanceLocally({
+        classId: selectedClass,
+        dateKey,
+        sessionKey,
+        source: "photo-assisted",
+        records: [{ studentId: sid, status }]
+      });
+      await refreshSyncStatus();
+    } catch (e) {
+      console.warn("Local draft update warning:", e.message);
+    }
 
     setNotice(`Confirmed ${item.matchName || "Student"} as ${status} ✓`);
   }
 
-  function confirmAllFaceMatches() {
-    let count = 0;
-    const updatedRecords = { ...records };
-    // Check for duplicate assignments across candidates before confirming all
-    const seenIds = new Set();
+  function changeFaceStudent(faceNo, newStudentId) {
+    const matched = students.find((s) => String(s._id || s.id) === String(newStudentId));
+
+    setDetected((prev) => {
+      const oldItem = prev.find((f) => f.faceNo === faceNo);
+      const oldStudentId = oldItem?.studentId;
+
+      // If previous student was marked present, remove the old record so it's not retained
+      if (oldStudentId && oldStudentId !== newStudentId && records[oldStudentId]?.status === "present") {
+        setRecords((prevRec) => {
+          const next = { ...prevRec };
+          delete next[oldStudentId];
+          return next;
+        });
+      }
+
+      return prev.map((f) => {
+        if (f.faceNo !== faceNo) return f;
+        return {
+          ...f,
+          studentId: newStudentId || "",
+          matchName: matched ? matched.name : "",
+          matchAdmissionNo: matched ? (matched.admissionNo || matched.admissionNumber || "") : "",
+          photoUrl: matched?.photoUrl || null,
+          isManual: Boolean(newStudentId),
+          tier: newStudentId ? "high" : "none",
+          confidencePct: newStudentId ? 100 : 0,
+          scoreDescription: newStudentId ? "Selected manually by teacher" : "No student assigned",
+          isAmbiguous: false,
+          confirmed: false,
+          dismissed: false
+        };
+      });
+    });
+  }
+
+  function dismissFaceMatch(faceNo) {
+    setDetected((prev) =>
+      prev.map((f) => {
+        if (f.faceNo !== faceNo) return f;
+        // If candidate had a confirmed record, remove it
+        if (f.studentId && records[f.studentId]?.status === "present") {
+          setRecords((prevRec) => {
+            const next = { ...prevRec };
+            delete next[f.studentId];
+            return next;
+          });
+        }
+        return { ...f, dismissed: true, confirmed: false };
+      })
+    );
+    setNotice(`Face #${faceNo} dismissed. (Click "Undo" to restore if needed)`);
+  }
+
+  function restoreFaceMatch(faceNo) {
+    setDetected((prev) =>
+      prev.map((f) => (f.faceNo === faceNo ? { ...f, dismissed: false } : f))
+    );
+    setNotice(`Face #${faceNo} restored for review.`);
+  }
+
+  function openBulkConfirmDialog() {
+    const assignedIds = new Set();
     const duplicateIds = new Set();
     for (const f of detected) {
-      if (f.studentId) {
-        if (seenIds.has(f.studentId)) duplicateIds.add(f.studentId);
-        seenIds.add(f.studentId);
+      if (f.studentId && !f.dismissed) {
+        if (assignedIds.has(f.studentId)) duplicateIds.add(f.studentId);
+        assignedIds.add(f.studentId);
       }
     }
 
+    const eligible = detected.filter(
+      (f) =>
+        f.studentId &&
+        !f.confirmed &&
+        !f.dismissed &&
+        !f.isAmbiguous &&
+        (f.tier === "high" || f.isManual) &&
+        !duplicateIds.has(f.studentId)
+    );
+
+    const excluded = detected.filter(
+      (f) => !f.confirmed && !f.dismissed && !eligible.some((e) => e.faceNo === f.faceNo)
+    );
+
+    if (!eligible.length) {
+      setError("No eligible high-confidence candidates found for bulk confirmation. Please review and assign ambiguous or unmatched faces manually.");
+      return;
+    }
+
+    setBulkConfirmModal({
+      eligible,
+      excluded,
+      count: eligible.length
+    });
+  }
+
+  async function executeBulkConfirm() {
+    if (!bulkConfirmModal || !bulkConfirmModal.eligible.length) return;
+
+    const eligibleStudents = bulkConfirmModal.eligible;
+    const updatedRecords = { ...records };
+    const localBatch = [];
+
+    eligibleStudents.forEach((c) => {
+      updatedRecords[c.studentId] = { ...(updatedRecords[c.studentId] || {}), status: "present" };
+      localBatch.push({ studentId: c.studentId, status: "present" });
+    });
+
     setDetected((prev) =>
       prev.map((f) => {
-        if (f.studentId && !duplicateIds.has(f.studentId) && !f.confirmed) {
-          updatedRecords[f.studentId] = { ...(updatedRecords[f.studentId] || {}), status: "present" };
-          count++;
+        if (eligibleStudents.some((e) => e.faceNo === f.faceNo)) {
           return { ...f, confirmed: true };
         }
         return f;
       })
     );
-    setRecords(updatedRecords);
-    if (duplicateIds.size > 0) {
-      setError(`Some face suggestions have duplicate student assignments. Please verify them individually.`);
-    } else {
-      setNotice(`Confirmed all ${count} recognized student(s) as Present ✓. Click "Save Attendance" to persist.`);
-    }
-  }
 
-  function changeFaceStudent(faceNo, newStudentId) {
-    const matched = students.find((s) => String(s._id || s.id) === String(newStudentId));
-    setDetected((prev) =>
-      prev.map((f) => {
-        if (f.faceNo !== faceNo) return f;
-        return {
-          ...f,
-          studentId: newStudentId,
-          matchName: matched ? matched.name : "",
-          matchAdmissionNo: matched ? (matched.admissionNo || matched.admissionNumber || "") : "",
-          photoUrl: matched?.photoUrl || null,
-          isManual: Boolean(newStudentId),
-          confirmed: false
-        };
-      })
+    setRecords(updatedRecords);
+
+    try {
+      await saveAttendanceLocally({
+        classId: selectedClass,
+        dateKey,
+        sessionKey,
+        source: "photo-assisted",
+        records: localBatch
+      });
+      await refreshSyncStatus();
+    } catch (e) {
+      console.warn("Bulk local draft warning:", e.message);
+    }
+
+    const count = eligibleStudents.length;
+    const excludedCount = bulkConfirmModal.excluded.length;
+    setBulkConfirmModal(null);
+    setNotice(
+      `Confirmed ${count} high-confidence student(s) as Present ✓.${
+        excludedCount > 0 ? ` ${excludedCount} ambiguous/unmatched face(s) remain for manual verification.` : ""
+      }`
     );
   }
 
-  function dismissFaceMatch(faceNo) {
-    setDetected((prev) => prev.filter((f) => f.faceNo !== faceNo));
+  function handleClearPhoto() {
+    if (detected.length > 0) {
+      setShowClearPhotoConfirm(true);
+    } else {
+      doClearPhoto();
+    }
+  }
+
+  function doClearPhoto() {
+    if (classPhoto && classPhoto.startsWith("blob:")) {
+      try { URL.revokeObjectURL(classPhoto); } catch {}
+    }
+    setClassPhoto(null);
+    setDetected([]);
+    setActiveInspectFace(null);
+    setPhotoProcessingStage("");
+    setScanSessionMeta(null);
+    setShowClearPhotoConfirm(false);
+    setNotice("Classroom photo and detection workspace cleared.");
   }
 
   // Reports
@@ -3096,29 +3238,75 @@ export default function App() {
               {(classPhoto || detected.length > 0) && (() => {
                 const assignedFaceMap = {};
                 for (const f of detected) {
-                  if (f.studentId) {
+                  if (f.studentId && !f.dismissed) {
                     assignedFaceMap[f.studentId] = f.faceNo;
                   }
                 }
 
-                const confidentCount = detected.filter((f) => f.confidencePct >= 70 && !f.isAmbiguous).length;
-                const uncertainCount = detected.filter((f) => ((f.confidencePct >= 40 && f.confidencePct < 70) || f.isAmbiguous)).length;
-                const unmatchedCount = detected.filter((f) => !f.studentId || f.confidencePct < 40).length;
-                const assignedStudentIds = new Set(detected.filter((f) => f.studentId).map((f) => String(f.studentId)));
+                const confidentCount = detected.filter((f) => !f.dismissed && f.tier === "high" && !f.isAmbiguous).length;
+                const uncertainCount = detected.filter((f) => !f.dismissed && (f.isAmbiguous || f.tier === "ambiguous" || f.tier === "moderate")).length;
+                const unmatchedCount = detected.filter((f) => !f.dismissed && (!f.studentId || f.tier === "none")).length;
+                const dismissedCount = detected.filter((f) => f.dismissed).length;
+                const confirmedCount = detected.filter((f) => f.confirmed).length;
+
+                const assignedStudentIds = new Set(
+                  detected.filter((f) => f.studentId && !f.dismissed).map((f) => String(f.studentId))
+                );
                 const unmatchedStudents = students.filter((s) => !assignedStudentIds.has(String(s._id || s.id)));
 
                 return (
                   <div className="group-photo-panel">
-                    {/* Header: Title, Controls, Zoom, Retake */}
+                    {/* WORKFLOW STEPPER */}
+                    <div className="group-photo-steps">
+                      <div className="group-photo-step completed">
+                        <span className="group-photo-step-num">✓</span>
+                        <span>1. Class Selected</span>
+                      </div>
+                      <span className="group-photo-step-sep">›</span>
+                      <div className="group-photo-step completed">
+                        <span className="group-photo-step-num">✓</span>
+                        <span>2. Photo Captured</span>
+                      </div>
+                      <span className="group-photo-step-sep">›</span>
+                      <div className={`group-photo-step ${detected.length > 0 ? "completed" : "active"}`}>
+                        <span className="group-photo-step-num">{detected.length > 0 ? "✓" : "3"}</span>
+                        <span>3. Faces Detected</span>
+                      </div>
+                      <span className="group-photo-step-sep">›</span>
+                      <div className={`group-photo-step ${detected.length > 0 ? "active" : ""}`}>
+                        <span className="group-photo-step-num">4</span>
+                        <span>4. Review Candidates</span>
+                      </div>
+                      <span className="group-photo-step-sep">›</span>
+                      <div className={`group-photo-step ${confirmedCount > 0 ? "completed" : ""}`}>
+                        <span className="group-photo-step-num">{confirmedCount > 0 ? "✓" : "5"}</span>
+                        <span>5. Confirm Attendance</span>
+                      </div>
+                    </div>
+
+                    {/* Header: Title, Class/Session, Controls, Zoom, Retake */}
                     <div className="group-photo-header">
-                      <div className="group-photo-title">
-                        <Camera size={18} color="var(--primary)" />
-                        <span>Classroom Group Photo ({formatNumber(detected.length, lang)} {detected.length === 1 ? "face" : "faces"} detected)</span>
-                        {photoProcessingStage && (
-                          <span style={{ fontSize: 11, fontWeight: 500, color: "var(--muted)", padding: "2px 8px", background: "var(--surface-secondary, #F1F5F9)", borderRadius: 12 }}>
-                            {photoProcessingStage}
+                      <div className="group-photo-title-area">
+                        <div className="group-photo-title">
+                          <Camera size={18} color="var(--primary)" />
+                          <span>Classroom Group Photo Review</span>
+                          {photoProcessingStage && (
+                            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--primary)", padding: "2px 8px", background: "var(--primary-subtle)", borderRadius: 12 }}>
+                              {photoProcessingStage}
+                            </span>
+                          )}
+                        </div>
+                        <div className="group-photo-subtitle">
+                          <strong>{activeClass ? activeClass.name : "Class"}</strong>
+                          <span>•</span>
+                          <span>{localizeSection(sessionKey, lang)}</span>
+                          <span>•</span>
+                          <span>{formatDate(dateKey, lang)}</span>
+                          <span>•</span>
+                          <span style={{ fontWeight: 700, color: "var(--text)" }}>
+                            {formatNumber(detected.length, lang)} {detected.length === 1 ? "face" : "faces"} detected
                           </span>
-                        )}
+                        </div>
                       </div>
 
                       <div className="group-photo-controls">
@@ -3128,7 +3316,7 @@ export default function App() {
                               type="button"
                               className="btn secondary"
                               style={{ minHeight: 30, padding: "2px 8px", fontSize: 11 }}
-                              onClick={() => setPhotoZoom((z) => Math.max(0.6, Number((z - 0.25).toFixed(2))))}
+                              onClick={() => setPhotoZoom((z) => Math.max(0.5, Number((z - 0.25).toFixed(2))))}
                               title="Zoom Out"
                             >
                               <ZoomOut size={13} />
@@ -3152,7 +3340,7 @@ export default function App() {
                               onClick={() => setPhotoZoom(1)}
                               title="Reset Zoom"
                             >
-                              1x
+                              100%
                             </button>
                           </>
                         )}
@@ -3166,13 +3354,24 @@ export default function App() {
                           <Camera size={13} /> Retake
                         </button>
 
+                        <label
+                          htmlFor="class-photo-replace-input"
+                          className="btn secondary"
+                          style={{ minHeight: 30, padding: "2px 10px", fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                        >
+                          <Upload size={13} /> Replace
+                        </label>
+                        <input
+                          id="class-photo-replace-input"
+                          type="file"
+                          accept="image/*"
+                          style={{ display: "none" }}
+                          onChange={(e) => processClassPhoto(e.target.files?.[0])}
+                        />
+
                         <button
                           type="button"
-                          onClick={() => {
-                            setClassPhoto(null);
-                            setDetected([]);
-                            setActiveInspectFace(null);
-                          }}
+                          onClick={handleClearPhoto}
                           style={{ background: "none", border: "none", color: "var(--muted)", padding: 4, cursor: "pointer", display: "grid", placeItems: "center" }}
                           title="Clear Photo & Suggestions"
                         >
@@ -3186,7 +3385,11 @@ export default function App() {
                       <div className="group-photo-viewport">
                         <div
                           className="group-photo-canvas-wrap"
-                          style={{ transform: `scale(${photoZoom})` }}
+                          style={{
+                            aspectRatio: photoDims.width && photoDims.height ? `${photoDims.width} / ${photoDims.height}` : "16 / 9",
+                            maxWidth: photoDims.width ? `${photoDims.width}px` : "100%",
+                            transform: `scale(${photoZoom})`
+                          }}
                         >
                           <img
                             src={classPhoto}
@@ -3202,34 +3405,45 @@ export default function App() {
                             >
                               {detected.map((f) => {
                                 if (!f.box) return null;
-                                const isConf = f.confirmed || (f.confidencePct >= 70 && !f.isAmbiguous);
-                                const isUncert = (f.confidencePct >= 40 && f.confidencePct < 70) || f.isAmbiguous;
-                                const boxColor = isConf ? "#10B981" : isUncert ? "#F59E0B" : "#EF4444";
+                                const isConf = f.confirmed;
+                                const isHigh = f.tier === "high" && !f.isAmbiguous;
+                                const isAmbiguous = f.isAmbiguous;
+                                const isDismissed = f.dismissed;
+                                const boxColor = isConf ? "#10B981" : isDismissed ? "#94A3B8" : isHigh ? "#0284C7" : isAmbiguous ? "#D97706" : "#EF4444";
                                 const isSelected = activeInspectFace === f.faceNo;
 
                                 return (
-                                  <g key={f.faceNo} onClick={() => setActiveInspectFace(f.faceNo)} style={{ cursor: "pointer" }}>
+                                  <g
+                                    key={f.faceNo}
+                                    onClick={() => {
+                                      setActiveInspectFace(f.faceNo);
+                                      const cardEl = document.getElementById(`candidate-card-${f.faceNo}`);
+                                      if (cardEl) cardEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                                    }}
+                                    style={{ cursor: "pointer" }}
+                                  >
                                     <rect
                                       x={f.box.x}
                                       y={f.box.y}
                                       width={f.box.width}
                                       height={f.box.height}
-                                      fill={boxColor + "28"}
+                                      fill={boxColor + (isDismissed ? "15" : "28")}
                                       stroke={boxColor}
                                       strokeWidth={isSelected ? 4 : 2}
+                                      strokeDasharray={isDismissed ? "4 4" : "none"}
                                       rx={4}
                                       className={`group-photo-box ${isSelected ? "active" : ""}`}
                                     />
                                     <rect
                                       x={f.box.x}
                                       y={Math.max(0, f.box.y - 18)}
-                                      width={30}
+                                      width={32}
                                       height={18}
                                       rx={3}
                                       fill={boxColor}
                                     />
                                     <text
-                                      x={f.box.x + 15}
+                                      x={f.box.x + 16}
                                       y={Math.max(0, f.box.y - 5)}
                                       fill="#FFF"
                                       fontSize="11"
@@ -3247,15 +3461,39 @@ export default function App() {
                       </div>
                     )}
 
+                    {/* INTERACTIVE LEGEND BAR */}
+                    <div className="group-photo-legend">
+                      <div className="group-photo-legend-item">
+                        <span className="group-photo-legend-dot confirmed" />
+                        <span>Confirmed Present ({formatNumber(confirmedCount, lang)})</span>
+                      </div>
+                      <div className="group-photo-legend-item">
+                        <span className="group-photo-legend-dot high" />
+                        <span>High Confidence ({formatNumber(confidentCount, lang)})</span>
+                      </div>
+                      <div className="group-photo-legend-item">
+                        <span className="group-photo-legend-dot ambiguous" />
+                        <span>Ambiguous Review ({formatNumber(uncertainCount, lang)})</span>
+                      </div>
+                      <div className="group-photo-legend-item">
+                        <span className="group-photo-legend-dot unidentified" />
+                        <span>Unidentified Face ({formatNumber(unmatchedCount, lang)})</span>
+                      </div>
+                    </div>
+
                     {/* Match Summary Badges */}
                     <div className="match-summary-grid">
-                      <div className="match-summary-card confident">
+                      <div className="match-summary-card confirmed">
+                        <span className="match-summary-count">{formatNumber(confirmedCount, lang)}</span>
+                        <span className="match-summary-label">Confirmed Present</span>
+                      </div>
+                      <div className="match-summary-card high">
                         <span className="match-summary-count">{formatNumber(confidentCount, lang)}</span>
                         <span className="match-summary-label">High Confidence</span>
                       </div>
-                      <div className="match-summary-card uncertain">
+                      <div className="match-summary-card ambiguous">
                         <span className="match-summary-count">{formatNumber(uncertainCount, lang)}</span>
-                        <span className="match-summary-label">Uncertain / Ambiguous</span>
+                        <span className="match-summary-label">Ambiguous / Uncertain</span>
                       </div>
                       <div className="match-summary-card unmatched">
                         <span className="match-summary-count">{formatNumber(unmatchedCount, lang)}</span>
@@ -3269,19 +3507,24 @@ export default function App() {
 
                     {/* Face Suggestion Cards Section */}
                     {detected.length > 0 && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-                            Review Detected Face Matches ({formatNumber(detected.length, lang)})
-                          </span>
-                          {detected.some((f) => f.studentId && !f.confirmed) && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 4 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                          <div>
+                            <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)" }}>
+                              Review Detected Face Matches ({formatNumber(detected.length, lang)})
+                            </span>
+                            <small className="muted" style={{ display: "block", fontSize: 11 }}>
+                              Inspect and verify each face match below before confirming attendance.
+                            </small>
+                          </div>
+                          {detected.some((f) => f.studentId && !f.confirmed && !f.dismissed && !f.isAmbiguous && f.tier === "high") && (
                             <button
                               type="button"
                               className="btn primary"
-                              style={{ minHeight: 32, fontSize: 11.5, padding: "4px 12px" }}
-                              onClick={confirmAllFaceMatches}
+                              style={{ minHeight: 34, fontSize: 12, padding: "5px 14px" }}
+                              onClick={openBulkConfirmDialog}
                             >
-                              <Check size={13} /> {t.confirmAllPresent || "Confirm All High-Confidence Present"}
+                              <Check size={14} /> Confirm All High-Confidence Present
                             </button>
                           )}
                         </div>
@@ -3290,56 +3533,74 @@ export default function App() {
                           {detected.map((f) => {
                             const hasDuplicateConflict = Boolean(
                               f.studentId &&
-                              detected.some((other) => other.faceNo !== f.faceNo && String(other.studentId) === String(f.studentId))
+                              !f.dismissed &&
+                              detected.some((other) => other.faceNo !== f.faceNo && !other.dismissed && String(other.studentId) === String(f.studentId))
                             );
                             const isInspected = activeInspectFace === f.faceNo;
+                            const tierClass = f.confirmed
+                              ? "confirmed"
+                              : f.dismissed
+                              ? "dismissed"
+                              : f.isAmbiguous
+                              ? "tier-ambiguous"
+                              : f.tier === "high"
+                              ? "tier-high"
+                              : "tier-none";
 
                             return (
                               <div
                                 key={f.faceNo}
-                                className={`face-suggestion-card ${f.confirmed ? "confirmed" : hasDuplicateConflict ? "has-conflict" : ""} ${isInspected ? "active-inspect" : ""}`}
+                                id={`candidate-card-${f.faceNo}`}
+                                className={`face-suggestion-card ${tierClass} ${isInspected ? "active-inspect" : ""}`}
                                 onClick={() => setActiveInspectFace(f.faceNo)}
                                 style={{ zIndex: 10 }}
                               >
-                                <div className="face-suggestion-header">
-                                  <div className="face-candidate-title">
-                                    <strong>
-                                      {t.faceItem
-                                        ? t.faceItem.replace("{{number}}", formatNumber(f.faceNo, lang))
-                                        : `Face #${formatNumber(f.faceNo, lang)}`}
+                                <div className="face-candidate-meta-row">
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                    <strong style={{ fontSize: 13, color: "var(--text)" }}>
+                                      Face #{formatNumber(f.faceNo, lang)}
                                     </strong>
-                                    {f.confidencePct > 0 ? (
+                                    {f.distance !== null && f.distance !== undefined && (
                                       <span
                                         className={`face-confidence-tag ${
-                                          f.confidencePct >= 70 ? "high" : f.confidencePct >= 45 ? "medium" : "low"
+                                          f.tier === "high" ? "high" : f.tier === "moderate" ? "medium" : "low"
                                         }`}
                                       >
-                                        {f.confidencePct}% {t.match || "match"}
-                                      </span>
-                                    ) : (
-                                      <span className="face-confidence-tag low">
-                                        {t.unmatched || "Unmatched"}
+                                        {f.confidencePct}% match (distance: {f.distance})
                                       </span>
                                     )}
                                     {f.isAmbiguous && (
-                                      <span className="face-confidence-tag low" title="Similar distance to multiple students">
-                                        Ambiguous
+                                      <span className="face-confidence-tag low" title="Similar distance to multiple enrolled students">
+                                        Ambiguous Match
+                                      </span>
+                                    )}
+                                    {f.tier === "none" && !f.studentId && (
+                                      <span className="face-confidence-tag low">
+                                        No reliable match
                                       </span>
                                     )}
                                   </div>
 
                                   <span
                                     className={`face-status-badge ${
-                                      f.confirmed ? "confirmed" : f.isManual ? "manual" : "suggested"
+                                      f.confirmed ? "confirmed" : f.dismissed ? "manual" : f.isManual ? "manual" : "suggested"
                                     }`}
                                   >
                                     {f.confirmed
-                                      ? t.confirmed || "Confirmed"
+                                      ? "Confirmed Present ✓"
+                                      : f.dismissed
+                                      ? "Dismissed"
                                       : f.isManual
-                                      ? t.manuallySelected || "Manual"
-                                      : t.suggested || "Suggested"}
+                                      ? "Manually Selected"
+                                      : "AI Suggested"}
                                   </span>
                                 </div>
+
+                                {f.scoreDescription && (
+                                  <div style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+                                    {f.scoreDescription}
+                                  </div>
+                                )}
 
                                 {hasDuplicateConflict && (
                                   <div
@@ -3349,53 +3610,71 @@ export default function App() {
                                       fontWeight: 600,
                                       display: "flex",
                                       alignItems: "center",
-                                      gap: 5,
-                                      padding: "4px 8px",
+                                      gap: 6,
+                                      padding: "6px 10px",
                                       background: "#FEE2E2",
-                                      borderRadius: 4
+                                      borderRadius: 6
                                     }}
                                   >
-                                    <AlertCircle size={13} />
-                                    <span>{t.duplicateWarning || "Duplicate: This student is assigned to another face candidate."}</span>
+                                    <AlertCircle size={14} style={{ flexShrink: 0 }} />
+                                    <span>Duplicate: This student is assigned to another face candidate in this photo.</span>
                                   </div>
                                 )}
 
                                 {/* Searchable Student Combobox Dropdown */}
-                                <StudentSearchDropdown
-                                  students={students}
-                                  value={f.studentId}
-                                  onChange={(newId) => changeFaceStudent(f.faceNo, newId)}
-                                  currentFaceNo={f.faceNo}
-                                  assignedMap={assignedFaceMap}
-                                  placeholder={t.chooseStudent || "Choose student..."}
-                                  lang={lang}
-                                  t={t}
-                                />
+                                {!f.dismissed && (
+                                  <StudentSearchDropdown
+                                    students={students}
+                                    value={f.studentId}
+                                    onChange={(newId) => changeFaceStudent(f.faceNo, newId)}
+                                    currentFaceNo={f.faceNo}
+                                    assignedMap={assignedFaceMap}
+                                    placeholder={t.chooseStudent || "Choose student..."}
+                                    lang={lang}
+                                    t={t}
+                                  />
+                                )}
 
-                                <div className="face-suggestion-actions">
-                                  <button
-                                    type="button"
-                                    className="btn primary"
-                                    style={{ minHeight: 36, fontSize: 12, padding: "6px 12px", flex: 1 }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      confirmFaceMatch(f.faceNo, "present");
-                                    }}
-                                    disabled={!f.studentId || hasDuplicateConflict || f.confirmed}
-                                  >
-                                    <Check size={14} /> {f.confirmed ? (t.confirmed || "Confirmed Present ✓") : (t.confirmPresent || "Confirm Present")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="btn secondary"
-                                    style={{ minHeight: 36, fontSize: 12, padding: "6px 12px" }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      dismissFaceMatch(f.faceNo);
-                                    }}
-                                  >
-                                    <X size={14} /> {t.dismiss || "Dismiss"}
-                                  </button>
+                                <div className="face-suggestion-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  {!f.dismissed ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="btn primary"
+                                        style={{ minHeight: 36, fontSize: 12, padding: "6px 14px", flex: 1 }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          confirmFaceMatch(f.faceNo, "present");
+                                        }}
+                                        disabled={!f.studentId || hasDuplicateConflict || f.confirmed}
+                                      >
+                                        <Check size={14} /> {f.confirmed ? "Confirmed Present ✓" : "Confirm Present"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn secondary"
+                                        style={{ minHeight: 36, fontSize: 12, padding: "6px 12px" }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          dismissFaceMatch(f.faceNo);
+                                        }}
+                                      >
+                                        <X size={14} /> Dismiss
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="btn secondary"
+                                      style={{ minHeight: 34, fontSize: 11.5, padding: "4px 12px" }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        restoreFaceMatch(f.faceNo);
+                                      }}
+                                    >
+                                      Undo Dismiss (Restore Face #{f.faceNo})
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -6960,29 +7239,49 @@ export default function App() {
         </div>
       )}
 
-      {/* LIVE CAMERA MODAL (GETUSERMEDIA) */}
+      {/* LIVE CAMERA MODAL (GETUSERMEDIA) — LANDSCAPE & RESPONSIVE */}
       {cameraActive && (
-        <div className="camera-modal-overlay">
-          <div className="camera-modal-content">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "#fff", marginBottom: 10 }}>
-              <span style={{ fontWeight: 600 }}>
-                {cameraMode === "class-attendance" ? t("faceMatching.classScannerLive", "Class Attendance Scanner (Live)") : t("faceMatching.cameraViewfinder", "Camera Viewfinder")}
-              </span>
+        <div className="camera-modal-overlay" onClick={stopCamera}>
+          <div className="camera-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="camera-modal-header">
+              <div className="camera-modal-title-wrap">
+                <Camera size={20} color="var(--primary, #174B36)" />
+                <span style={{ fontWeight: 700, fontSize: 15, color: "#FFF" }}>
+                  {cameraMode === "class-attendance"
+                    ? "Classroom Group Photo Scanner"
+                    : t("faceMatching.cameraViewfinder", "Camera Viewfinder")}
+                </span>
+                {cameraMode === "class-attendance" && (
+                  <span className="camera-modal-badge">
+                    16:9 Landscape
+                  </span>
+                )}
+              </div>
               <button
+                type="button"
                 onClick={stopCamera}
-                style={{ background: "none", border: "none", color: "#fff", padding: 6, cursor: "pointer" }}
+                className="btn icon-btn"
+                style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "#fff", padding: 6, borderRadius: 8, cursor: "pointer" }}
+                title="Close Camera"
+                aria-label="Close Camera"
               >
-                <X size={24} />
+                <X size={20} />
               </button>
             </div>
 
-            <div className="camera-viewfinder">
-              <video ref={videoRef} playsInline autoPlay muted />
+            <div className={`camera-viewfinder-container ${cameraMode === "class-attendance" ? "landscape" : ""}`}>
+              <video
+                ref={videoRef}
+                playsInline
+                autoPlay
+                muted
+                className={cameraFacing === "user" ? "mirrored" : ""}
+              />
               {cameraMode === "class-attendance" && (
                 <div className="camera-guidance-overlay">
                   <div className="camera-guidance-frame">
                     <span className="camera-guidance-text">
-                      👥 Align class within frame • Keep faces visible & well-lit
+                      👥 Horizontal Classroom Frame • Align all students within view • Keep faces well-lit
                     </span>
                   </div>
                 </div>
@@ -6991,18 +7290,181 @@ export default function App() {
 
             <div className="camera-snap-bar">
               <button
+                type="button"
+                className="btn secondary"
+                onClick={stopCamera}
+                style={{ minHeight: 38, color: "#fff", borderColor: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.08)" }}
+              >
+                <X size={15} /> Cancel
+              </button>
+
+              <button
+                type="button"
+                className="camera-snap-trigger"
+                onClick={snapPhoto}
+                title="Capture Photo"
+                aria-label="Capture Photo"
+              >
+                <Camera size={28} color="var(--primary, #174B36)" />
+              </button>
+
+              <button
+                type="button"
+                className="btn secondary"
                 onClick={() => startCamera(cameraFacing === "user" ? "environment" : "user", cameraMode)}
-                style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: 44, height: 44, display: "grid", placeItems: "center", cursor: "pointer" }}
+                style={{ minHeight: 38, color: "#fff", borderColor: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.08)", display: "inline-flex", alignItems: "center", gap: 6 }}
                 title={t("faceMatching.switchCamera", "Switch Camera")}
               >
-                <FlipHorizontal size={20} />
+                <FlipHorizontal size={16} />
+                <span style={{ fontSize: 12 }}>{cameraFacing === "user" ? "Back Camera" : "Front Camera"}</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-              <button className="camera-snap-trigger" onClick={snapPhoto}>
-                <Camera size={26} color="var(--primary)" />
+      {/* BULK CONFIRMATION DIALOG MODAL */}
+      {bulkConfirmModal && (
+        <div className="sheet-overlay" onClick={() => setBulkConfirmModal(null)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: "50%",
+                    background: "var(--success-bg)",
+                    color: "var(--success)",
+                    display: "grid",
+                    placeItems: "center"
+                  }}
+                >
+                  <Check size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16 }}>Confirm High-Confidence Attendance</h3>
+                  <small className="muted">
+                    {activeClass?.name || "Class"} ({localizeSection(sessionKey, lang)}) · {dateKey}
+                  </small>
+                </div>
+              </div>
+              <button className="btn icon-btn" onClick={() => setBulkConfirmModal(null)}>
+                <X size={18} />
               </button>
+            </div>
 
-              <div style={{ width: 44 }} />
+            <p style={{ fontSize: 13, color: "var(--text)", margin: "0 0 12px 0" }}>
+              The following <strong>{bulkConfirmModal.count} student(s)</strong> matched with high confidence and will be confirmed as <strong>Present</strong>:
+            </p>
+
+            <div
+              style={{
+                maxHeight: 220,
+                overflowY: "auto",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                background: "var(--canvas, #FAF8F5)",
+                padding: "8px 12px",
+                display: "grid",
+                gap: 6
+              }}
+            >
+              {bulkConfirmModal.eligible.map((item) => (
+                <div
+                  key={item.faceNo}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "6px 8px",
+                    background: "#FFF",
+                    borderRadius: 6,
+                    border: "1px solid var(--border)",
+                    fontSize: 12
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontWeight: 700, color: "var(--primary)" }}>#{item.faceNo}</span>
+                    <strong className="notranslate" translate="no">{item.matchName}</strong>
+                    <span className="muted notranslate" translate="no">#{item.matchAdmissionNo || "—"}</span>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#059669" }}>
+                    {item.confidencePct}% match
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {bulkConfirmModal.excluded.length > 0 && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  background: "#FFFBEB",
+                  border: "1px solid #FCD34D",
+                  fontSize: 12,
+                  color: "#92400E",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8
+                }}
+              >
+                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <span>
+                  <strong>{bulkConfirmModal.excluded.length} face(s)</strong> are uncertain or unassigned and excluded from this bulk action. Please review them individually.
+                </span>
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button type="button" className="btn secondary" onClick={() => setBulkConfirmModal(null)}>
+                Cancel
+              </button>
+              <button type="button" className="btn primary" onClick={executeBulkConfirm}>
+                <Check size={16} /> Confirm {bulkConfirmModal.count} Students Present
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CLEAR PHOTO CONFIRMATION DIALOG MODAL */}
+      {showClearPhotoConfirm && (
+        <div className="sheet-overlay" onClick={() => setShowClearPhotoConfirm(false)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "50%",
+                  background: "var(--warning-bg)",
+                  color: "var(--warning)",
+                  display: "grid",
+                  placeItems: "center"
+                }}
+              >
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16 }}>Clear Group Photo & Detections?</h3>
+                <small className="muted">This will remove the current classroom photo and all unconfirmed face suggestions.</small>
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button type="button" className="btn secondary" onClick={() => setShowClearPhotoConfirm(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn danger"
+                onClick={doClearPhoto}
+                style={{ background: "var(--danger)", color: "#fff" }}
+              >
+                <Trash2 size={16} /> Yes, Clear Photo
+              </button>
             </div>
           </div>
         </div>
