@@ -67,7 +67,7 @@ export async function generateWeeklyExcelWorkbook({ from, to, recipientEmail, mo
   } else {
     [classes, students, attendances] = await Promise.all([
       Class.find({ active: true }).populate("teacherIds", "name email").sort({ name: 1 }),
-      Student.find({ active: true }).populate("classId", "name section").collation({ locale: "en", numericOrdering: true }).sort({ admissionNo: 1, name: 1 }),
+      Student.find({ active: true }).populate("classId", "name section").populate("classIds", "name section").collation({ locale: "en", numericOrdering: true }).sort({ admissionNo: 1, name: 1 }),
       Attendance.find({ dateKey: { $gte: from, $lte: to } })
         .populate("studentId", "name admissionNo classId")
         .populate("classId", "name section")
@@ -226,11 +226,19 @@ export async function generateWeeklyExcelWorkbook({ from, to, recipientEmail, mo
       else standing = "Needs Attention";
     }
 
+    const assignedClasses = Array.isArray(st.classIds) && st.classIds.length > 0 ? st.classIds : (st.classId ? [st.classId] : []);
+    const classNameDisplay = assignedClasses.length > 0
+      ? assignedClasses.map(c => c.name || "General").join(", ")
+      : (st.classId?.name || "General");
+    const sectionDisplay = assignedClasses.length > 0
+      ? assignedClasses.map(c => c.section || "A").join(", ")
+      : (st.classId?.section || "A");
+
     const rowObj = {
       admissionNo: String(st.admissionNo || "—"), // String preserves leading zeros
       name: st.name || "Unknown",
-      className: st.classId?.name || "General",
-      section: st.classId?.section || "A",
+      className: classNameDisplay,
+      section: sectionDisplay,
       presentCount: sPresent,
       absentCount: sAbsent,
       lateCount: sLate,

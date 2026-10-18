@@ -54,11 +54,22 @@ export default function GoogleTranslate({ compact = false }) {
       script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
       script.async = true;
       script.onerror = () => {
-        console.warn("Google Translate script failed to load (offline or blocked).");
+        // Silently mark as unavailable when blocked by client ad-blocker or offline
         setLoadError(true);
       };
       document.body.appendChild(script);
     }
+
+    // Intercept Google Translate telemetry network rejection if blocked by client extension
+    const handleRejection = (e) => {
+      if (e.reason?.message?.includes("translate.googleapis.com") || String(e.reason).includes("translate")) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("unhandledrejection", handleRejection);
+    return () => {
+      window.removeEventListener("unhandledrejection", handleRejection);
+    };
   }, []);
 
   if (loadError) return null;

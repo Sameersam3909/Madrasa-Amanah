@@ -395,7 +395,12 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   doc.roundedRect(infoX + 114, badgeY, 114, 16, 3).fill(statusBg);
   doc.fillColor(statusColor).fontSize(8).font("Helvetica-Bold").text(statusLabel, infoX + 120, badgeY + 4, { lineBreak: false });
 
-  const classDisplayName = `${student.classId?.name || "Unassigned"}${student.classId?.section ? ` - ${student.classId.section}` : ""}`;
+  const assignedClassesList = Array.isArray(student.classIds) && student.classIds.length > 0
+    ? student.classIds
+    : (student.classId ? [student.classId] : []);
+  const classDisplayName = assignedClassesList.length > 0
+    ? assignedClassesList.map(c => `${c.name || "Class"}${c.section ? ` - ${c.section}` : ""}`).join(", ")
+    : "Unassigned";
   doc.roundedRect(infoX + 234, badgeY, 163, 16, 3).fill("#FEF3C7");
   doc.fillColor("#92400E").fontSize(8).font("Helvetica-Bold").text(classDisplayName.toUpperCase(), infoX + 240, badgeY + 4, { width: 151, ellipsis: true, lineBreak: false });
 
@@ -406,7 +411,7 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   const pCol2 = infoX + 126;
   const pCol3 = infoX + 252;
 
-  drawField("Assigned Class", classDisplayName, pCol1, curY, 70, 116);
+  drawField(assignedClassesList.length > 1 ? "Assigned Classes" : "Assigned Class", classDisplayName, pCol1, curY, 70, 116);
   drawField("Academic Year", student.classId?.academicYear || "1447-1448 / 2026", pCol2, curY, 70, 116);
   const formattedEnroll = student.enrollmentDate ? String(student.enrollmentDate).slice(0, 10) : "Not Recorded";
   drawField("Enrollment Date", formattedEnroll, pCol3, curY, 70, 135);
@@ -419,8 +424,17 @@ export async function generateStudentProfilePdf({ student, attendance = [], outp
   drawField("Date of Birth", dobDisplay, pCol2, curY, 70, 116);
 
   let teacherDisplay = "Madrasa Staff";
-  if (Array.isArray(student.classId?.teacherIds) && student.classId.teacherIds.length > 0) {
-    teacherDisplay = student.classId.teacherIds.map(t => t.name || t).filter(Boolean).join(", ") || "Madrasa Staff";
+  const allTeachers = [];
+  for (const c of assignedClassesList) {
+    if (Array.isArray(c?.teacherIds)) {
+      c.teacherIds.forEach(t => {
+        const name = typeof t === "object" ? t.name : t;
+        if (name && !allTeachers.includes(name)) allTeachers.push(name);
+      });
+    }
+  }
+  if (allTeachers.length > 0) {
+    teacherDisplay = allTeachers.join(", ");
   }
   drawField("Assigned Teacher", teacherDisplay, pCol3, curY, 70, 135);
   curY += 24;

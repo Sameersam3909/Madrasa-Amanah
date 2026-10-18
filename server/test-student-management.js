@@ -1,10 +1,17 @@
-import 'dotenv/config';
+import dotenv from "dotenv";
+import { spawn } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const API_BASE = 'http://localhost:4000/api';
 
 async function runTests() {
   console.log('--- TESTING COMPLETE ADMIN STUDENT MANAGEMENT ---');
   let failures = 0;
+  let serverProcess = null;
 
   function assert(condition, message) {
     if (!condition) {
@@ -16,6 +23,32 @@ async function runTests() {
   }
 
   try {
+    let serverRunning = false;
+    try {
+      const ping = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(2000) });
+      if (ping.ok) serverRunning = true;
+    } catch {}
+
+    if (!serverRunning) {
+      console.log("  Starting server on port 4000 for test suite...");
+      serverProcess = spawn("node", ["src/index.js"], {
+        cwd: __dirname,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, PORT: "4000" }
+      });
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        try {
+          const ping = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(1000) });
+          if (ping.ok) {
+            serverRunning = true;
+            break;
+          }
+        } catch {}
+      }
+      if (!serverRunning) throw new Error("Could not start API server on port 4000");
+    }
+
     // 1. Sign in as Admin
     const adminLoginRes = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
@@ -244,6 +277,10 @@ async function runTests() {
 
   } catch (err) {
     console.error('Fatal error during test run:', err);
+  } finally {
+    if (serverProcess) {
+      serverProcess.kill("SIGTERM");
+    }
   }
 }
 

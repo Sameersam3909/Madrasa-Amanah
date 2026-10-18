@@ -1,9 +1,13 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { spawn } from "child_process";
-import { User, Class, Student, Attendance } from "./src/models.js";
+import path from "path";
+import { fileURLToPath } from "url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
+import { User, Class, Student, Attendance } from "./src/models.js";
 const API_BASE = "http://localhost:4000/api";
 const PIN = process.env.EXPORT_PIN || "12@12";
 
@@ -37,7 +41,7 @@ async function runSecurityTests() {
     if (!serverRunning) {
       console.log("  Starting server on port 4000 for test suite...");
       serverProcess = spawn("node", ["src/index.js"], {
-        cwd: process.cwd(),
+        cwd: __dirname,
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env, PORT: "4000" }
       });

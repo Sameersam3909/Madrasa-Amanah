@@ -32,7 +32,8 @@ const studentSchema = new mongoose.Schema({
   guardianPhone: { type: String, trim: true, default: "" },
   address: { type: String, trim: true, default: "" },
   enrollmentDate: { type: String, trim: true, default: "" },
-  classId: { type: mongoose.Schema.Types.ObjectId, ref: "Class", required: true, index: true },
+  classId: { type: mongoose.Schema.Types.ObjectId, ref: "Class", required: false, index: true },
+  classIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Class" }],
   photoUrl: { type: String, default: "" },
   // Face descriptors are sensitive biometric data: store only with appropriate guardian consent
   faceDescriptor: { type: [Number], select: false, default: undefined },
@@ -40,6 +41,7 @@ const studentSchema = new mongoose.Schema({
   active: { type: Boolean, default: true, index: true }
 }, { timestamps: true });
 studentSchema.index({ classId: 1, active: 1, name: 1 });
+studentSchema.index({ classIds: 1, active: 1, name: 1 });
 studentSchema.index({ admissionNo: 1, active: 1 });
 studentSchema.index({ nameEn: 1 });
 studentSchema.index({ nameUr: 1 });

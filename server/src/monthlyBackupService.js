@@ -101,7 +101,7 @@ export async function generateMonthlyExcelWorkbook({ from, to, monthLabel, month
   // 1. Fetch live application records
   const [classes, students, attendances] = await Promise.all([
     Class.find({ active: true }).populate("teacherIds", "name email").sort({ name: 1 }),
-    Student.find({ active: true }).populate("classId", "name section").collation({ locale: "en", numericOrdering: true }).sort({ admissionNo: 1, name: 1 }),
+    Student.find({ active: true }).populate("classId", "name section").populate("classIds", "name section").collation({ locale: "en", numericOrdering: true }).sort({ admissionNo: 1, name: 1 }),
     Attendance.find({ dateKey: { $gte: from, $lte: to } })
       .populate("studentId", "name admissionNo classId")
       .populate("classId", "name section")
@@ -315,9 +315,10 @@ export async function generateMonthlyExcelWorkbook({ from, to, monthLabel, month
       else assessment = "Needs Attention (<70%)";
     }
 
-    const className = s.classId
-      ? `${s.classId.name}${s.classId.section ? ` (${s.classId.section})` : ""}`
-      : "Unassigned";
+    const classesList = Array.isArray(s.classIds) && s.classIds.length > 0 ? s.classIds : (s.classId ? [s.classId] : []);
+    const className = classesList.length > 0
+      ? classesList.map(c => `${c.name}${c.section ? ` (${c.section})` : ""}`).join(", ")
+      : (s.classId ? `${s.classId.name}${s.classId.section ? ` (${s.classId.section})` : ""}` : "Unassigned");
 
     const row = wsStudent.addRow({
       admissionNo: s.admissionNo,

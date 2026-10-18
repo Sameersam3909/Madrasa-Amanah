@@ -28,23 +28,30 @@ export async function cacheClasses(classes) {
 
 export async function cacheStudents(students, classId) {
   if (!students || !students.length) return;
-  await offlineDb.students.bulkPut(students.map(s => ({
-    ...s,
-    id: String(s._id || s.id),
-    classId: String(s.classId?._id || s.classId || classId),
-    name: s.name,
-    admissionNo: s.admissionNo,
-    gender: s.gender || "",
-    dob: s.dob || "",
-    guardianName: s.guardianName || "",
-    guardianPhone: s.guardianPhone || "",
-    address: s.address || "",
-    enrollmentDate: s.enrollmentDate || "",
-    photoUrl: s.photoUrl || s.referencePhotoUrl || "",
-    consentGiven: s.consentGiven !== false,
-    active: s.active !== false,
-    updatedAt: s.updatedAt || new Date().toISOString()
-  })));
+  await offlineDb.students.bulkPut(students.map(s => {
+    const rawClassIds = Array.isArray(s.classIds) && s.classIds.length > 0
+      ? s.classIds.map(c => String(c._id || c.id || c))
+      : [String(s.classId?._id || s.classId || classId)];
+    const uniqueClassIds = Array.from(new Set(rawClassIds.filter(Boolean)));
+    return {
+      ...s,
+      id: String(s._id || s.id),
+      classId: String(s.classId?._id || s.classId || classId),
+      classIds: uniqueClassIds,
+      name: s.name,
+      admissionNo: s.admissionNo,
+      gender: s.gender || "",
+      dob: s.dob || "",
+      guardianName: s.guardianName || "",
+      guardianPhone: s.guardianPhone || "",
+      address: s.address || "",
+      enrollmentDate: s.enrollmentDate || "",
+      photoUrl: s.photoUrl || s.referencePhotoUrl || "",
+      consentGiven: s.consentGiven !== false,
+      active: s.active !== false,
+      updatedAt: s.updatedAt || new Date().toISOString()
+    };
+  }));
 }
 
 export async function removeStudentFromCache(studentId) {
@@ -56,11 +63,16 @@ export async function updateStudentInCache(student) {
   if (!student) return;
   const id = String(student._id || student.id);
   const existing = await offlineDb.students.get(id);
+  const rawClassIds = Array.isArray(student.classIds) && student.classIds.length > 0
+    ? student.classIds.map(c => String(c._id || c.id || c))
+    : (student.classId ? [String(student.classId?._id || student.classId)] : (existing?.classIds || []));
+  const uniqueClassIds = Array.from(new Set(rawClassIds.filter(Boolean)));
   await offlineDb.students.put({
     ...(existing || {}),
     ...student,
     id,
-    classId: String(student.classId?._id || student.classId || existing?.classId || ""),
+    classId: String(student.classId?._id || student.classId || existing?.classId || uniqueClassIds[0] || ""),
+    classIds: uniqueClassIds,
     updatedAt: new Date().toISOString()
   });
 }

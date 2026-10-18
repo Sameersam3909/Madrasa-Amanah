@@ -3091,3 +3091,52 @@ input[type="email"],
   text-align: center;
 }
 
+/* High Definition Crisp Brand Logo Rendering */
+.hd-brand-logo {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  image-rendering: high-quality;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+/* Manage Classes Modal Styles */
+.class-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+}
+.class-checkbox-row:hover {
+  border-color: var(--primary);
+  background: var(--primary-subtle);
+}
+.class-checkbox-row.selected {
+  border-color: var(--primary);
+  background: rgba(23, 75, 54, 0.06);
+}
+.class-checkbox-indicator {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 1.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  background: #FFF;
+  flex-shrink: 0;
+}
+.class-checkbox-row.selected .class-checkbox-indicator {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #FFF;
+}
+
+

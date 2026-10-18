@@ -94,6 +94,7 @@ import {
 } from "./offlineDb";
 import StudentSearchDropdown from "./components/StudentSearchDropdown.jsx";
 import GoogleTranslate from "./components/GoogleTranslate.jsx";
+import ClassMultiSelect from "./components/ClassMultiSelect.jsx";
 import { getStudentDisplayName, getStudentNameDir, matchesStudentSearch } from "./utils/studentName.js";
 import { sortStudentsByRoll, compareStudentsByClassAndRoll } from "./utils/studentSort.js";
 import { checkImageQuality, evaluateFaceMatch } from "./utils/faceQuality.js";
@@ -247,9 +248,11 @@ export default function App() {
   const [viewingStudent, setViewingStudent] = useState(null);
   const [profilePreviewPhoto, setProfilePreviewPhoto] = useState(null);
   const [profilePreviewDescriptor, setProfilePreviewDescriptor] = useState(null);
+  const [pendingPhotoSource, setPendingPhotoSource] = useState(null); // 'camera' | 'file' | null
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraFacing, setCameraFacing] = useState("user");
   const [cameraMode, setCameraMode] = useState("student-profile"); // 'student-profile' | 'class-attendance'
+  const cameraModeRef = useRef("student-profile");
   const [faceDetectStatus, setFaceDetectStatus] = useState(""); // '', 'loading', 'detected', 'no-face', 'error', 'unavailable'
   const [photoSaving, setPhotoSaving] = useState(false);
   const [photoSaveError, setPhotoSaveError] = useState("");
@@ -317,7 +320,10 @@ export default function App() {
   const [viewingStudentProfile, setViewingStudentProfile] = useState(null);
   const [editingStudent, setEditingStudent] = useState(null);
   const [transferringStudent, setTransferringStudent] = useState(null);
-  const [transferTargetClassId, setTransferTargetClassId] = useState("");
+  const [manageStudentClassIds, setManageStudentClassIds] = useState([]);
+  const [manageClassesSearch, setManageClassesSearch] = useState("");
+  const [manageClassesSaving, setManageClassesSaving] = useState(false);
+  const [manageClassesError, setManageClassesError] = useState("");
   const [attendanceHistoryStudent, setAttendanceHistoryStudent] = useState(null);
   const [studentAttendanceData, setStudentAttendanceData] = useState(null);
   const [studentAttendanceLoading, setStudentAttendanceLoading] = useState(false);
@@ -376,6 +382,8 @@ export default function App() {
   const [teacherForm, setTeacherForm] = useState({ name: "", email: "", password: "", assignedClasses: [] });
   const [resetPasswordTeacher, setResetPasswordTeacher] = useState(null);
   const [newTeacherPassword, setNewTeacherPassword] = useState("");
+  const [showResetPasswordPlainText, setShowResetPasswordPlainText] = useState(false);
+  const [editingTeacher, setEditingTeacher] = useState(null);
 
   // Storage Rotation & Monitoring
   const [storageReport, setStorageReport] = useState(null);
@@ -434,8 +442,10 @@ export default function App() {
       if (studentStatusFilter === "active" && s.active === false) return false;
       if (studentStatusFilter === "archived" && s.active !== false) return false;
       if (studentClassFilter !== "all") {
-        const sClassId = String(s.classId?._id || s.classId?.id || s.classId || "");
-        if (sClassId !== String(studentClassFilter)) return false;
+        const assignedClassIds = Array.isArray(s.classIds) && s.classIds.length > 0
+          ? s.classIds.map((c) => String(c?._id || c?.id || c))
+          : [String(s.classId?._id || s.classId?.id || s.classId || "")];
+        if (!assignedClassIds.includes(String(studentClassFilter))) return false;
       }
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -498,11 +508,17 @@ export default function App() {
 
   function openEditStudent(student) {
     setActiveMenuStudentId(null);
+    const initialClassIds = Array.isArray(student.classIds) && student.classIds.length > 0
+      ? student.classIds.map((c) => String(c?._id || c?.id || c))
+      : (student.classId ? [String(student.classId?._id || student.classId?.id || student.classId)] : (selectedClass ? [String(selectedClass)] : []));
+    const uniqueClassIds = Array.from(new Set(initialClassIds.filter(Boolean)));
+
     setEditingStudent({
       id: student._id || student.id,
       name: student.name || student.fullName || "",
       admissionNo: student.admissionNo || student.admissionNumber || "",
-      classId: String(student.classId?._id || student.classId?.id || student.classId || selectedClass || ""),
+      classId: uniqueClassIds[0] || "",
+      classIds: uniqueClassIds,
       gender: student.gender || "",
       dob: student.dob || "",
       guardianName: student.guardianName || "",
@@ -527,8 +543,11 @@ export default function App() {
       setEditingStudent((prev) => ({ ...prev, error: "Admission number is required." }));
       return;
     }
-    if (!editingStudent.classId) {
-      setEditingStudent((prev) => ({ ...prev, error: "Class assignment is required." }));
+    const targetClassIds = Array.isArray(editingStudent.classIds) && editingStudent.classIds.length > 0
+      ? editingStudent.classIds
+      : (editingStudent.classId ? [editingStudent.classId] : []);
+    if (targetClassIds.length === 0) {
+      setEditingStudent((prev) => ({ ...prev, error: "At least one class assignment is required." }));
       return;
     }
     setEditingStudent((prev) => ({ ...prev, saving: true, error: "" }));
@@ -536,7 +555,8 @@ export default function App() {
       const payload = {
         name: editingStudent.name.trim(),
         fullName: editingStudent.name.trim(),
-        classId: editingStudent.classId,
+        classId: targetClassIds[0],
+        classIds: targetClassIds,
         gender: editingStudent.gender,
         dob: editingStudent.dob,
         guardianName: editingStudent.guardianName,
@@ -571,15 +591,29 @@ export default function App() {
   function openTransferClass(student) {
     setActiveMenuStudentId(null);
     setTransferringStudent(student);
-    setTransferTargetClassId(String(student.classId?._id || student.classId?.id || student.classId || ""));
+    setManageClassesError("");
+    setManageClassesSearch("");
+    let initialIds = [];
+    if (Array.isArray(student.classIds) && student.classIds.length > 0) {
+      initialIds = student.classIds.map((c) => String(c?._id || c?.id || c));
+    } else if (student.classId) {
+      initialIds = [String(student.classId?._id || student.classId?.id || student.classId)];
+    }
+    setManageStudentClassIds(Array.from(new Set(initialIds.filter(Boolean))));
   }
 
-  async function handleConfirmTransfer() {
-    if (!transferringStudent || !transferTargetClassId) return;
-    setLoading(true);
+  async function handleSaveStudentClasses() {
+    if (!transferringStudent) return;
+    if (manageStudentClassIds.length === 0) {
+      setManageClassesError(t("students.atLeastOneClassRequired", "At least one class must be selected."));
+      return;
+    }
+    setManageClassesSaving(true);
+    setManageClassesError("");
     try {
       const res = await api.patch(`/students/${transferringStudent._id || transferringStudent.id}`, {
-        classId: transferTargetClassId
+        classIds: manageStudentClassIds,
+        classId: manageStudentClassIds[0]
       });
       await updateStudentInCache(res.data);
       setDirectoryStudents((prev) =>
@@ -588,16 +622,15 @@ export default function App() {
       if (viewingStudentProfile && String(viewingStudentProfile._id || viewingStudentProfile.id) === String(transferringStudent._id || transferringStudent.id)) {
         setViewingStudentProfile(res.data);
       }
-      const newCls = classes.find((c) => String(c._id || c.id) === String(transferTargetClassId));
-      setNotice(`Transferred ${res.data.name} to ${newCls?.name || "new class"} successfully.`);
+      setNotice(t("students.classesUpdatedSuccess", `Updated class assignments for "${res.data.name}" successfully.`));
       setTransferringStudent(null);
       if (selectedClass) {
         loadStudentsAndAttendanceOfflineFirst(selectedClass, dateKey, sessionKey);
       }
     } catch (err) {
-      setError(errText(err));
+      setManageClassesError(errText(err));
     } finally {
-      setLoading(false);
+      setManageClassesSaving(false);
     }
   }
 
@@ -1466,21 +1499,107 @@ export default function App() {
     e.preventDefault();
     setError("");
     setNotice("");
+    if (!teacherForm.name?.trim()) {
+      setError("Teacher full name is required.");
+      return;
+    }
+    if (!teacherForm.email?.trim()) {
+      setError("Teacher email address is required.");
+      return;
+    }
+    if (!teacherForm.password || teacherForm.password.length < 8) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
+    setLoading(true);
     try {
       await api.post("/admin/users", {
-        name: teacherForm.name,
-        email: teacherForm.email,
+        name: teacherForm.name.trim(),
+        email: teacherForm.email.toLowerCase().trim(),
         password: teacherForm.password,
         role: "teacher",
-        assignedClasses: teacherForm.assignedClasses
+        assignedClasses: teacherForm.assignedClasses || []
       });
-      setNotice(`Teacher account for ${teacherForm.name} created successfully.`);
+      setNotice(`Teacher account for ${teacherForm.name.trim()} created successfully.`);
       setShowAddTeacherModal(false);
       setTeacherForm({ name: "", email: "", password: "", assignedClasses: [] });
       fetchTeachers();
     } catch (err) {
       setError(errText(err));
+    } finally {
+      setLoading(false);
     }
+  }
+
+  function handleOpenEditTeacher(teacher) {
+    if (!teacher) return;
+    setEditingTeacher({
+      id: String(teacher._id || teacher.id),
+      name: teacher.name || "",
+      email: teacher.email || "",
+      assignedClasses: (teacher.assignedClasses || []).map(c => String(c._id || c.id || c)),
+      active: teacher.active !== false
+    });
+  }
+
+  async function handleSaveTeacherEdit(e) {
+    e.preventDefault();
+    if (!editingTeacher) return;
+    if (!editingTeacher.name?.trim()) {
+      setError("Teacher name is required.");
+      return;
+    }
+    if (!editingTeacher.email?.trim()) {
+      setError("Teacher email is required.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setNotice("");
+    try {
+      await api.patch(`/admin/users/${editingTeacher.id}`, {
+        name: editingTeacher.name.trim(),
+        email: editingTeacher.email.toLowerCase().trim(),
+        assignedClasses: editingTeacher.assignedClasses || [],
+        active: Boolean(editingTeacher.active)
+      });
+      setNotice(`Teacher account for "${editingTeacher.name.trim()}" updated successfully.`);
+      setEditingTeacher(null);
+      fetchTeachers();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleToggleTeacherStatus(teacher) {
+    const tId = teacher._id || teacher.id;
+    const newActive = teacher.active === false;
+    setLoading(true);
+    setError("");
+    setNotice("");
+    try {
+      await api.patch(`/admin/users/${tId}`, {
+        active: newActive
+      });
+      setNotice(`Teacher "${teacher.name}" is now ${newActive ? "Active" : "Deactivated"}.`);
+      fetchTeachers();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function generateRandomPassword() {
+    const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
+    let pwd = "";
+    for (let i = 0; i < 10; i++) {
+      pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setNewTeacherPassword(pwd);
+    setShowResetPasswordPlainText(true);
   }
 
     async function handleDeleteClass(cls) {
@@ -1558,6 +1677,11 @@ export default function App() {
   async function handleResetTeacherPassword(e) {
     e.preventDefault();
     if (!resetPasswordTeacher) return;
+    if (!newTeacherPassword || newTeacherPassword.length < 8) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
+    setLoading(true);
     setError("");
     setNotice("");
     try {
@@ -1567,8 +1691,11 @@ export default function App() {
       setNotice(`Password for ${resetPasswordTeacher.name} was reset successfully.`);
       setResetPasswordTeacher(null);
       setNewTeacherPassword("");
+      setShowResetPasswordPlainText(false);
     } catch (err) {
       setError(errText(err));
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -1695,9 +1822,11 @@ export default function App() {
       const faceapi = await loadFaceApi();
       // Create an Image element and wait for it to fully load before detection
       const img = document.createElement("img");
-      img.crossOrigin = "anonymous";
+      if (!dataUrl.startsWith("data:") && !dataUrl.startsWith("blob:")) {
+        img.crossOrigin = "anonymous";
+      }
       await new Promise((resolve, reject) => {
-        img.onload = resolve;
+        img.onload = () => resolve();
         img.onerror = () => reject(new Error("Failed to decode the captured image."));
         img.src = dataUrl;
       });
@@ -1724,6 +1853,7 @@ export default function App() {
 
     setCameraFacing(facing);
     setCameraMode(mode);
+    cameraModeRef.current = mode;
     stopCamera();
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -1812,27 +1942,29 @@ export default function App() {
     // Preserve natural orientation and resolution for neural face detector
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-    const currentMode = cameraMode;
+    const currentMode = cameraModeRef.current || cameraMode;
     stopCamera();
 
-    if (currentMode === "class-attendance") {
-      processClassPhoto(dataUrl);
+    if (currentMode === "student-profile" || viewingStudent) {
+      setPendingPhotoSource("camera");
+      handleNewPhoto(dataUrl, "camera");
     } else {
-      handleNewPhoto(dataUrl);
+      processClassPhoto(dataUrl);
     }
   }
 
-  async function handleNewPhoto(dataUrl) {
+  async function handleNewPhoto(dataUrl, source = null) {
+    if (source) setPendingPhotoSource(source);
     setProfilePreviewPhoto(dataUrl);
     setProfilePreviewDescriptor(null);
     setFaceDetectStatus("loading");
     setPhotoSaveError("");
     setNotice("Analyzing image for face detection...");
 
-    // Validate image size (reject > 5MB data URLs)
-    if (dataUrl.length > 5 * 1024 * 1024 * 1.37) {
+    // Validate image size (reject > 10MB data URLs)
+    if (dataUrl.length > 10 * 1024 * 1024 * 1.37) {
       setFaceDetectStatus("error");
-      setNotice("Image is too large. Please use a smaller photo (under 5 MB).");
+      setNotice("Image is too large. Please use a smaller photo (under 10 MB).");
       return;
     }
 
@@ -1853,7 +1985,7 @@ export default function App() {
         setNotice("Face recognition models could not load. Photo can still be saved for manual attendance.");
       } else {
         setFaceDetectStatus("error");
-        setNotice(`Face detection failed: ${err.message}. Photo can still be saved.`);
+        setNotice("Face detection status: manual attendance ready.");
       }
     }
   }
@@ -1862,9 +1994,28 @@ export default function App() {
     if (!student) return;
     setProfilePreviewPhoto(null);
     setProfilePreviewDescriptor(null);
+    setPendingPhotoSource(null);
     setFaceDetectStatus("");
     setPhotoSaveError("");
     setViewingStudent(student);
+  }
+
+  function discardPendingPhoto() {
+    setProfilePreviewPhoto(null);
+    setProfilePreviewDescriptor(null);
+    setPendingPhotoSource(null);
+    setFaceDetectStatus("");
+    setPhotoSaveError("");
+  }
+
+  function handleRetakePhoto() {
+    const prevSource = pendingPhotoSource;
+    discardPendingPhoto();
+    if (prevSource === "file") {
+      document.getElementById("profile-gallery-file-input")?.click();
+    } else {
+      startCamera(cameraFacing, "student-profile");
+    }
   }
 
   // Save / Replace Reference Photo
@@ -1962,6 +2113,7 @@ export default function App() {
     setViewingStudent(null);
     setProfilePreviewPhoto(null);
     setProfilePreviewDescriptor(null);
+    setPendingPhotoSource(null);
     setFaceDetectStatus("");
     setPhotoSaveError("");
   }
@@ -2668,14 +2820,17 @@ export default function App() {
             <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", alignItems: "center" }}>
               <img
                 src="/logo-transparent.png"
+                srcSet="/logo-transparent.png 1x, /logo.png 2x"
                 alt="DARUL ULOOM ASHRAFIA • ATMAKUR • Regd. No. 243/2023"
+                className="hd-brand-logo"
                 style={{
                   width: 105,
                   height: 105,
                   objectFit: "contain",
                   display: "block",
                   marginBottom: 10,
-                  filter: "drop-shadow(0 4px 12px rgba(23, 75, 54, 0.12))"
+                  filter: "drop-shadow(0 4px 12px rgba(23, 75, 54, 0.12))",
+                  imageRendering: "-webkit-optimize-contrast"
                 }}
               />
               <h1 className="arabic-brand-title notranslate" translate="no" style={{ fontSize: 24, margin: "0 0 2px", color: "var(--primary)" }}>
@@ -2769,14 +2924,17 @@ export default function App() {
         <div style={{ marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid var(--border)", textAlign: "center" }}>
           <img
             src="/logo-transparent.png"
+            srcSet="/logo-transparent.png 1x, /logo.png 2x"
             alt="DARUL ULOOM ASHRAFIA • ATMAKUR"
+            className="hd-brand-logo"
             style={{
               width: 70,
               height: 70,
               objectFit: "contain",
               display: "block",
               margin: "0 auto 8px",
-              filter: "drop-shadow(0 2px 8px rgba(23, 75, 54, 0.1))"
+              filter: "drop-shadow(0 2px 8px rgba(23, 75, 54, 0.1))",
+              imageRendering: "-webkit-optimize-contrast"
             }}
           />
           <div className="arabic-brand-title notranslate" translate="no" style={{ fontSize: 18, margin: "0 0 2px", color: "var(--primary)", lineHeight: 1.2 }}>
@@ -2900,12 +3058,15 @@ export default function App() {
         <div className="mobile-brand" style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
           <img
             src="/logo-transparent.png"
+            srcSet="/logo-transparent.png 1x, /logo.png 2x"
             alt="DARUL ULOOM ASHRAFIA Logo"
+            className="hd-brand-logo"
             style={{
               width: 36,
               height: 36,
               objectFit: "contain",
-              flexShrink: 0
+              flexShrink: 0,
+              imageRendering: "-webkit-optimize-contrast"
             }}
           />
           <div className="mobile-brand-title" style={{ minWidth: 0, overflow: "hidden" }}>
@@ -4840,8 +5001,8 @@ export default function App() {
                                           openTransferClass(s);
                                         }}
                                       >
-                                        <ArrowRightLeft size={15} color="var(--primary)" />
-                                        <span>{t.changeClass}</span>
+                                        <BookOpen size={15} color="var(--primary)" />
+                                        <span>{t("students.manageClasses", "Manage Classes")}</span>
                                       </button>
                                     </>
                                   )}
@@ -5011,13 +5172,16 @@ export default function App() {
                 setNotice("");
                 setLoading(true);
                 try {
-                  const targetClassId = studentForm.classId || selectedClass || classes[0]?._id;
-                  if (!targetClassId) {
-                    throw new Error(t("validation.selectClassError", "Please select a class for enrollment."));
+                  const targetClassIds = Array.isArray(studentForm.classIds) && studentForm.classIds.length > 0
+                    ? studentForm.classIds
+                    : (studentForm.classId ? [studentForm.classId] : (selectedClass ? [selectedClass] : (classes[0]?._id ? [classes[0]._id] : [])));
+                  if (!targetClassIds || targetClassIds.length === 0) {
+                    throw new Error(t("validation.selectClassError", "Please select at least one class for enrollment."));
                   }
                   const r = await api.post("/students", {
                     ...studentForm,
-                    classId: targetClassId
+                    classIds: targetClassIds,
+                    classId: targetClassIds[0]
                   });
                   setStudents((prev) => {
                     const map = new Map(prev.map((s) => [String(s._id || s.id), s]));
@@ -5025,7 +5189,7 @@ export default function App() {
                     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
                   });
                   setDirectoryStudents((prev) => [r.data, ...prev.filter(s => String(s._id || s.id) !== String(r.data._id || r.data.id))]);
-                  await cacheStudents([r.data], targetClassId);
+                  await cacheStudents([r.data], targetClassIds[0]);
                   setStudentForm({
                     admissionNo: "",
                     name: "",
@@ -5035,7 +5199,9 @@ export default function App() {
                     guardianPhone: "",
                     address: "",
                     enrollmentDate: today(),
-                    consentGiven: true
+                    consentGiven: true,
+                    classIds: targetClassIds.slice(0, 1),
+                    classId: targetClassIds[0] || ""
                   });
                   setNotice(`${t("students.studentsTitle", "Student")}: ${r.data.name} (${r.data.admissionNo})`);
                   setTab("students");
@@ -5049,23 +5215,17 @@ export default function App() {
               style={{ display: "grid", gap: 14 }}
             >
               <div className="responsive-grid-2">
-                <label>
-                  {t.class} *
-                  <select
-                    value={studentForm.classId || selectedClass}
-                    required
-                    onChange={(e) => {
-                      setStudentForm({ ...studentForm, classId: e.target.value });
-                      setSelectedClass(e.target.value);
+                <div>
+                  <ClassMultiSelect
+                    classes={classes}
+                    selectedClassIds={Array.isArray(studentForm.classIds) && studentForm.classIds.length > 0 ? studentForm.classIds : (studentForm.classId ? [studentForm.classId] : (selectedClass ? [selectedClass] : []))}
+                    onChange={(ids) => {
+                      setStudentForm({ ...studentForm, classIds: ids, classId: ids[0] || "" });
+                      if (ids[0]) setSelectedClass(ids[0]);
                     }}
-                  >
-                    {classes.map((c) => (
-                      <option key={c._id || c.id} value={c._id || c.id}>
-                        {formatClassLabel(c, lang)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    lang={lang}
+                  />
+                </div>
 
                 <label>
                   {t.admissionNo} *
@@ -6210,41 +6370,116 @@ export default function App() {
                     </button>
                   </div>
 
-                  {teachers.filter(u => u.role === "teacher" && u.active !== false).length === 0 ? (
+                  {teachers.filter(u => u.role === "teacher").length === 0 ? (
                     <p className="muted" style={{ fontSize: 13 }}>{t("teachers.noTeachers", "No teachers registered yet.")}</p>
                   ) : (
-                    <div style={{ display: "grid", gap: 8 }}>
-                      {teachers.filter(u => u.role === "teacher" && u.active !== false).map((teacher) => (
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {teachers.filter(u => u.role === "teacher").map((teacher) => (
                         <div
                           key={teacher._id || teacher.id}
                           style={{
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
-                            padding: "10px 14px",
+                            padding: "12px 16px",
                             background: "var(--canvas)",
                             borderRadius: "var(--radius-md)",
                             border: "1px solid var(--border)",
                             flexWrap: "wrap",
-                            gap: 8
+                            gap: 12
                           }}
                         >
-                          <div>
-                            <strong>{teacher.name}</strong>
-                            <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>{teacher.email}</span>
-                            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                              {teacher.assignedClasses?.length > 0
-                                ? teacher.assignedClasses.map(c => c.name || "Class").join(", ")
-                                : "No classes assigned"}
+                          <div style={{ minWidth: 220 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <strong style={{ fontSize: 14 }}>{teacher.name}</strong>
+                              <span className={`status-pill ${teacher.active !== false ? "present" : "absent"}`} style={{ fontSize: 10, padding: "2px 6px" }}>
+                                {teacher.active !== false ? t("teachers.active", "Active") : t("teachers.deactivated", "Deactivated")}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{teacher.email}</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                              {teacher.assignedClasses?.length > 0 ? (
+                                teacher.assignedClasses.map((c, idx) => (
+                                  <span
+                                    key={c._id || c.id || idx}
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 500,
+                                      background: "var(--primary-subtle)",
+                                      color: "var(--primary)",
+                                      padding: "2px 8px",
+                                      borderRadius: 6,
+                                      border: "1px solid rgba(16, 185, 129, 0.2)"
+                                    }}
+                                  >
+                                    {c.name || "Class"} {c.section ? `(${c.section})` : ""}
+                                  </span>
+                                ))
+                              ) : (
+                                <span style={{ fontSize: 11, color: "var(--muted)" }}>{t("teachers.noClassesAssigned", "No classes assigned")}</span>
+                              )}
                             </div>
                           </div>
-                          <button
-                            className="btn secondary"
-                            onClick={() => handleDeactivateTeacher(teacher)}
-                            style={{ color: "var(--danger)", borderColor: "var(--danger)", minHeight: 32, fontSize: 12, padding: "4px 10px" }}
-                          >
-                            <UserX size={13} /> {t("teachers.removeTeacher", "Remove Teacher")}
-                          </button>
+
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              onClick={() => handleOpenEditTeacher(teacher)}
+                              style={{ minHeight: 32, fontSize: 12, padding: "4px 10px" }}
+                              title={t("teachers.editTeacher", "Edit Teacher Details")}
+                            >
+                              <Edit3 size={13} /> {t("teachers.editTeacher", "Edit")}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              onClick={() => {
+                                setResetPasswordTeacher(teacher);
+                                setNewTeacherPassword("");
+                                setShowResetPasswordPlainText(false);
+                              }}
+                              style={{ minHeight: 32, fontSize: 12, padding: "4px 10px" }}
+                              title={t("teachers.resetPassword", "Reset Password")}
+                            >
+                              <Lock size={13} /> {t("teachers.resetPassword", "Reset Password")}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              onClick={() => handleToggleTeacherStatus(teacher)}
+                              style={{
+                                minHeight: 32,
+                                fontSize: 12,
+                                padding: "4px 10px",
+                                color: teacher.active !== false ? "var(--warning, #D97706)" : "var(--success, #059669)",
+                                borderColor: teacher.active !== false ? "var(--warning, #D97706)" : "var(--success, #059669)"
+                              }}
+                              title={teacher.active !== false ? "Deactivate account" : "Re-activate account"}
+                            >
+                              {teacher.active !== false ? (
+                                <>
+                                  <UserX size={13} /> {t("teachers.deactivate", "Deactivate")}
+                                </>
+                              ) : (
+                                <>
+                                  <UserCheck size={13} /> {t("teachers.activate", "Activate")}
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              onClick={() => handleDeactivateTeacher(teacher)}
+                              style={{ color: "var(--danger)", borderColor: "var(--danger)", minHeight: 32, fontSize: 12, padding: "4px 10px" }}
+                              title={t("teachers.removeTeacher", "Remove Teacher")}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -6431,7 +6666,7 @@ export default function App() {
           STUDENT PROFILE & PHOTO MANAGER (MODAL)
           ========================================================= */}
       {viewingStudent && (
-        <div className="sheet-overlay" onClick={closeStudentModal}>
+        <div className="sheet-overlay photo-editor-overlay" style={{ zIndex: 100 }} onClick={closeStudentModal}>
           <div className="sheet-content" onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div>
@@ -6460,119 +6695,142 @@ export default function App() {
             <div className="photo-manager-card">
               <div className="photo-manager-title">{t("faceMatching.studentPhoto", "Student photo")}</div>
 
-              <div className="photo-manager-avatar-wrap">
-                <div className="photo-manager-avatar">
-                  {viewingStudent.photoUrl || viewingStudent.referencePhotoUrl ? (
-                    <img src={viewingStudent.photoUrl || viewingStudent.referencePhotoUrl} alt={localizeStudentName(viewingStudent.name, lang)} />
-                  ) : (
-                    <User size={38} />
-                  )}
-                </div>
-                <div className="photo-manager-avatar-label">{t("faceMatching.currentRefPhoto", "Current reference photo")}</div>
-              </div>
+              {/* Hidden file inputs kept mounted for retake & selection */}
+              <input
+                id="profile-gallery-file-input"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                style={{ display: "none" }}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (f) {
+                    if (!f.type.startsWith("image/")) {
+                      setPhotoSaveError("Invalid file type. Please select a JPEG, PNG, or WebP photo.");
+                      e.target.value = "";
+                      return;
+                    }
+                    if (f.size > 10 * 1024 * 1024) {
+                      setPhotoSaveError("Selected photo is too large (maximum 10 MB).");
+                      e.target.value = "";
+                      return;
+                    }
+                    try {
+                      const url = await readDataUrl(f);
+                      handleNewPhoto(url, "file");
+                    } catch (err) {
+                      setPhotoSaveError("Could not read image file. Please choose another.");
+                    }
+                    e.target.value = "";
+                  }
+                }}
+              />
 
-              {!profilePreviewPhoto && !cameraActive && (
-                <div>
-                  <button
-                    type="button"
-                    className="photo-pill-btn take"
-                    onClick={() => startCamera(cameraFacing, "student-profile")}
-                  >
-                    <Camera size={20} />
-                    <span>{t("faceMatching.takePhoto", "Take a photo")}</span>
-                  </button>
+              <input
+                id="profile-camera-file-input"
+                type="file"
+                accept="image/*"
+                capture="user"
+                style={{ display: "none" }}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (f) {
+                    if (f.size > 10 * 1024 * 1024) {
+                      setPhotoSaveError("Captured photo is too large (maximum 10 MB).");
+                      e.target.value = "";
+                      return;
+                    }
+                    try {
+                      const url = await readDataUrl(f);
+                      handleNewPhoto(url, "camera");
+                    } catch (err) {
+                      setPhotoSaveError("Could not process camera photo.");
+                    }
+                    e.target.value = "";
+                  }
+                }}
+              />
 
-                  <label
-                    htmlFor="profile-gallery-file-input"
-                    className="photo-pill-btn choose"
-                  >
-                    <Image size={20} />
-                    <span>{t("faceMatching.chooseExistingPhoto", "Choose existing photo")}</span>
-                  </label>
-                  <input
-                    id="profile-gallery-file-input"
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    style={{ display: "none" }}
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0];
-                      if (f) {
-                        if (!f.type.startsWith("image/")) {
-                          setPhotoSaveError("Invalid file type. Please select a JPEG, PNG, or WebP photo.");
-                          e.target.value = "";
-                          return;
-                        }
-                        if (f.size > 10 * 1024 * 1024) {
-                          setPhotoSaveError("Selected photo is too large (maximum 10 MB).");
-                          e.target.value = "";
-                          return;
-                        }
-                        try {
-                          const url = await readDataUrl(f);
-                          handleNewPhoto(url);
-                        } catch (err) {
-                          setPhotoSaveError("Could not read image file. Please choose another.");
-                        }
-                        e.target.value = "";
-                      }
-                    }}
-                  />
-
-                  <input
-                    id="profile-camera-file-input"
-                    type="file"
-                    accept="image/*"
-                    capture="user"
-                    style={{ display: "none" }}
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0];
-                      if (f) {
-                        if (f.size > 10 * 1024 * 1024) {
-                          setPhotoSaveError("Captured photo is too large (maximum 10 MB).");
-                          e.target.value = "";
-                          return;
-                        }
-                        try {
-                          const url = await readDataUrl(f);
-                          handleNewPhoto(url);
-                        } catch (err) {
-                          setPhotoSaveError("Could not process camera photo.");
-                        }
-                        e.target.value = "";
-                      }
-                    }}
-                  />
-
-                  <button
-                    type="button"
-                    className="photo-pill-btn cancel"
-                    onClick={closeStudentModal}
-                    style={{ marginTop: 6 }}
-                  >
-                    <X size={16} />
-                    <span>{t("common.cancel", "Cancel")}</span>
-                  </button>
-                </div>
-              )}
-
-              {profilePreviewPhoto && (
-                <div className="photo-preview-wrap">
-                  <div style={{ fontSize: 13, color: "var(--muted)", fontWeight: 500, marginBottom: 8 }}>
-                    {t("faceMatching.newImagePreview", "New image preview:")}
+              {/* PENDING PHOTO PREVIEW MODE (When new photo captured or picked) */}
+              {profilePreviewPhoto ? (
+                <div className="photo-preview-wrap" style={{ marginTop: 8 }}>
+                  <div className="photo-manager-avatar-wrap" style={{ marginBottom: 12 }}>
+                    <div
+                      className="photo-manager-avatar"
+                      style={{
+                        border: "3px solid #10B981",
+                        boxShadow: "0 0 0 4px rgba(16, 185, 129, 0.2)"
+                      }}
+                    >
+                      <img src={profilePreviewPhoto} alt="New photo preview" />
+                    </div>
+                    <div
+                      className="photo-manager-avatar-label"
+                      style={{
+                        color: "#059669",
+                        fontWeight: 600,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        justifyContent: "center",
+                        marginTop: 6
+                      }}
+                    >
+                      <CheckCircle2 size={15} />
+                      <span>{t("faceMatching.newImagePreview", "New photo preview (Pending Save)")}</span>
+                    </div>
                   </div>
-                  <img src={profilePreviewPhoto} alt="Preview" className="photo-preview-img" />
 
-                  <div style={{
-                    fontSize: 12,
-                    fontWeight: 500,
-                    marginBottom: 14,
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    display: "inline-block",
-                    background: faceDetectStatus === "detected" ? "rgba(46, 125, 50, 0.12)" : "rgba(230, 81, 0, 0.12)",
-                    color: faceDetectStatus === "detected" ? "#166534" : "#C2410C",
-                    border: faceDetectStatus === "detected" ? "1px solid #86EFAC" : "1px solid #FDBA74"
-                  }}>
+                  {/* Previous Reference Comparison if one existed */}
+                  {(viewingStudent.photoUrl || viewingStudent.referencePhotoUrl) && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        background: "var(--surface)",
+                        border: "1px solid var(--border)",
+                        padding: "6px 12px",
+                        borderRadius: 10,
+                        marginBottom: 12,
+                        fontSize: 12
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: "50%",
+                          overflow: "hidden",
+                          flexShrink: 0,
+                          border: "1px solid var(--border)"
+                        }}
+                      >
+                        <img
+                          src={viewingStudent.photoUrl || viewingStudent.referencePhotoUrl}
+                          alt="Saved"
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        />
+                      </div>
+                      <span style={{ color: "var(--muted)" }}>
+                        {t("faceMatching.currentRefPhoto", "Current saved reference photo will be replaced on save.")}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Face Analysis Status Badge */}
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 500,
+                      marginBottom: 14,
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      display: "inline-block",
+                      background: faceDetectStatus === "detected" ? "rgba(46, 125, 50, 0.12)" : "rgba(230, 81, 0, 0.12)",
+                      color: faceDetectStatus === "detected" ? "#166534" : "#C2410C",
+                      border: faceDetectStatus === "detected" ? "1px solid #86EFAC" : "1px solid #FDBA74"
+                    }}
+                  >
                     {faceDetectStatus === "loading" && t("faceMatching.analyzingPhoto", "Analyzing photo for face detection...")}
                     {faceDetectStatus === "detected" && t("faceMatching.faceDetectedReady", "Face detected & descriptor ready ✓")}
                     {faceDetectStatus === "no-face" && t("faceMatching.noFaceDetectedManual", "No face detected (manual attendance ready)")}
@@ -6581,21 +6839,8 @@ export default function App() {
                     {!faceDetectStatus && (profilePreviewDescriptor ? t("faceMatching.faceDetectedReady", "Face descriptor ready ✓") : t("faceMatching.manualAttendanceReady", "Manual attendance ready"))}
                   </div>
 
-                  <div className="photo-preview-actions">
-                    <button
-                      type="button"
-                      className="photo-pill-btn choose"
-                      style={{ marginBottom: 0 }}
-                      disabled={photoSaving}
-                      onClick={() => {
-                        setProfilePreviewPhoto(null);
-                        setProfilePreviewDescriptor(null);
-                        setFaceDetectStatus("");
-                        setPhotoSaveError("");
-                      }}
-                    >
-                      <RefreshCw size={16} /> {t("faceMatching.retake", "Retake")}
-                    </button>
+                  {/* Actions: Save, Retake, Discard */}
+                  <div className="photo-preview-actions" style={{ display: "grid", gap: 8 }}>
                     <button
                       type="button"
                       className="photo-pill-btn take"
@@ -6605,18 +6850,84 @@ export default function App() {
                     >
                       <Check size={18} /> {photoSaving ? t("common.saving", "Saving...") : t("faceMatching.savePhoto", "Save photo")}
                     </button>
+
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        type="button"
+                        className="photo-pill-btn choose"
+                        style={{ flex: 1, marginBottom: 0 }}
+                        disabled={photoSaving}
+                        onClick={handleRetakePhoto}
+                      >
+                        <RefreshCw size={16} /> {t("faceMatching.retake", "Retake")}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="photo-pill-btn cancel"
+                        style={{ flex: 1, marginBottom: 0 }}
+                        disabled={photoSaving}
+                        onClick={discardPendingPhoto}
+                      >
+                        <X size={16} /> {t("common.discard", "Discard")}
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      disabled={photoSaving}
+                      onClick={closeStudentModal}
+                      style={{ minHeight: 36, marginTop: 4 }}
+                    >
+                      <span>{t("common.cancel", "Cancel")}</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* INITIAL / SAVED PHOTO MODE */
+                <div>
+                  <div className="photo-manager-avatar-wrap">
+                    <div className="photo-manager-avatar">
+                      {viewingStudent.photoUrl || viewingStudent.referencePhotoUrl ? (
+                        <img src={viewingStudent.photoUrl || viewingStudent.referencePhotoUrl} alt={localizeStudentName(viewingStudent.name, lang)} />
+                      ) : (
+                        <User size={38} />
+                      )}
+                    </div>
+                    <div className="photo-manager-avatar-label">{t("faceMatching.currentRefPhoto", "Current reference photo")}</div>
                   </div>
 
-                  <button
-                    type="button"
-                    className="photo-pill-btn cancel"
-                    disabled={photoSaving}
-                    onClick={closeStudentModal}
-                    style={{ marginTop: 10, marginBottom: 0 }}
-                  >
-                    <X size={16} />
-                    <span>{t("common.cancel", "Cancel")}</span>
-                  </button>
+                  {!cameraActive && (
+                    <div>
+                      <button
+                        type="button"
+                        className="photo-pill-btn take"
+                        onClick={() => startCamera(cameraFacing, "student-profile")}
+                      >
+                        <Camera size={20} />
+                        <span>{t("faceMatching.takePhoto", "Take a photo")}</span>
+                      </button>
+
+                      <label
+                        htmlFor="profile-gallery-file-input"
+                        className="photo-pill-btn choose"
+                      >
+                        <Image size={20} />
+                        <span>{t("faceMatching.chooseExistingPhoto", "Choose existing photo")}</span>
+                      </label>
+
+                      <button
+                        type="button"
+                        className="photo-pill-btn cancel"
+                        onClick={closeStudentModal}
+                        style={{ marginTop: 6 }}
+                      >
+                        <X size={16} />
+                        <span>{t("common.cancel", "Cancel")}</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -6647,7 +6958,12 @@ export default function App() {
                 <p className="eyebrow">{t.studentProfile || "STUDENT PROFILE"}</p>
                 <h2 style={{ marginBottom: 2 }}>{localizeStudentName(viewingStudentProfile.name, lang)}</h2>
                 <small className="muted">
-                  {t.admissionNo}: <strong>{viewingStudentProfile.admissionNo || viewingStudentProfile.admissionNumber}</strong> · {t.class}: {viewingStudentProfile.classId?.name || t("common.unassigned", "Unassigned")}
+                  {t.admissionNo}: <strong>{viewingStudentProfile.admissionNo || viewingStudentProfile.admissionNumber}</strong> · {t.class}: {
+                    (Array.isArray(viewingStudentProfile.classIds) && viewingStudentProfile.classIds.length > 0
+                      ? viewingStudentProfile.classIds.map((c) => (typeof c === "object" && c?.name ? formatClassLabel(c, lang) : (classes.find((cl) => String(cl._id || cl.id) === String(c)) ? formatClassLabel(classes.find((cl) => String(cl._id || cl.id) === String(c)), lang) : String(c))))
+                      : [viewingStudentProfile.classId?.name || t("common.unassigned", "Unassigned")]
+                    ).join(", ")
+                  }
                 </small>
               </div>
               <button
@@ -6694,9 +7010,26 @@ export default function App() {
                     {viewingStudentProfile.active !== false ? (t.active || "Active") : (t.archived || "Archived")}
                   </span>
                 </div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                  {viewingStudentProfile.classId?.name} {viewingStudentProfile.classId?.section ? `(${localizeSection(viewingStudentProfile.classId.section, lang)})` : ""}
-                  {viewingStudentProfile.classId?.academicYear ? ` · ${viewingStudentProfile.classId.academicYear}` : ""}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                  {(Array.isArray(viewingStudentProfile.classIds) && viewingStudentProfile.classIds.length > 0
+                    ? viewingStudentProfile.classIds.map((c) => (typeof c === "object" && c?.name ? c : classes.find((cl) => String(cl._id || cl.id) === String(c)) || { name: String(c) }))
+                    : (viewingStudentProfile.classId ? [typeof viewingStudentProfile.classId === "object" ? viewingStudentProfile.classId : classes.find((cl) => String(cl._id || cl.id) === String(viewingStudentProfile.classId)) || { name: String(viewingStudentProfile.classId) }] : [])
+                  ).map((c, idx) => (
+                    <span
+                      key={c._id || c.id || idx}
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        background: "var(--primary-subtle)",
+                        color: "var(--primary)",
+                        padding: "2px 8px",
+                        borderRadius: 6,
+                        border: "1px solid rgba(16, 185, 129, 0.2)"
+                      }}
+                    >
+                      {formatClassLabel(c, lang)}
+                    </span>
+                  ))}
                 </div>
                 <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button
@@ -6754,6 +7087,30 @@ export default function App() {
                   </span>
                 </div>
                 <div style={{ gridColumn: "1 / -1" }}>
+                  <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t("classes.assignedClasses", "Assigned Classes")}</span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                    {(Array.isArray(viewingStudentProfile.classIds) && viewingStudentProfile.classIds.length > 0
+                      ? viewingStudentProfile.classIds.map((c) => (typeof c === "object" && c?.name ? c : classes.find((cl) => String(cl._id || cl.id) === String(c)) || { name: String(c) }))
+                      : (viewingStudentProfile.classId ? [typeof viewingStudentProfile.classId === "object" ? viewingStudentProfile.classId : classes.find((cl) => String(cl._id || cl.id) === String(viewingStudentProfile.classId)) || { name: String(viewingStudentProfile.classId) }] : [])
+                    ).map((c, idx) => (
+                      <span
+                        key={c._id || c.id || idx}
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          background: "var(--surface)",
+                          color: "var(--text)",
+                          padding: "3px 10px",
+                          borderRadius: 8,
+                          border: "1px solid var(--border)"
+                        }}
+                      >
+                        {formatClassLabel(c, lang)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
                   <span style={{ color: "var(--muted)", fontSize: 11, display: "block" }}>{t("students.guardianParent", "Guardian / Parent")}</span>
                   <strong>{localizeGuardianName(viewingStudentProfile.guardianName, lang) || t("common.notRecorded", "Not recorded")}</strong>
                 </div>
@@ -6781,7 +7138,7 @@ export default function App() {
                 onClick={() => openTransferClass(viewingStudentProfile)}
                 style={{ minHeight: 40 }}
               >
-                <ArrowRightLeft size={16} /> {t.transferClass || "Transfer Class"}
+                <BookOpen size={16} /> {t("students.manageClasses", "Manage Classes")}
               </button>
               <button
                 className="btn primary"
@@ -6845,20 +7202,14 @@ export default function App() {
 
             <form onSubmit={handleSaveStudentEdit} style={{ display: "grid", gap: 14 }}>
               <div className="responsive-grid-2">
-                <label>
-                  {t.class} *
-                  <select
-                    value={editingStudent.classId}
-                    required
-                    onChange={(e) => setEditingStudent({ ...editingStudent, classId: e.target.value })}
-                  >
-                    {classes.map((c) => (
-                      <option key={c._id || c.id} value={c._id || c.id}>
-                        {formatClassLabel(c, lang)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div>
+                  <ClassMultiSelect
+                    classes={classes}
+                    selectedClassIds={Array.isArray(editingStudent.classIds) && editingStudent.classIds.length > 0 ? editingStudent.classIds : (editingStudent.classId ? [editingStudent.classId] : [])}
+                    onChange={(ids) => setEditingStudent({ ...editingStudent, classIds: ids, classId: ids[0] || "" })}
+                    lang={lang}
+                  />
+                </div>
 
                 <label>
                   {t.admissionNo} *
@@ -7003,18 +7354,18 @@ export default function App() {
       )}
 
       {/* =========================================================
-          TRANSFER CLASS MODAL
+          MANAGE STUDENT CLASSES MODAL (MULTIPLE-CLASS ASSIGNMENT)
           ========================================================= */}
       {transferringStudent && (
-        <div className="sheet-overlay" onClick={() => !loading && setTransferringStudent(null)}>
-          <div className="sheet-content" onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div className="sheet-overlay" onClick={() => !manageClassesSaving && setTransferringStudent(null)}>
+          <div className="sheet-content" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <div>
-                <p className="eyebrow">{t("students.classReassignment", "CLASS REASSIGNMENT")}</p>
-                <h2 style={{ marginBottom: 0 }}>{t("students.transferStudentTitle", "Transfer Student")}</h2>
+                <p className="eyebrow">{t("students.manageClassesSubtitle", "ASSIGN MULTIPLE CLASSES")}</p>
+                <h2 style={{ marginBottom: 0 }}>{t("students.manageClassesTitle", "Manage Student Classes")}</h2>
               </div>
               <button
-                disabled={loading}
+                disabled={manageClassesSaving}
                 onClick={() => setTransferringStudent(null)}
                 style={{ background: "transparent", border: "none", color: "var(--muted)", padding: 6, cursor: "pointer" }}
               >
@@ -7022,43 +7373,274 @@ export default function App() {
               </button>
             </div>
 
-            <div className="card" style={{ padding: "14px", marginBottom: 14, background: "var(--canvas)" }}>
-              <div style={{ fontSize: 13 }}>
-                {t("reports.student", "Student")}: <strong>{localizeStudentName(transferringStudent.name, lang)}</strong> ({transferringStudent.admissionNo || transferringStudent.admissionNumber})
+            {/* Student Summary Card */}
+            <div className="card" style={{ padding: "12px 14px", marginBottom: 14, background: "var(--canvas)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                  {localizeStudentName(transferringStudent.name, lang)}
+                </div>
+                <span className="badge" style={{ background: "var(--primary-subtle)", color: "var(--primary)", fontWeight: 700, fontSize: 11 }}>
+                  {t.admissionNo}: {transferringStudent.admissionNo || transferringStudent.admissionNumber}
+                </span>
               </div>
-              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
-                {t("students.currentClass", "Current Class")}: <strong>{transferringStudent.classId?.name || t("common.unassigned", "Unassigned")} {transferringStudent.classId?.section ? `(${localizeSection(transferringStudent.classId.section, lang)})` : ""}</strong>
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4, fontWeight: 600 }}>
+                  {t("students.currentlyAssignedClasses", "Currently Assigned Classes")}:
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {(() => {
+                    const currentIds = (Array.isArray(transferringStudent.classIds) && transferringStudent.classIds.length > 0)
+                      ? transferringStudent.classIds.map((c) => String(c?._id || c?.id || c))
+                      : (transferringStudent.classId ? [String(transferringStudent.classId?._id || transferringStudent.classId?.id || transferringStudent.classId)] : []);
+                    const matchedClasses = classes.filter((c) => currentIds.includes(String(c._id || c.id)));
+                    if (matchedClasses.length === 0) {
+                      return <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>{t("students.noClassesAssigned", "No classes currently assigned")}</span>;
+                    }
+                    return matchedClasses.map((c) => (
+                      <span
+                        key={c._id || c.id}
+                        className="badge"
+                        style={{
+                          background: "rgba(23, 75, 54, 0.08)",
+                          color: "var(--primary)",
+                          border: "1px solid rgba(23, 75, 54, 0.2)",
+                          fontSize: 11,
+                          padding: "2px 8px",
+                          borderRadius: 6,
+                          fontWeight: 600
+                        }}
+                      >
+                        {formatClassLabel(c, lang)}
+                      </span>
+                    ));
+                  })()}
+                </div>
               </div>
             </div>
 
-            <label style={{ marginBottom: 14 }}>
-              {t("students.selectNewTargetClass", "Select New Target Class *")}
-              <select
-                value={transferTargetClassId}
-                onChange={(e) => setTransferTargetClassId(e.target.value)}
-                style={{ minHeight: 46 }}
+            {/* Selected Classes Chips Preview */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
+                  {t("students.selectedClasses", "Selected Classes")} ({manageStudentClassIds.length})
+                </span>
+                {manageStudentClassIds.length === 0 && (
+                  <span style={{ fontSize: 11, color: "var(--danger)", fontWeight: 600 }}>
+                    {t("students.atLeastOneClassRequired", "At least one class must be selected.")}
+                  </span>
+                )}
+              </div>
+              <div
+                style={{
+                  minHeight: 42,
+                  padding: "6px 10px",
+                  border: `1.5px solid ${manageStudentClassIds.length === 0 ? "var(--danger)" : "var(--border)"}`,
+                  borderRadius: 10,
+                  background: "var(--surface)",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 6,
+                  alignItems: "center"
+                }}
               >
-                <option value="">{t("students.chooseDestinationClass", "-- Choose destination class --")}</option>
-                {classes.map((c) => (
-                  <option key={c._id || c.id} value={c._id || c.id}>
-                    {formatClassLabel(c, lang)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div style={{ background: "var(--info-bg)", border: "1px solid #BAE6FD", color: "#0369A1", padding: "10px 14px", borderRadius: 12, marginBottom: 16, fontSize: 12, display: "flex", alignItems: "flex-start", gap: 8 }}>
-              <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
-              <div>
-                <strong>{t("students.historicalContinuity", "Historical Register Continuity")}:</strong> {t("students.historicalContinuityNotice", "Past attendance records will remain safely attached to the class and date on which they were taken.")}
+                {manageStudentClassIds.map((clsId) => {
+                  const cls = classes.find((c) => String(c._id || c.id) === clsId) || { name: "Class" };
+                  return (
+                    <span
+                      key={clsId}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        background: "var(--primary-subtle)",
+                        color: "var(--primary)",
+                        border: "1px solid var(--primary)",
+                        padding: "3px 8px 3px 10px",
+                        borderRadius: 16,
+                        fontSize: 11.5,
+                        fontWeight: 600
+                      }}
+                    >
+                      <span>{formatClassLabel(cls, lang)}</span>
+                      <button
+                        type="button"
+                        disabled={manageClassesSaving}
+                        onClick={() => setManageStudentClassIds((prev) => prev.filter((id) => id !== clsId))}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "var(--primary)",
+                          cursor: "pointer",
+                          padding: 1,
+                          display: "inline-flex",
+                          borderRadius: "50%"
+                        }}
+                        title="Remove class"
+                      >
+                        <X size={13} />
+                      </button>
+                    </span>
+                  );
+                })}
+                {manageStudentClassIds.length === 0 && (
+                  <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>
+                    {t("students.chooseDestinationClass", "-- Select classes from the list below --")}
+                  </span>
+                )}
               </div>
             </div>
+
+            {/* Search & Actions Bar */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+              <div style={{ position: "relative", flex: 1 }}>
+                <Search
+                  size={15}
+                  style={{
+                    position: "absolute",
+                    left: 10,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "var(--muted)",
+                    pointerEvents: "none"
+                  }}
+                />
+                <input
+                  type="text"
+                  placeholder={t("students.searchClassesPlaceholder", "Search available classes...")}
+                  value={manageClassesSearch}
+                  onChange={(e) => setManageClassesSearch(e.target.value)}
+                  style={{ paddingLeft: 32, minHeight: 38, fontSize: 12.5 }}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={manageClassesSaving}
+                onClick={() => setManageStudentClassIds(classes.map((c) => String(c._id || c.id)))}
+                style={{ minHeight: 38, fontSize: 11.5, padding: "0 10px", whiteSpace: "nowrap" }}
+              >
+                {t("students.selectAll", "Select All")}
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={manageClassesSaving}
+                onClick={() => setManageStudentClassIds([])}
+                style={{ minHeight: 38, fontSize: 11.5, padding: "0 10px", whiteSpace: "nowrap" }}
+              >
+                {t("students.clearAll", "Clear All")}
+              </button>
+            </div>
+
+            {/* Checklist of Available Classes */}
+            <div
+              style={{
+                maxHeight: 210,
+                overflowY: "auto",
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                paddingRight: 2
+              }}
+            >
+              {classes
+                .filter((c) => {
+                  if (!manageClassesSearch.trim()) return true;
+                  const term = manageClassesSearch.trim().toLowerCase();
+                  const full = `${c.name || ""} ${c.section || ""} ${c.academicYear || ""}`.toLowerCase();
+                  return full.includes(term);
+                })
+                .map((c) => {
+                  const cId = String(c._id || c.id);
+                  const isSelected = manageStudentClassIds.includes(cId);
+                  return (
+                    <div
+                      key={cId}
+                      className={`class-checkbox-row ${isSelected ? "selected" : ""}`}
+                      onClick={() => {
+                        if (manageClassesSaving) return;
+                        setManageStudentClassIds((prev) =>
+                          isSelected ? prev.filter((id) => id !== cId) : [...prev, cId]
+                        );
+                      }}
+                    >
+                      <div className="class-checkbox-indicator">
+                        {isSelected && <Check size={13} strokeWidth={3} />}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text)" }}>
+                          {c.name}
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                          {c.section ? localizeSection(c.section, lang) : ""} {c.academicYear ? `· ${c.academicYear}` : ""}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              {classes.filter((c) => {
+                if (!manageClassesSearch.trim()) return true;
+                const term = manageClassesSearch.trim().toLowerCase();
+                const full = `${c.name || ""} ${c.section || ""} ${c.academicYear || ""}`.toLowerCase();
+                return full.includes(term);
+              }).length === 0 && (
+                <div style={{ textAlign: "center", padding: "20px", color: "var(--muted)", fontSize: 12 }}>
+                  {t("students.noClassesFound", "No matching classes found")}
+                </div>
+              )}
+            </div>
+
+            {/* Historical Continuity Notice */}
+            <div
+              style={{
+                background: "var(--info-bg)",
+                border: "1px solid #BAE6FD",
+                color: "#0369A1",
+                padding: "10px 12px",
+                borderRadius: 10,
+                marginTop: 12,
+                marginBottom: 14,
+                fontSize: 11.5,
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8
+              }}
+            >
+              <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>
+                <strong>{t("students.historicalContinuity", "Historical Register Continuity")}:</strong>{" "}
+                {t(
+                  "students.historicalContinuityNotice",
+                  "Past attendance records will remain safely attached to the class and date on which they were taken. New attendance will be recorded independently for each assigned class session."
+                )}
+              </div>
+            </div>
+
+            {manageClassesError && (
+              <div
+                style={{
+                  background: "var(--danger-bg)",
+                  border: "1px solid #FECDD3",
+                  color: "var(--danger)",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  marginBottom: 12,
+                  fontSize: 12,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8
+                }}
+              >
+                <AlertCircle size={16} />
+                <span>{manageClassesError}</span>
+              </div>
+            )}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
               <button
                 type="button"
                 className="btn secondary"
-                disabled={loading}
+                disabled={manageClassesSaving}
                 onClick={() => setTransferringStudent(null)}
               >
                 {t.cancel}
@@ -7066,10 +7648,16 @@ export default function App() {
               <button
                 type="button"
                 className="btn primary"
-                disabled={loading || !transferTargetClassId || String(transferTargetClassId) === String(transferringStudent.classId?._id || transferringStudent.classId)}
-                onClick={handleConfirmTransfer}
+                disabled={manageClassesSaving || manageStudentClassIds.length === 0}
+                onClick={handleSaveStudentClasses}
               >
-                {loading ? t("students.transferring", "Transferring…") : t("students.confirmTransfer", "Confirm Class Transfer")}
+                {manageClassesSaving ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <RefreshCw size={14} className="spin" /> {t.saving || "Saving…"}
+                  </span>
+                ) : (
+                  t.saveChanges || "Save Changes"
+                )}
               </button>
             </div>
           </div>
@@ -7608,7 +8196,7 @@ export default function App() {
             </div>
             <form onSubmit={handleCreateTeacher} style={{ display: "grid", gap: 12 }}>
               <label>
-                {t("teachers.teacherName", t.name || "Teacher Name")} *
+                {t("teachers.teacherName", "Teacher Name")} *
                 <input
                   required
                   value={teacherForm.name}
@@ -7631,18 +8219,39 @@ export default function App() {
                 <input
                   type="password"
                   required
-                  minLength={6}
+                  minLength={8}
                   value={teacherForm.password}
                   onChange={(e) => setTeacherForm({ ...teacherForm, password: e.target.value })}
-                  placeholder={t("auth.minCharacters", "Minimum 6 characters")}
+                  placeholder={t("auth.minCharacters", "Minimum 8 characters")}
                 />
               </label>
               <label>
-                {t("teachers.assignClasses", "Assign Classes")}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>{t("teachers.assignClasses", "Assign Classes")}</span>
+                  {classes.length > 1 && (
+                    <div style={{ display: "flex", gap: 8, fontSize: 11 }}>
+                      <button
+                        type="button"
+                        style={{ background: "transparent", border: "none", color: "var(--primary)", fontWeight: 600, cursor: "pointer", padding: "2px 4px" }}
+                        onClick={() => setTeacherForm({ ...teacherForm, assignedClasses: classes.map((c) => String(c._id || c.id)) })}
+                      >
+                        {t("students.selectAll", "Select All")}
+                      </button>
+                      <span style={{ color: "var(--border)" }}>|</span>
+                      <button
+                        type="button"
+                        style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", padding: "2px 4px" }}
+                        onClick={() => setTeacherForm({ ...teacherForm, assignedClasses: [] })}
+                      >
+                        {t("students.clearAll", "Clear All")}
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 6, maxHeight: 150, overflowY: "auto", border: "1px solid var(--border)", padding: 8, borderRadius: 6 }}>
                   {classes.map((cls) => {
                     const cid = String(cls._id || cls.id);
-                    const isChecked = teacherForm.assignedClasses.includes(cid);
+                    const isChecked = (teacherForm.assignedClasses || []).includes(cid);
                     return (
                       <label key={cid} style={{ flexDirection: "row", alignItems: "center", gap: 6, fontSize: 13 }}>
                         <input
@@ -7650,9 +8259,9 @@ export default function App() {
                           checked={isChecked}
                           onChange={(e) => {
                             if (e.target.checked) {
-                              setTeacherForm({ ...teacherForm, assignedClasses: [...teacherForm.assignedClasses, cid] });
+                              setTeacherForm({ ...teacherForm, assignedClasses: [...(teacherForm.assignedClasses || []), cid] });
                             } else {
-                              setTeacherForm({ ...teacherForm, assignedClasses: teacherForm.assignedClasses.filter((id) => id !== cid) });
+                              setTeacherForm({ ...teacherForm, assignedClasses: (teacherForm.assignedClasses || []).filter((id) => id !== cid) });
                             }
                           }}
                         />
@@ -7676,31 +8285,176 @@ export default function App() {
       )}
 
       {/* =========================================================
+          TEACHER MANAGEMENT: EDIT TEACHER MODAL
+          ========================================================= */}
+      {editingTeacher && (
+        <div className="sheet-overlay" onClick={() => setEditingTeacher(null)}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 500 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>{t("teachers.editTeacherModalTitle", "Edit Teacher Details")}</h3>
+              <button className="btn icon-btn" onClick={() => setEditingTeacher(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveTeacherEdit} style={{ display: "grid", gap: 12 }}>
+              <label>
+                {t("teachers.teacherName", "Teacher Name")} *
+                <input
+                  required
+                  value={editingTeacher.name}
+                  onChange={(e) => setEditingTeacher({ ...editingTeacher, name: e.target.value })}
+                  placeholder="e.g. Ustad Ahmed"
+                />
+              </label>
+              <label>
+                {t.email} *
+                <input
+                  type="email"
+                  required
+                  value={editingTeacher.email}
+                  onChange={(e) => setEditingTeacher({ ...editingTeacher, email: e.target.value })}
+                  placeholder="teacher@madrasa.org"
+                />
+              </label>
+              <label>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>{t("teachers.assignClasses", "Assign Classes")}</span>
+                  {classes.length > 1 && (
+                    <div style={{ display: "flex", gap: 8, fontSize: 11 }}>
+                      <button
+                        type="button"
+                        style={{ background: "transparent", border: "none", color: "var(--primary)", fontWeight: 600, cursor: "pointer", padding: "2px 4px" }}
+                        onClick={() => setEditingTeacher({ ...editingTeacher, assignedClasses: classes.map((c) => String(c._id || c.id)) })}
+                      >
+                        {t("students.selectAll", "Select All")}
+                      </button>
+                      <span style={{ color: "var(--border)" }}>|</span>
+                      <button
+                        type="button"
+                        style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", padding: "2px 4px" }}
+                        onClick={() => setEditingTeacher({ ...editingTeacher, assignedClasses: [] })}
+                      >
+                        {t("students.clearAll", "Clear All")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 6, maxHeight: 150, overflowY: "auto", border: "1px solid var(--border)", padding: 8, borderRadius: 6 }}>
+                  {classes.map((cls) => {
+                    const cid = String(cls._id || cls.id);
+                    const isChecked = (editingTeacher.assignedClasses || []).includes(cid);
+                    return (
+                      <label key={cid} style={{ flexDirection: "row", alignItems: "center", gap: 6, fontSize: 13 }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setEditingTeacher({ ...editingTeacher, assignedClasses: [...(editingTeacher.assignedClasses || []), cid] });
+                            } else {
+                              setEditingTeacher({ ...editingTeacher, assignedClasses: (editingTeacher.assignedClasses || []).filter((id) => id !== cid) });
+                            }
+                          }}
+                        />
+                        <span>{formatClassLabel(cls, lang)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </label>
+
+              <label style={{ flexDirection: "row", alignItems: "center", gap: 8, fontSize: 13, marginTop: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={editingTeacher.active !== false}
+                  onChange={(e) => setEditingTeacher({ ...editingTeacher, active: e.target.checked })}
+                />
+                <span><strong>{t("teachers.teacherStatus", "Account Status")}:</strong> {editingTeacher.active !== false ? t("teachers.active", "Active (Authorized to login)") : t("teachers.deactivated", "Deactivated (Login disabled)")}</span>
+              </label>
+
+              {/* Password Management Action Trigger */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "var(--canvas)", border: "1px solid var(--border)", borderRadius: 8, marginTop: 4 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t("teachers.passwordAdministration", "Password Administration")}</div>
+                  <div style={{ fontSize: 11, color: "var(--muted)" }}>{t("teachers.passwordAdminNotice", "Reset credentials securely without viewing existing password")}</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ minHeight: 32, fontSize: 12, padding: "4px 10px", whiteSpace: "nowrap" }}
+                  onClick={() => {
+                    const target = { ...editingTeacher, _id: editingTeacher.id };
+                    setEditingTeacher(null);
+                    setResetPasswordTeacher(target);
+                    setNewTeacherPassword("");
+                    setShowResetPasswordPlainText(false);
+                  }}
+                >
+                  <Lock size={13} /> {t("teachers.resetPassword", "Reset Password")}
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 10, justifyContent: "flex-end" }}>
+                <button type="button" className="btn secondary" onClick={() => setEditingTeacher(null)}>
+                  {t.cancel}
+                </button>
+                <button type="submit" className="btn primary" disabled={loading}>
+                  {t("teachers.saveTeacherBtn", "Save Changes")}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
           TEACHER MANAGEMENT: RESET PASSWORD MODAL
           ========================================================= */}
       {resetPasswordTeacher && (
         <div className="sheet-overlay" onClick={() => setResetPasswordTeacher(null)}>
-          <div className="sheet-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div className="sheet-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <h3 style={{ margin: 0 }}>{t("teachers.resetPasswordTitle", "Reset Teacher Password")}</h3>
               <button className="btn icon-btn" onClick={() => setResetPasswordTeacher(null)}>
                 <X size={18} />
               </button>
             </div>
-            <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+            <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
               Reset password for <strong>{resetPasswordTeacher.name}</strong> ({resetPasswordTeacher.email}).
             </p>
+            <div style={{ fontSize: 12, background: "var(--primary-subtle)", border: "1px solid rgba(16, 185, 129, 0.25)", padding: "8px 12px", borderRadius: 8, color: "var(--primary)", marginBottom: 14 }}>
+              {t("teachers.passwordResetNotice", "Enter a new secure password (minimum 8 characters). Existing passwords remain encrypted and cannot be viewed.")}
+            </div>
             <form onSubmit={handleResetTeacherPassword} style={{ display: "grid", gap: 12 }}>
               <label>
-                {t("teachers.newPassword", "New Password")} *
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  value={newTeacherPassword}
-                  onChange={(e) => setNewTeacherPassword(e.target.value)}
-                  placeholder={t("auth.minCharacters", "Minimum 6 characters")}
-                />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <span>{t("teachers.newPassword", "New Password")} *</span>
+                  <button
+                    type="button"
+                    onClick={generateRandomPassword}
+                    style={{ background: "transparent", border: "none", color: "var(--primary)", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                  >
+                    <Shield size={12} /> {t("teachers.generatePassword", "Generate Secure Password")}
+                  </button>
+                </div>
+                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                  <input
+                    type={showResetPasswordPlainText ? "text" : "password"}
+                    required
+                    minLength={8}
+                    value={newTeacherPassword}
+                    onChange={(e) => setNewTeacherPassword(e.target.value)}
+                    placeholder={t("auth.minCharacters", "Minimum 8 characters")}
+                    style={{ width: "100%", paddingRight: 40 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPasswordPlainText(!showResetPasswordPlainText)}
+                    style={{ position: "absolute", right: 10, background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", padding: 4 }}
+                    title={showResetPasswordPlainText ? "Hide password" : "Show password"}
+                  >
+                    {showResetPasswordPlainText ? <Eye size={16} /> : <Lock size={16} />}
+                  </button>
+                </div>
               </label>
               <div style={{ display: "flex", gap: 10, marginTop: 10, justifyContent: "flex-end" }}>
                 <button type="button" className="btn secondary" onClick={() => setResetPasswordTeacher(null)}>
